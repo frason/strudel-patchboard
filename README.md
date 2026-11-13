@@ -92,8 +92,8 @@ Or connect a Git repository in the Cloudflare dashboard (Workers & Pages → Cre
 Check the production build locally with `npm run build && npm run preview` (http://localhost:4173).
 
 ## Licence
-AGPL-3.0-or-later (see `LICENSE`), because it is built on Strudel, which is AGPL-3.0. If you host a public copy, link to the source:
-set `SOURCE_URL` near the top of `src/main.js`.
+AGPL-3.0-or-later (see `LICENSE`), because it is built on Strudel, which is AGPL-3.0. Source: https://github.com/frason/strudel-patchboard.
+If you host your own public copy, link to your source: set `SOURCE_URL` near the top of `src/main.js`.
 
 ## Hydra visuals
 The **Hydra Visuals** module (Views) writes `await initHydra()` plus your Hydra code into the patch and runs it with hydra-synth

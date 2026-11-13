@@ -19,7 +19,7 @@ import { SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas
 import { effectiveKey, makeNode, nodeById, wiresFrom, uid, validateShape, normalize, whyNot, clone } from './graph.js';
 
 // Link to this app's source code (the AGPL asks public copies to offer it). Fill in once the repository exists.
-const SOURCE_URL = '';
+const SOURCE_URL = 'https://github.com/frason/strudel-patchboard';
 
 // ---------- state ----------
 storage.capturePrevious(); // before the first autosave of this session overwrites it
