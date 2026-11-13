@@ -398,12 +398,23 @@ function drawMinimap(s, node, key, deg) {
   });
 }
 
-// Columns for a row of steps with a small gap after every 4th step (so the beat is easy to read). Every row of a module uses
+// Which steps start a group. The steps are grouped in bars of B/C steps, the beats-per-cycle setting in the top bar: at 4, 8 steps are two groups of 4
+// and 16 steps four groups of 4; at 6, 8 steps are a group of 6 and a group of 2; at 3, groups of 3. (This is the usual step-sequencer view, a drawing
+// aid only: the sound and the code do not change.) When each step is a whole cycle ("one step per cycle") a bar of steps means nothing, so
+// null keeps the plain groups of four.
+function beatStarts(steps, beats, mode) {
+  if (mode === 'turns' || !beats || !steps) return null;
+  const s = new Set([0]);
+  for (let i = beats; i < steps; i += beats) s.add(i);
+  return s;
+}
+const beatsNow = () => boardStore?.graph.nodes.find((n) => n.type === 'output')?.params.beats ?? 4;
+// Columns for a row of steps with a small gap at the start of each group (so the beat is easy to read). Every row of a module uses
 // the same columns, so pads, velocity, length and the playhead dots all line up.
-function layoutCols(widths, lead) {
+function layoutCols(widths, lead, starts = null) {
   const cols = lead ? [lead] : [];
   const idx = [];
-  widths.forEach((w, i) => { if (i > 0 && i % 4 === 0) cols.push('6px'); idx.push(cols.length + 1); cols.push(w); });
+  widths.forEach((w, i) => { if (i > 0 && (starts ? starts.has(i) : i % 4 === 0)) cols.push('6px'); idx.push(cols.length + 1); cols.push(w); });
   return { template: cols.join(' '), col: (i) => idx[i] };
 }
 const dotsRow = (L, steps) => { const dots = []; const row = h('div', { class: 'ph-row', style: `grid-template-columns: ${L.template}` }); for (let i = 0; i < steps; i++) { const d = h('i', { class: 'ph-dot' }); d.style.gridColumn = L.col(i); dots.push(d); row.append(d); } return { row, dots }; };
@@ -1026,7 +1037,8 @@ export function createBoard(root, store, hooks) {
     const cellsData = node.params.cells;
     const nOf = (i) => { const x = parseX(cellsData[i]); return x.type === 'sub' ? x.n : 1; };
     const widths = Array.from({ length: steps }, (_, i) => slotWidth(nOf(i)) + 'px');
-    const L = layoutCols(widths, 'var(--lab, 26px)'), L0 = layoutCols(widths, null);
+    const B = beatStarts(steps, beatsNow(), node.params.mode);
+    const L = layoutCols(widths, 'var(--lab, 26px)', B), L0 = layoutCols(widths, null, B);
     const wrap = h('div', { class: 'seq', style: `--steps:${steps}` });
     const model = pitched ? pitchModel(effectiveKey(store.graph, node), node.params.octave) : null;
     const rows = pitched ? model.rows : 1;
@@ -1043,7 +1055,7 @@ export function createBoard(root, store, hooks) {
         const slot = h('div', { class: 'slot', style: `grid-column:${L.col(i)}` });
         for (let k = 0; k < n; k++) {
           const sub = n > 1 ? k : -1;
-          const c = h('button', { class: 'cell' + (pitched && model.black(idx) ? ' black' : '') + (i % 4 === 0 && k === 0 ? ' beat' : ''), dataset: { step: i, row: idx, sub }, title: pitched ? 'click to add a note to this step (several rows = a chord); click again to remove it' : 'click to toggle a hit' });
+          const c = h('button', { class: 'cell' + (pitched && model.black(idx) ? ' black' : '') + ((B ? B.has(i) : i % 4 === 0) && k === 0 ? ' beat' : ''), dataset: { step: i, row: idx, sub }, title: pitched ? 'click to add a note to this step (several rows = a chord); click again to remove it' : 'click to toggle a hit' });
           c.addEventListener('pointerdown', (e) => e.stopPropagation());
           c.addEventListener('click', () => {
             if (c.dataset.hid) return hooks.setParam(node.id, 'octave', Number(c.dataset.hid));
@@ -1300,7 +1312,7 @@ export function createBoard(root, store, hooks) {
 
   function buildChords(node, ctl) {
     const steps = node.params.steps;
-    const L0 = layoutCols(Array(steps).fill('minmax(44px, 1fr)'), null);
+    const L0 = layoutCols(Array(steps).fill('minmax(44px, 1fr)'), null, beatStarts(steps, beatsNow(), node.params.mode));
     const tmpl = `grid-template-columns: ${L0.template}`;
     const row = h('div', { class: 'chord-row', style: tmpl }), lenRow = h('div', { class: 'chord-row', style: tmpl });
     const btns = [], lenBtns = [];
@@ -1326,7 +1338,8 @@ export function createBoard(root, store, hooks) {
     const tracks = node.params.tracks;
     const subN = (c) => { const x = parseX(c); return x.type === 'sub' ? x.n : 1; };
     const slotN = Array.from({ length: steps }, (_, i) => Math.max(...tracks.map((t) => subN(t.cells[i] || {}))));
-    const L0 = layoutCols(slotN.map((n) => slotWidth(n) + 'px'), null);
+    const BD = beatStarts(steps, beatsNow(), 'steps');
+    const L0 = layoutCols(slotN.map((n) => slotWidth(n) + 'px'), null, BD);
     const template = L0.template;
     const wrap = h('div', { class: 'drums', style: `--steps:${steps}` });
     const rows = [];
@@ -1345,7 +1358,7 @@ export function createBoard(root, store, hooks) {
         const slot = h('div', { class: 'slot', style: `grid-column:${L0.col(i)}` });
         const btns = [];
         for (let k = 0; k < n; k++) {
-          const c = h('button', { class: 'cell' + (i % 4 === 0 && k === 0 ? ' beat' : ''), dataset: { step: i, track: ti, sub: n > 1 ? k : -1 }, title: 'click to toggle a hit. Shift-click: repeat ×2 ×3 ×4, or split into [2] [3] [4] sub-steps' });
+          const c = h('button', { class: 'cell' + ((BD ? BD.has(i) : i % 4 === 0) && k === 0 ? ' beat' : ''), dataset: { step: i, track: ti, sub: n > 1 ? k : -1 }, title: 'click to toggle a hit. Shift-click: repeat ×2 ×3 ×4, or split into [2] [3] [4] sub-steps' });
           c.addEventListener('pointerdown', (e) => e.stopPropagation());
           c.addEventListener('click', (e) => { select(ti); if (e.shiftKey) return openXPicker(c, store.graph.nodes.find((x) => x.id === node.id)?.params.tracks[ti]?.cells[i]?.x, (st) => hooks.setTrack(node.id, ti, { step: i, setX: st })); hooks.setTrack(node.id, ti, { step: i, sub: n > 1 ? k : -1 }); });
           btns.push(c); slot.append(c);
@@ -1378,7 +1391,7 @@ export function createBoard(root, store, hooks) {
   const sigOf = (n) => {
     const k = effectiveKey(store.graph, n);
     const xs = n.params.cells ? n.params.cells.map((c) => c.x || '').join(',') : n.params.tracks ? n.params.tracks.map((t) => t.cells.map((c) => c.x || '').join(',')).join(';') : '';
-    return [n.type, n.params.steps, n.params.n, n.params.tracks?.length, k ? (SCALES[k.scale] || []).length : 0, xs, n.collapsed ? 1 : 0].join('|');
+    return [n.type, n.params.steps, n.params.n, n.params.tracks?.length, k ? (SCALES[k.scale] || []).length : 0, xs, n.collapsed ? 1 : 0, n.params.cells || n.params.tracks ? beatsNow() : ''].join('|');   // a sequencer is redrawn when the beats per cycle change
   };
 
   function syncNode(v, node) {

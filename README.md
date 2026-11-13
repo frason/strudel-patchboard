@@ -51,6 +51,8 @@ npm test         # evaluates every starter in real Strudel, checks graph rules, 
 - **Code panel choices**: a sound name, a bank, a filter type, shuffle or scramble, and what Sometimes or Every does are underlined with a ▾. Click one (or press Enter
   on it) and the same picker or menu the module uses opens right there; the pick goes to the module and the code rewrites. In a Sample pattern each sound word is its own
   choice (only that word is replaced). Scales and keys, chord symbols and note names are not choices: use the modules for those.
+- **B/C (beats per cycle)** in the top bar also sets how the sequencer grids are grouped: bars of B/C steps (8 steps at 4 are two groups of 4; at 6, a group of 6 and a group of 2).
+  It only changes the drawing; sequencers set to "one step per cycle" keep groups of four.
 - **Dials**: click a dial and small ▼ ▲ buttons appear beside its value (click = one step, Shift-click = ten, hold = repeat); they show for the dial you hover or
   have clicked, so nothing else moves. Or use the keys: up and down (or left and right) move it one step; Shift or Page Up and Down move ten; Home and End go to the ends.
   Dials on a log scale (a cutoff in Hz) move by a small percentage per press.
