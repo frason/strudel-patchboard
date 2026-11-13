@@ -813,6 +813,18 @@ export function createBoard(root, store, hooks) {
     if (spec.callFrom) return spec.qSuffix ? node.params[spec.callFrom].replace('f', 'q') : node.params[spec.callFrom];
     return spec.call || spec.label || spec.key;   // a dial with no code call of its own shows its plain name (volume, chance, freeze) instead of an internal key
   }
+  // What a knob is being driven to right now, when its cable comes from a Slider or a Macro (it follows them). A Wave moves by itself, so it has no single value to show.
+  function drivenValue(g, node, spec, key) {
+    const w = wiresInto(g, node.id, 'p:' + key)[0], src = w && nodeById(g, w.from.node);
+    if (!src) return null;
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    if (src.type === 'slider') return clamp(Number(src.params.value), Number(src.params.min), Number(src.params.max));
+    if (src.type === 'macro') {   // the same maths the code uses: .mul(setting), or .range(lo, hi) with .pow(3) on a log knob
+      const v = clamp(Number(src.params.value), 0, 1);
+      return src.params.mode === 'multiply' ? v * Number(node.params[key]) : spec.min + (spec.log && spec.min > 0 ? v ** 3 : v) * (spec.max - spec.min);
+    }
+    return null;
+  }
   const knobRange = (node, spec) => (spec.dyn ? { min: Number(node.params.min), max: Number(node.params.max), step: Number(node.params.step) || 0 } : { min: spec.min, max: spec.max });
 
   function buildNode(node) {
@@ -1385,11 +1397,12 @@ export function createBoard(root, store, hooks) {
       k.knob.setRange(range);
       const wired = !!(spec.wire && wiresInto(g, node.id, 'p:' + key).length > 0);
       const value = node.params[key];
-      k.knob.set(value);
+      const driven = wired ? drivenValue(g, node, spec, key) : null;
+      k.knob.set(driven ?? value);   // a wired dial follows its Slider or Macro
       k.knob.setDisabled(wired);
       k.cell.classList.toggle('wired', wired);
       k.cell.classList.toggle('is-default', !wired && !spec.always && value === spec.def);
-      k.val.textContent = wired ? '↯ wired' : fmtKnob(spec, value);
+      k.val.textContent = wired ? (driven != null ? '↯ ' + fmtKnob(spec, driven) : '↯ wired') : fmtKnob(spec, value);
       k.lab.textContent = paramLabel(def, spec, node);
       k.cell.title = (spec.tip ? spec.tip + ' — ' : '') + (spec.unit ? 'unit: ' + spec.unit : '');
       const jack = k.cell.querySelector('.jack');
