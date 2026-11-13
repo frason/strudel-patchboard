@@ -1,0 +1,786 @@
+import './style.css';
+if (import.meta.env.DEV) import('./capture.js');   // developer-only audio capture; stripped from the build
+import { createStore, storage } from './store.js';
+import { createBoard, buildPalette, h, openSoundPicker } from './board.js';
+import { createCodePanel } from './codepanel.js';
+import { createEngine } from './engine.js';
+import { createViews } from './views.js';
+import { icon } from './icons.js';
+import { presetCells } from './chords.js';
+import { getPrefs, setPref, onPrefs } from './prefs.js';
+import { loadCatalog, onCatalog, soundsFor, sampleItems, SAMPLE_CATS } from './catalog.js';
+import { INSTRUMENTS, CATEGORIES as INST_CATS } from './instruments.js';
+import { compile } from './compile.js';
+import { strudelFile, parseImport, b64 } from './io.js';
+import { importStrudel } from './importer.js';
+import { setHydraMode, prepareWindow, hydraNotes } from './hydra.js';
+import { LESSONS } from './starters.js';
+import { SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
+import { effectiveKey, makeNode, nodeById, wiresFrom, uid, validateShape, normalize, whyNot, clone } from './graph.js';
+
+// Link to this app's source code (the AGPL asks public copies to offer it). Fill in once the repository exists.
+const SOURCE_URL = '';
+
+// ---------- state ----------
+storage.capturePrevious(); // before the first autosave of this session overwrites it
+const saved = storage.autosaved();
+let startGraph;
+let firstLesson = null;
+try {
+  if (saved) { startGraph = validateShape(saved); normalize(startGraph); }
+} catch { startGraph = null; }
+if (!startGraph) { firstLesson = LESSONS[0]; startGraph = firstLesson.graph(); }
+
+const store = createStore(startGraph);
+const engine = createEngine();
+if (import.meta.env.DEV) { window.__engine = engine; window.__lessons = () => LESSONS.map((l) => ({ title: l.title, code: compile(l.graph()).code })); }   // developer-only, for audio capture experiments
+let showNotes = localStorage.getItem('pb.notes') !== '0';
+let evaluated = { code: '', segments: [] };
+let current = compile(store.graph);
+
+// ---------- layout ----------
+const app = document.getElementById('app');
+const playBtn = h('button', { class: 'play-btn', id: 'play', title: 'Start (Space)', 'aria-label': 'Start' });
+function setPlayUI(on) { playBtn.replaceChildren(icon(on ? 'stop' : 'play', 20)); playBtn.classList.toggle('on', on); playBtn.title = on ? 'Stop (Space)' : 'Start (Space)'; playBtn.setAttribute('aria-label', on ? 'Stop' : 'Start'); }
+setPlayUI(false);
+const statusEl = h('span', { class: 'status', id: 'status' }, 'ready');
+const overEl = h('span', { class: 'over', id: 'over', title: 'The sound went past full volume a moment ago: turn the Output volume or a loud part down', hidden: true }, 'over');
+let lastOver = 0;
+setInterval(() => {
+  if (engine.playing && engine.peak() > 1.0) lastOver = Date.now();
+  const show = Date.now() - lastOver < 2000;
+  overEl.hidden = !show;
+  if (show) overEl.textContent = engine.limiterOn() ? 'limiting' : 'clipping';
+}, 100);
+const undoBtn = h('button', { class: 'btn', id: 'undo', title: 'Undo (Ctrl/⌘ Z)', onclick: () => doUndo() }, '↶ Undo');
+const redoBtn = h('button', { class: 'btn', id: 'redo', title: 'Redo (Shift Ctrl/⌘ Z)', onclick: () => doRedo() }, '↷ Redo');
+const newBtn = h('button', { class: 'btn', id: 'new-btn', title: 'Start an empty patch (undoable)', onclick: () => { store.replace({ v: 1, nodes: [], wires: [] }, 'new'); setBanner(null); board.fit(); toast('Empty patch', [undoAction], 5000); } }, 'New');
+const learnBtn = h('button', { class: 'btn', id: 'learn-btn' }, 'Learn ▾');
+const savesBtn = h('button', { class: 'btn', id: 'saves-btn' }, 'Saves ▾');
+const exportBtn = h('button', { class: 'btn', id: 'export-btn' }, 'Export ▾');
+const fileInput = h('input', { type: 'file', accept: '.json,.strudel,.txt,.js', style: 'display:none', id: 'import-file' });
+const importBtn = h('button', { class: 'btn', id: 'import-btn', onclick: () => openImport() }, 'Import');
+const popHost = h('div', { class: 'pop-host' });
+const bpmInput = h('input', { type: 'number', id: 'bpm', min: 40, max: 220, step: 1, title: 'Tempo: beats per minute (the Output module\'s tempo knob)', class: 'bpm-input' });
+bpmInput.addEventListener('keydown', (e) => e.stopPropagation());
+bpmInput.addEventListener('change', () => {
+  const out = store.graph.nodes.find((n) => n.type === 'output');
+  const v = Math.min(220, Math.max(40, Math.round(Number(bpmInput.value))));
+  if (out && Number.isFinite(v)) hooks.setParam(out.id, 'bpm', v);
+  syncBpm();
+});
+const bpmBox = h('label', { class: 'bpm' }, bpmInput, h('span', {}, 'BPM'));
+const beatsSel = h('select', { id: 'beats', class: 'beats-sel', title: 'Beats per cycle (the time signature)' }, [2, 3, 4, 5, 6, 8].map((v) => h('option', { value: v }, v)));
+beatsSel.addEventListener('change', () => { const out = store.graph.nodes.find((n) => n.type === 'output'); if (out) hooks.setParam(out.id, 'beats', Number(beatsSel.value)); });
+const beatsBox = h('label', { class: 'bpm' }, beatsSel, h('span', {}, 'B/C'));
+const settingsBtn = h('button', { class: 'btn', id: 'settings-btn' });
+const addBtn = h('button', { class: 'btn', id: 'add-btn', title: 'Add a module (Ctrl/⌘ K)' }, '+ Add');
+const codeBtn = h('button', { class: 'btn', id: 'code-toggle', title: 'Show or hide the Strudel code (Ctrl/⌘ \\)', onclick: () => setCodeShown(!codeShown) }, '{ } Code');
+
+const iconify = (btn, name, label) => { btn.replaceChildren(icon(name)); btn.title = btn.title || label; btn.title = label + (btn.title && btn.title !== label ? '' : ''); btn.setAttribute('aria-label', label); btn.classList.add('icon-btn'); };
+iconify(newBtn, 'newfile', 'New empty patch'); iconify(undoBtn, 'undo', 'Undo (Ctrl/⌘ Z)'); iconify(redoBtn, 'redo', 'Redo (Shift Ctrl/⌘ Z)');
+iconify(learnBtn, 'book', 'Learning path'); iconify(savesBtn, 'folder', 'Saves and history'); iconify(exportBtn, 'download', 'Export'); iconify(importBtn, 'upload', 'Import a patch');
+iconify(addBtn, 'plus', 'Add a module (Ctrl/⌘ K)'); iconify(codeBtn, 'code', 'Show or hide the Strudel code (Ctrl/⌘ \\)'); iconify(settingsBtn, 'sliders', 'Display settings');
+const top = h('header', { class: 'topbar' },
+  h('div', { class: 'brand' }, h('b', {}, 'Strudel'), ' Patchboard'),
+  h('div', { class: 'transport' }, playBtn, bpmBox, beatsBox, statusEl, overEl),
+  h('div', { class: 'toolbar' }, addBtn, newBtn, undoBtn, redoBtn, learnBtn, savesBtn, exportBtn, importBtn, settingsBtn, codeBtn), fileInput);
+
+const paletteEl = h('aside', { class: 'palette' }, h('div', { class: 'pal-head' },
+  h('button', { class: 'pal-burger', id: 'modules-toggle', title: 'Show or hide the module list', onclick: () => setPaletteShown(!paletteShown) }, '☰'),
+  h('span', { class: 'pal-title' }, 'Modules'),
+  h('button', { class: 'pal-collapse', title: 'Collapse the module list', onclick: () => setPaletteShown(false) }, '«')));
+const boardEl = h('main', { class: 'board', id: 'board' });
+const codeHead = h('div', { class: 'code-head' },
+  h('b', {}, 'Strudel code'),
+  h('span', { class: 'sp' }),
+  h('label', { class: 'toggle', title: 'Show a plain-English note after each line' },
+    h('input', { type: 'checkbox', id: 'notes-toggle', checked: showNotes, onchange: (e) => { showNotes = e.target.checked; localStorage.setItem('pb.notes', showNotes ? '1' : '0'); panel.setShowNotes(showNotes); } }), ' explain'),
+  h('button', { class: 'btn sm', id: 'copy', onclick: copyCode }, 'Copy'),
+  h('button', { class: 'btn sm', id: 'open-cc', onclick: openInStrudel }, 'Open in strudel.cc ↗'));
+const codeHost = h('div', { class: 'code-host', id: 'code-host' });
+const issuesEl = h('div', { class: 'issues', id: 'issues' });
+const learnEl = h('div', { class: 'learn-banner', id: 'learn-banner', hidden: true });
+const readOnlyNote = h('div', { class: 'ro-note' }, 'The numbers are editable: click one, type, press Enter (↑ ↓ nudge it, Esc cancels). The rest follows the modules; to bring in whole code use Import.');
+const codeCol = h('aside', { class: 'codecol' }, codeHead, codeHost, learnEl, issuesEl, readOnlyNote);
+const toastEl = h('div', { class: 'toasts', id: 'toasts' });
+app.append(top, h('div', { class: 'main' }, paletteEl, boardEl, codeCol), popHost, toastEl);
+
+// ---------- show / hide the code ----------
+let codeShown = localStorage.getItem('pb.codeShown') !== '0';
+function setCodeShown(v) {
+  codeShown = v;
+  try { localStorage.setItem('pb.codeShown', v ? '1' : '0'); } catch { /* private mode */ }
+  app.classList.toggle('code-hidden', !v);
+  codeBtn.classList.toggle('on', v);
+  codeBtn.setAttribute('aria-pressed', String(v));
+  requestAnimationFrame(() => { panel?.view.requestMeasure(); board?.drawCables(); });
+}
+
+let paletteShown = localStorage.getItem('pb.paletteShown') !== '0';
+function setPaletteShown(v) {
+  paletteShown = v;
+  try { localStorage.setItem('pb.paletteShown', v ? '1' : '0'); } catch { /* private mode */ }
+  app.classList.toggle('palette-hidden', !v);
+  document.getElementById('modules-toggle')?.setAttribute('aria-expanded', String(v));
+  requestAnimationFrame(() => board?.drawCables());
+}
+function syncBpm() {
+  const out = store.graph.nodes.find((n) => n.type === 'output');
+  bpmInput.disabled = !out;
+  if (out && document.activeElement !== bpmInput) bpmInput.value = out.params.bpm;
+  if (!out) bpmInput.value = '';
+  beatsSel.disabled = !out;
+  if (out) beatsSel.value = String(out.params.beats ?? 4);
+}
+
+// ---------- toasts ----------
+function toast(text, actions = [], ms = 6000) {
+  const el = h('div', { class: 'toast' }, h('span', {}, text),
+    actions.map((a) => h('button', { class: 'btn sm', onclick: () => { a.fn(); el.remove(); } }, a.label)));
+  toastEl.append(el);
+  if (ms) setTimeout(() => el.remove(), ms);
+  return el;
+}
+const undoAction = { label: 'Undo', fn: () => doUndo() };
+
+// ---------- code panel ----------
+// a number edited (or nudged with the arrow keys) in the code panel goes to the knob it came from
+function codeEdit({ seg, call, value, dir, big }) {
+  const n = nodeById(store.graph, seg.node);
+  if (!n) return;
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v)), r4 = (v) => Number(v.toFixed(4)), nudge = dir ? { dir, big } : null;
+  if (n.type === 'mixer' && seg.key === 'strips') {   // .postgain(x) and .pan(x) on a part are that strip's fader and pan
+    const isPan = /^\.pan\(/.test(call), f = isPan ? 'pan' : 'vol';
+    const strips = (n.params.strips || []).map((s) => ({ vol: 1, pan: 0.5, mute: false, solo: false, ...s }));
+    if (!strips[seg.step]) return;
+    const next = nudge ? strips[seg.step][f] + nudge.dir * (nudge.big ? 0.1 : 0.01) : value;
+    strips[seg.step] = { ...strips[seg.step], [f]: r4(clamp(next, 0, isPan ? 1 : 1.5)) };
+    hooks.setParam(n.id, 'strips', strips);
+    return;
+  }
+  const spec = MODULES[n.type].params.find((p) => p.key === seg.key);
+  if (!spec || spec.kind !== 'knob') return;
+  let lo = spec.min, hi = spec.max;
+  if (spec.dyn) { lo = Number(n.params.min); hi = Number(n.params.max); }
+  if (n.type === 'macro') { lo = 0; hi = 1; }
+  const step = spec.step || 0.01;
+  let next = value;
+  if (nudge) {
+    const cur = Number(n.params[seg.key]);
+    next = spec.log && lo > 0 ? cur * (1 + 0.015 * (nudge.big ? 5 : 1)) ** nudge.dir : cur + nudge.dir * step * (nudge.big ? 10 : 1);
+    next = Math.round(next / step) * step;
+    if (next === cur) next = cur + nudge.dir * step;
+  }
+  if (Number.isInteger(step) && step >= 1) next = Math.round(next);
+  hooks.setParam(n.id, seg.key, r4(clamp(next, lo, hi)));
+}
+// The choices in the code: a sound name, a bank, a filter type ... Each one knows where it sits in the text and how to apply a new pick to its module.
+function codeChoices(res) {
+  const out = [], code = res.code;
+  const asOptions = (spec) => spec.options.map((o) => (Array.isArray(o) ? { value: o[0], label: String(o[1]) } : { value: o, label: o === '' ? '(none)' : String(o) }));
+  for (const s of res.segments) {
+    if (!s.node) continue;
+    const n = nodeById(store.graph, s.node);
+    if (!n) continue;
+    const text = code.slice(s.from, s.to), set = (key, v) => hooks.setParam(n.id, key, v);
+    const quoted = () => { const a = text.indexOf('"'), z = text.lastIndexOf('"'); return a >= 0 && z > a ? [s.from + a + 1, s.from + z] : null; };
+    // a Sample's pattern: every sound word in "bd*2 [hh sd]" is its own choice, and only that word is replaced
+    if (s.role === 'mini' && n.type === 'sample' && !s.key && text.startsWith('"') && text === JSON.stringify(String(n.params.name || 'bd'))) {
+      const re = /[A-Za-z_]\w*(?::\d+)?/g, inner = text.slice(1, -1);
+      let w;
+      while ((w = re.exec(inner))) {
+        const at = w.index, len = w[0].length;
+        out.push({ node: n.id, kind: 'sample', from: s.from + 1 + at, to: s.from + 1 + at + len, current: w[0].split(':')[0], apply: (id) => { const cur = String(nodeById(store.graph, n.id)?.params.name ?? ''); set('name', cur.slice(0, at) + id + cur.slice(at + len)); } });
+      }
+      continue;
+    }
+    if (s.role !== 'knob' || !s.key) continue;
+    const spec = MODULES[n.type].params.find((p) => p.key === s.key);
+    if (n.type === 'synth' && s.key === 'wave') { const q = quoted(); if (q) out.push({ node: n.id, kind: 'instrument', from: q[0], to: q[1], current: n.params.wave, apply: (id) => set('wave', id) }); continue; }
+    if (spec?.kind === 'select' && spec.str) {   // a bank, a tremolo shape, a filter slope ...: a fixed list
+      const q = quoted();
+      if (q) out.push({ node: n.id, kind: 'menu', from: q[0], to: q[1], title: spec.label, options: asOptions(spec), current: n.params[s.key], apply: (v) => set(s.key, v) });
+      continue;
+    }
+    let m;
+    if (n.type === 'shuffle' && (m = /^\.(shuffle|scramble)\(/.exec(text))) {
+      out.push({ node: n.id, kind: 'menu', from: s.from + 1, to: s.from + 1 + m[1].length, title: 'mode', current: n.params.mode, options: asOptions(MODULES.shuffle.params.find((p) => p.key === 'mode')), apply: (v) => set('mode', v) });
+    } else if (n.type === 'sometimes' && (m = /^\.sometimesBy\([^,]+,\s*/.exec(text))) {
+      out.push({ node: n.id, kind: 'menu', from: s.from + m[0].length, to: s.to - 1, title: 'what happens to the chosen events', current: n.params.fn, options: Object.entries(SOMETIMES_FNS).map(([value, f]) => ({ value, label: f.label })), apply: (v) => set('fn', v) });
+    } else if (n.type === 'every' && (m = /^\.every\([^,]+,\s*/.exec(text))) {
+      out.push({ node: n.id, kind: 'menu', from: s.from + m[0].length, to: s.to - 1, title: 'what happens on every nth cycle', current: n.params.fn, options: Object.entries(EVERY_FNS).map(([value, f]) => ({ value, label: f.label })), apply: (v) => set('fn', v) });
+    } else if (n.type === 'filter' && (m = /^\.(lpf|hpf|bpf)\(/.exec(text))) {
+      out.push({ node: n.id, kind: 'menu', from: s.from + 1, to: s.from + 1 + m[1].length, title: 'filter type', current: n.params.type, options: asOptions(MODULES.filter.params.find((p) => p.key === 'type')), apply: (v) => set('type', v) });
+    }
+  }
+  return out;
+}
+let choiceAnchor = null;
+function openChoice(c, rect) {
+  choiceAnchor?.remove();
+  const a = document.createElement('span');   // an invisible stand-in for the word, so the pickers open right under it
+  a.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${Math.max(4, rect.right - rect.left)}px;height:${rect.bottom - rect.top}px;pointer-events:none`;
+  document.body.append(a); choiceAnchor = a;
+  if (c.kind === 'instrument') openSoundPicker({ anchor: a, items: INSTRUMENTS.map((i) => ({ ...i, pitched: true })), cats: INST_CATS, current: c.current, onPick: (id) => c.apply(id) });
+  else if (c.kind === 'sample') openSoundPicker({ anchor: a, items: sampleItems(nodeById(store.graph, c.node)?.params.bank || ''), cats: SAMPLE_CATS, current: c.current, onPick: (id) => c.apply(id) });
+  else showPop(a, h('div', { class: 'menu' }, h('div', { class: 'menu-h' }, c.title || 'Choose'),
+    c.options.map((o) => h('button', { class: 'menu-item' + (String(o.value) === String(c.current) ? ' on' : ''), onclick: () => { c.apply(o.value); closePop(); } }, o.label))));
+}
+const panel = createCodePanel(codeHost, { onHover: (hv) => board.setHover(hv), onEdit: (e) => codeEdit(e), onNudge: (e) => codeEdit(e), choicesOf: codeChoices, onChoice: openChoice });
+
+// step through: plain -> x2 -> x3 -> x4 -> [2] -> [3] -> [4] -> plain. Keeps what was written when entering or leaving brackets.
+function cycleX(c, pitched, f) { applyX(c, pitched, f, X_STATES[(X_STATES.indexOf(c.x || '') + 1) % X_STATES.length]); }
+function applyX(c, pitched, f, next) {
+  const had = parseX(c), has = (leaf) => (pitched ? cellNotes(leaf, f === 'd').length > 0 : !!leaf.on);
+  const copy = (from, to) => { if (pitched) { to.n = from.n ?? null; to.d = from.d ?? null; } else to.on = !!from.on; };
+  c.x = next || undefined;
+  if (!next) delete c.x;
+  const now = parseX(c);
+  if (now.type === 'sub') {
+    c.sub = c.sub || [];
+    for (let k = 0; k < now.n; k++) c.sub[k] = c.sub[k] || (pitched ? { n: null, d: null } : { on: false });
+    if (had.type !== 'sub' && has(c) && !c.sub.slice(0, now.n).some(has)) copy(c, c.sub[0]);
+  } else if (had.type === 'sub' && !has(c)) {
+    const first = (c.sub || []).slice(0, had.n).find(has);
+    if (first) copy(first, c);
+  }
+}
+
+// ---------- board hooks ----------
+const hooks = {
+  preview: (item) => engine.preview(item),
+  warm: () => engine.warm(),
+  soundsReady: () => engine.isReady(),
+  hover: (hv) => { board.setHover(hv); panel.setHover(hv); },
+  addNode(type, x, y) {
+    if (MODULES[type].single && store.graph.nodes.some((n) => n.type === type)) return toast(`Only one ${MODULES[type].title} is allowed.`);
+    if (x === undefined) {
+      const c = board.viewCenter();
+      x = Math.round((c.x - 90 + (store.graph.nodes.length % 5) * 24) / 24) * 24;
+      y = Math.round((c.y - 60 + (store.graph.nodes.length % 5) * 24) / 24) * 24;
+    }
+    const node = makeNode(type, x, y);
+    store.update((g) => g.nodes.push(node), { label: 'add ' + type });
+    board.select(node.id);
+  },
+  dropFromPalette(type, cx, cy) {
+    if (cx === undefined) hooks.addNode(type);
+    else board.placeFromPalette(type, cx, cy);
+  },
+  removeNode(id) {
+    const n = nodeById(store.graph, id);
+    store.update((g) => { g.nodes = g.nodes.filter((x) => x.id !== id); g.wires = g.wires.filter((w) => w.from.node !== id && w.to.node !== id); });
+    toast(`Removed ${MODULES[n.type].title}`, [undoAction]);
+  },
+  removeWire(id, msg = 'Cable removed') {
+    store.update((g) => { g.wires = g.wires.filter((w) => w.id !== id); });
+    board.clearWireSel();
+    toast(msg, [undoAction], 4000);
+  },
+  connect(from, to, replacedId) {
+    let warnRange = null;
+    const removed = store.update((g) => {
+      if (replacedId) g.wires = g.wires.filter((w) => w.id !== replacedId);
+      const port = MODULES[nodeById(g, to.node).type];
+      const isMulti = !!(Array.isArray(port.inputs) && port.inputs.find((i) => i.id === to.port)?.multi);
+      if (!isMulti) g.wires = g.wires.filter((w) => !(w.to.node === to.node && w.to.port === to.port));
+      const fresh = !g.wires.some((w) => w.from.node === from.node);   // this number source has no cable yet
+      g.wires.push({ id: uid('w'), from, to });
+      // A new slider (or wave) plugged into a knob starts from that knob's own setting and range, so the sound does not jump.
+      const src = nodeById(g, from.node), dst = nodeById(g, to.node);
+      const spec = to.port.startsWith('p:') ? MODULES[dst.type].params.find((s) => s.key === to.port.slice(2)) : null;
+      if (fresh && spec && !spec.dyn && Number.isFinite(spec.min) && Number.isFinite(spec.max) && (src.type === 'slider' || src.type === 'wave')) {
+        src.params.min = spec.min; src.params.max = spec.max;
+        if (src.type === 'slider') src.params.step = spec.step || 0;
+        if (src.type === 'slider') src.params.value = Math.min(spec.max, Math.max(spec.min, Number(dst.params[spec.key] ?? spec.def)));
+      }
+      // An already-used slider or wave keeps its range, which can reach past this knob's: warn, and offer a slider of its own.
+      if (!fresh && spec && !spec.dyn && Number.isFinite(spec.min) && Number.isFinite(spec.max) && (src.type === 'slider' || src.type === 'wave') && (Number(src.params.min) < spec.min || Number(src.params.max) > spec.max)) {
+        warnRange = { to, src: src.id, dst: dst.id, spec, lo: Number(src.params.min), hi: Number(src.params.max) };
+      }
+    });
+    if (warnRange) {
+      const { to: t0, src, dst, spec, lo, hi } = warnRange;
+      toast(`This ${MODULES[nodeById(store.graph, src).type].title.toLowerCase()} goes from ${fmt(lo)} to ${fmt(hi)}, but "${spec.label}" only goes from ${fmt(spec.min)} to ${fmt(spec.max)}. Values outside that can turn the sound to noise.`, [{
+        label: 'Give it its own',
+        fn: () => store.update((g) => {
+          const s0 = nodeById(g, src), d0 = nodeById(g, dst);
+          if (!s0 || !d0) return;
+          const n = makeNode(s0.type, Math.max(0, d0.x - 260), d0.y + 40, { ...s0.params, min: spec.min, max: spec.max, step: spec.step || 0, ...(s0.type === 'slider' ? { value: Math.min(spec.max, Math.max(spec.min, Number(d0.params[spec.key] ?? spec.def))) } : {}) });
+          g.nodes.push(n);
+          g.wires = g.wires.filter((w) => !(w.to.node === t0.node && w.to.port === t0.port));
+          g.wires.push({ id: uid('w'), from: { node: n.id, port: 'out' }, to: t0 });
+        }),
+      }], 10000);
+    }
+    removed?.forEach((r) => toast(`A cable was removed: ${r.reason}`, [undoAction]));
+  },
+  explain(fixed, jack, g) {
+    const from = fixed.dir === 'out' ? fixed.node : jack.dataset.node;
+    const to = fixed.dir === 'out' ? jack.dataset.node : fixed.node;
+    const port = fixed.dir === 'out' ? jack.dataset.port : fixed.port;
+    const why = whyNot(g, from, to, port);
+    if (why) toast(`Can't connect: ${why}.`, [], 3500);
+  },
+  setParam(id, key, value) {
+    store.update((g) => {
+      const n = nodeById(g, id);
+      if (!n) return; // the module was removed while a control was still being dragged
+      n.params[key] = value;
+      if (key === 'steps' && n.params.tracks) n.params.tracks = resizeTracks(n.params.tracks, value);
+      if (key === 'steps' && n.params.cells) n.params.cells = resizeCells(n.type, n.params.cells, value);
+      if (n.type === 'slider' && key !== 'value') n.params.value = Math.min(Number(n.params.max), Math.max(Number(n.params.min), n.params.value));
+    }, { coalesce: `p:${id}:${key}` });
+  },
+  setCell(id, i, op) {
+    store.update((g) => {
+      const n = nodeById(g, id);
+      const c = n.params.cells[i];
+      if (n.type === 'chords') {
+        if (op.sym !== undefined) c.sym = op.sym;
+        if (op.d !== undefined) c.d = op.d;
+        if (op.rest) { c.sym = null; c.d = null; }
+        if (op.cycleLen) c.len = ((c.len || 1) % Math.min(4, n.params.steps - i)) + 1;
+        if (!(effectiveKey(g, n) ? c.d : c.sym)) c.len = 1;
+        if (c.len > n.params.steps - i) c.len = n.params.steps - i;
+        return;
+      }
+      const pitched = n.type === 'melody';
+      const key = pitched ? effectiveKey(g, n) : null;
+      const deg = !!key, f = deg ? 'd' : 'n';
+      const leaf = op.sub !== undefined && op.sub >= 0 ? ((c.sub = c.sub || []), (c.sub[op.sub] = c.sub[op.sub] || {})) : c;
+      if (op.row !== undefined) {
+        const model = pitchModel(key, n.params.octave);
+        const v = model.pitchAt(op.row);
+        const cur = cellNotes(leaf, deg);
+        const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v].sort((x, y) => model.rank(x) - model.rank(y));
+        leaf[f] = next.length ? next : null;
+      }
+      if (op.toggle) leaf.on = !leaf.on;
+      if (op.vel !== undefined) c.vel = op.vel;
+      if (op.setX !== undefined) applyX(c, pitched, f, op.setX);
+      if (op.cycleX) cycleX(c, pitched, f);
+      if (op.cycleLen) {
+        const max = Math.min(4, n.params.steps - i);
+        c.len = ((c.len || 1) % max) + 1;
+      }
+      if (!stepHas(c, deg, pitched)) c.len = 1;
+      if (c.len > n.params.steps - i) c.len = n.params.steps - i;
+    }, { coalesce: `cell:${id}:${i}:${Object.keys(op)[0]}` });
+  },
+  setTrack(id, ti, op) {
+    store.update((g) => {
+      const n = nodeById(g, id);
+      const ts = n.params.tracks;
+      if (op.add) { if (ts.length < MAX_TRACKS) ts.push({ name: 'cp', mute: false, cells: Array(n.params.steps).fill(false) }); return; }
+      const t = ts[ti];
+      if (!t) return;
+      if (op.remove) ts.splice(ti, 1);
+      if (op.name !== undefined) t.name = op.name;
+      if (op.step !== undefined) {
+        const c = t.cells[op.step];
+        if (op.setX !== undefined) applyX(c, false, 'on', op.setX);
+        else if (op.cycleX) cycleX(c, false, 'on');
+        else { const leaf = op.sub !== undefined && op.sub >= 0 ? ((c.sub = c.sub || []), (c.sub[op.sub] = c.sub[op.sub] || {})) : c; leaf.on = !leaf.on; }
+      }
+      if (op.mute) t.mute = !t.mute;
+    }, { coalesce: `track:${id}:${ti}:${Object.keys(op)[0]}` });
+  },
+  moveNodes(pos) {
+    const ids = Object.keys(pos);
+    store.update((g) => { for (const n of g.nodes) if (pos[n.id]) { n.x = pos[n.id].x; n.y = pos[n.id].y; } }, { coalesce: ids.length > 1 ? 'move:multi' : 'move:' + ids[0] });
+  },
+  setNodeWidth(id, w) {
+    store.update((g) => { const n = nodeById(g, id); if (w) n.w = w; else delete n.w; }, { coalesce: 'resize:' + id });
+  },
+  groupNodes(ids) {
+    if (ids.length < 2) return;
+    store.update((g) => { g.groups = (g.groups || []).map((gr) => ({ ...gr, nodes: gr.nodes.filter((i) => !ids.includes(i)) })); g.groups.push({ id: uid('g'), name: 'Group', nodes: [...ids], collapsed: false }); }, { label: 'group' });
+    board.select(null);
+    toast(`Grouped ${ids.length} modules`, [undoAction], 3500);
+  },
+  ungroup(gid) { store.update((g) => { g.groups = (g.groups || []).filter((x) => x.id !== gid); }, { label: 'ungroup' }); },
+  toggleGroup(gid) { store.update((g) => { const gr = (g.groups || []).find((x) => x.id === gid); if (gr) gr.collapsed = !gr.collapsed; }, { label: 'collapse group' }); },
+  renameGroup(gid, name) { store.update((g) => { const gr = (g.groups || []).find((x) => x.id === gid); if (gr) gr.name = name; }, { coalesce: 'rename:' + gid }); },
+  removeNodes(ids) {
+    const set = new Set(ids);
+    store.update((g) => { g.nodes = g.nodes.filter((x) => !set.has(x.id)); g.wires = g.wires.filter((w) => !set.has(w.from.node) && !set.has(w.to.node)); });
+    toast(`Removed ${ids.length} modules`, [undoAction]);
+  },
+  moveNode(id, x, y) {
+    store.update((g) => { const n = nodeById(g, id); n.x = x; n.y = y; }, { coalesce: 'move:' + id });
+  },
+  applyChordPreset(id, preset) {
+    store.update((g) => { const n = nodeById(g, id); n.params.steps = preset.degrees.length; n.params.cells = presetCells(preset); }, { label: 'preset ' + preset.id });
+  },
+  layout(pos, merge = false) {
+    const apply = (g) => { for (const n of g.nodes) if (pos[n.id]) { n.x = pos[n.id].x; n.y = pos[n.id].y; } };
+    if (merge) store.amend(apply, { label: 'tidy' }); else store.update(apply, { label: 'tidy' });
+    requestAnimationFrame(() => board.fit());
+  },
+  duplicate(id) {
+    const src = nodeById(store.graph, id);
+    if (!src || MODULES[src.type].single) return toast(`Only one ${MODULES[src.type].title} is allowed.`);
+    const copy = JSON.parse(JSON.stringify(src));
+    copy.id = uid('n'); copy.x += 48; copy.y += 48;
+    store.update((g) => g.nodes.push(copy), { label: 'duplicate' });
+    board.select(copy.id);
+  },
+  toggleMute(id) {
+    store.update((g) => { const n = nodeById(g, id); n.muted = !n.muted; if (!n.muted) delete n.muted; }, { label: 'mute' });
+  },
+  collapse(id) {
+    store.update((g) => { const n = nodeById(g, id); n.collapsed = !n.collapsed; });
+  },
+};
+const board = createBoard(boardEl, store, hooks);
+if (import.meta.env.DEV) window.__app = { store, hooks, LESSONS, setPref };   // developer-only, for tests
+const palette = buildPalette(paletteEl, hooks, () => store.graph);
+const views = createViews({ board, store, engine, getEvaluated: () => evaluated });
+views.start();
+onCatalog(() => board.sync());
+loadCatalog();
+
+// ---------- compile -> panel -> engine ----------
+let evalTimer = null;
+function afterChange() {
+  current = compile(store.graph);
+  panel.setCompiled(current, showNotes);
+  board.sync();
+  syncBpm();
+  views.dirty();
+  palette.sync();
+  undoBtn.disabled = !store.canUndo;
+  redoBtn.disabled = !store.canRedo;
+  renderIssues();
+  if (engine.playing) { const hy = store.graph.nodes.find((n) => n.type === 'hydra' && !n.muted); if (hy) setHydraMode(hy.params.mode); }
+  if (engine.playing && current.code !== evaluated.code) {
+    clearTimeout(evalTimer);
+    evalTimer = setTimeout(runEval, 140);
+  }
+}
+hydraNotes((t) => toast(t, [], 7000));
+async function runEval() {
+  const hy = store.graph.nodes.find((n) => n.type === 'hydra' && !n.muted);
+  if (hy) setHydraMode(hy.params.mode === 'window' ? 'window' : hy.params.mode);
+  evaluated = current;
+  await engine.evaluate(current.code);
+}
+function renderIssues() {
+  issuesEl.replaceChildren(...current.issues.map((i) => h('div', { class: 'issue', onmouseenter: () => hooks.hover({ node: i.node }), onmouseleave: () => hooks.hover(null) }, '• ' + i.msg)));
+}
+store.subscribe((g, meta) => {
+  afterChange();
+  if (meta.removed?.length) meta.removed.forEach((r) => toast(`A cable was removed: ${r.reason}`, [undoAction]));
+});
+
+// slider modules move the live value immediately; the re-evaluation that follows keeps the code identical
+function liveSlider() {
+  for (const n of store.graph.nodes) {
+    if (n.type !== 'slider' && n.type !== 'macro') continue;
+    const lo = n.type === 'macro' ? 0 : Number(n.params.min), hi = n.type === 'macro' ? 1 : Number(n.params.max);
+    // a slider plugged into several knobs is written once per cable: move every copy
+    for (const seg of current.segments) {
+      if (seg.node !== n.id || seg.role !== 'knob' || seg.key !== 'value') continue;
+      engine.setSlider('slider_' + (seg.from + 'slider('.length), Math.min(hi, Math.max(lo, n.params.value)));
+    }
+  }
+}
+store.subscribe(liveSlider);
+
+// ---------- visuals from real events ----------
+function segmentsAt(loc) {
+  const hit = [];
+  for (const s of evaluated.segments) if (loc.start >= s.from && loc.end <= s.to) hit.push(s);
+  return hit;
+}
+engine.onHap(({ locations, delayMs, durMs }) => {
+  const nodes = new Set(), steps = [], ranges = [];
+  for (const loc of locations) {
+    for (const s of segmentsAt(loc)) {
+      nodes.add(s.node);
+      if (s.step !== undefined) steps.push([s.node, s.step, s.track]);
+      if (s.role === 'mini') ranges.push(loc);
+    }
+  }
+  if (!nodes.size) return;
+  const g = store.graph;
+  // BFS downstream from the modules that made the event: each hop is one cable pulse
+  const depth = new Map([...nodes].map((n) => [n, 0]));
+  const queue = [...nodes];
+  const edges = [];
+  while (queue.length) {
+    const id = queue.shift();
+    for (const w of wiresFrom(g, id)) {
+      if (w.to.port.startsWith('p:')) continue;
+      edges.push([w, depth.get(id)]);
+      if (!depth.has(w.to.node)) { depth.set(w.to.node, depth.get(id) + 1); queue.push(w.to.node); }
+    }
+  }
+  setTimeout(() => {
+    nodes.forEach((n) => board.flashNode(n, Math.min(durMs, 260)));
+    steps.forEach(([n, s, tr]) => board.flashStep(n, s, Math.min(Math.max(durMs, 120), 600), tr));
+    if (ranges.length) panel.flash(ranges, Math.min(Math.max(durMs, 140), 700));
+    for (const [w, d] of edges) {
+      board.pulse(w.id, d * 170, 200);
+      setTimeout(() => board.flashNode(w.to.node, 160), d * 170 + 200);
+    }
+  }, delayMs);
+});
+
+// ---------- engine / transport ----------
+engine.onStatus((s) => {
+  statusEl.textContent = { idle: 'ready', loading: s.message, ok: 'ok', ready: 'stopped', playing: 'playing', error: 'error: ' + s.message, warn: s.message }[s.state] || s.state;
+  statusEl.className = 'status ' + s.state;
+  setPlayUI(engine.playing);
+});
+playBtn.addEventListener('click', async () => {
+  if (engine.playing) { engine.stop(); panel.clearFlashes(); board.clearPulses(); setPlayUI(false); return; }
+  evaluated = current;
+  const hy = store.graph.nodes.find((n) => n.type === 'hydra' && !n.muted);
+  if (hy) { setHydraMode(hy.params.mode); if (hy.params.mode === 'window') prepareWindow(); }
+  try { await engine.start(current.code); } catch (e) { toast('Could not start audio: ' + e.message, [], 8000); }
+  setPlayUI(engine.playing);
+});
+
+// ---------- undo / redo ----------
+function doUndo() { if (store.undo()) toast('Undone', [{ label: 'Redo', fn: doRedo }], 2500); }
+function doRedo() { store.redo(); }
+
+// ---------- copy / strudel.cc ----------
+async function copyCode() {
+  try { await navigator.clipboard.writeText(current.code); toast('Code copied', [], 1800); }
+  catch { toast('Copy blocked by the browser — select the code and copy it by hand.', [], 4000); }
+}
+function openInStrudel() { window.open('https://strudel.cc/#' + encodeURIComponent(b64(current.code)), '_blank', 'noopener'); }
+
+// ---------- popovers ----------
+let openPop = null;
+function showPop(anchor, content) {
+  closePop();
+  const r = anchor.getBoundingClientRect();
+  const pop = h('div', { class: 'pop', style: `top:${r.bottom + 6}px;left:${Math.min(r.left, window.innerWidth - 340)}px` }, content);
+  popHost.append(pop);
+  // keep it on screen: if it runs off the bottom, open it above the anchor (or slide it up), and scroll inside it if it is still too tall
+  const pr = pop.getBoundingClientRect(), room = window.innerHeight - 16;
+  if (pr.height > room) { pop.style.top = '8px'; pop.style.maxHeight = room + 'px'; pop.style.overflowY = 'auto'; }
+  else if (pr.bottom > window.innerHeight - 8) { const above = r.top - pr.height - 6; pop.style.top = Math.max(8, above >= 8 ? above : window.innerHeight - pr.height - 8) + 'px'; }
+  openPop = { pop, anchor };
+}
+function closePop() { openPop?.pop.remove(); openPop = null; }
+document.addEventListener('pointerdown', (e) => { if (openPop && !openPop.pop.contains(e.target) && !openPop.anchor.contains(e.target)) closePop(); });
+
+function setBanner(lesson) {
+  if (!lesson) { learnEl.hidden = true; return; }
+  learnEl.hidden = false;
+  learnEl.replaceChildren(h('b', {}, lesson.title), h('div', {}, h('span', { class: 'learned' }, 'What you just learned: '), lesson.learned),
+    h('div', { class: 'rebuild' }, 'Rebuild it by hand from the module list, or tweak this one.'));
+}
+function loadLesson(l) {
+  store.replace(l.graph(), 'lesson ' + l.id);
+  setBanner(l);
+  closePop();
+  requestAnimationFrame(() => board.tidy({ merge: true }));
+}
+function openSettings() {
+  const seg = (key, label, options) => h('div', { class: 'set-row' }, h('span', { class: 'set-l' }, label),
+    h('div', { class: 'seg' }, options.map(([v, t]) => h('button', { class: 'seg-btn' + (getPrefs()[key] === v ? ' on' : ''), onclick: (e) => { setPref(key, v); e.target.parentNode.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b === e.target)); } }, t))));
+  showPop(settingsBtn, h('div', { class: 'menu wide' }, h('div', { class: 'menu-h' }, 'Display'),
+    seg('colourful', 'Module colours', [[false, 'calm'], [true, 'colourful']]),
+    seg('cables', 'Cable style', [['curved', 'curved'], ['step', 'stepped']]),
+    seg('labels', 'Cable labels', [['hover', 'on hover'], ['always', 'always']]),
+    seg('minimap', 'Board minimap', [[true, 'show'], [false, 'hide']]),
+    seg('descriptions', 'Module descriptions', [['folded', 'fold away'], ['shown', 'always show']]),
+    h('div', { class: 'menu-h' }, 'Sound'),
+    seg('safeOutput', 'Safe output', [[true, 'on'], [false, 'off']]),
+    h('div', { class: 'menu-empty' }, 'Safe output softly rounds off peaks above about 0.8 so a loud patch does not crackle. It is part of this app, not of the code, so it is not in the code panel and is not there on strudel.cc: on, the board sounds a little different from the same code elsewhere only when a patch is very loud.'),
+    h('div', { class: 'menu-empty' }, 'These only change how the board looks. The patch and the code are untouched.'),
+    h('div', { class: 'menu-empty about' }, 'Built on ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ' (AGPL-3.0).', SOURCE_URL ? [' ', h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code')] : null)));
+}
+settingsBtn.addEventListener('click', openSettings);
+const applyPrefs = () => { app.classList.toggle('colourful', !!getPrefs().colourful); app.classList.toggle('desc-shown', getPrefs().descriptions === 'shown'); setTimeout(() => board.drawCables(), 0); };
+onPrefs(applyPrefs);
+applyPrefs();
+
+function openAddMenu() {
+  const search = h('input', { class: 'txt add-search', type: 'text', placeholder: 'add a module: filter, chords, drums…', spellcheck: 'false', autocomplete: 'off' });
+  const list = h('div', { class: 'add-list' });
+  const catName = Object.fromEntries(CATEGORIES);
+  let hi = 0, shown = [];
+  const render = () => {
+    const q = search.value.trim().toLowerCase();
+    shown = Object.entries(MODULES).filter(([t, d]) => !(d.single && store.graph.nodes.some((n) => n.type === t)) && (!q || d.title.toLowerCase().includes(q) || t.includes(q) || (catName[d.cat] || '').toLowerCase().includes(q) || d.blurb.toLowerCase().includes(q)))
+      .sort(([, a], [, b]) => (a.title.toLowerCase().startsWith(q) ? 0 : 1) - (b.title.toLowerCase().startsWith(q) ? 0 : 1));
+    hi = Math.min(hi, Math.max(shown.length - 1, 0));
+    list.replaceChildren(...(shown.length ? shown.map(([t, d], i) => h('div', { class: 'add-item' + (i === hi ? ' cur' : ''), onpointerdown: (e) => { e.preventDefault(); pick(t); } },
+      h('span', { class: 'add-t' }, d.title), h('span', { class: 'add-c' }, catName[d.cat] || ''), h('span', { class: 'add-b' }, d.blurb.split('. ')[0].slice(0, 90)))) : [h('div', { class: 'menu-empty' }, 'No module matches.')]));
+    list.querySelector('.cur')?.scrollIntoView({ block: 'nearest' });
+  };
+  const pick = (t) => { closePop(); hooks.addNode(t); };
+  search.addEventListener('input', () => { hi = 0; render(); });
+  search.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Escape') closePop();
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); hi = (hi + (e.key === 'ArrowDown' ? 1 : -1) + shown.length) % Math.max(shown.length, 1); render(); }
+    else if (e.key === 'Enter' && shown[hi]) pick(shown[hi][0]);
+  });
+  showPop(addBtn, h('div', { class: 'menu add-menu' }, search, list));
+  render();
+  search.focus();
+}
+addBtn.addEventListener('click', openAddMenu);
+
+learnBtn.addEventListener('click', () => {
+  showPop(learnBtn, h('div', { class: 'menu' }, h('div', { class: 'menu-h' }, 'Learning path'),
+    LESSONS.flatMap((l, i) => [
+      ...(l.section && l.section !== LESSONS[i - 1]?.section ? [h('div', { class: 'menu-h' }, l.section)] : []),
+      h('button', { class: 'menu-item', dataset: { lesson: l.id }, onclick: () => loadLesson(l) }, l.title),
+    ])));
+});
+
+// saves
+function fmtTime(t) { return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+function loadGraph(graph, label) {
+  try { store.replace(graph, label); setBanner(null); closePop(); requestAnimationFrame(() => board.fit()); toast(`Loaded ${label}`, [undoAction], 4000); }
+  catch (e) { toast('Could not load: ' + e.message); }
+}
+savesBtn.addEventListener('click', () => {
+  const name = h('input', { class: 'txt', id: 'save-name', placeholder: 'name this patch', spellcheck: 'false' });
+  name.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') save.click(); });
+  const list = h('div', { class: 'menu-list' });
+  const save = h('button', { class: 'btn sm', id: 'save-go', onclick: () => {
+    const n = name.value.trim();
+    if (!n) return name.focus();
+    storage.putSave(n, clone(store.graph));
+    toast(`Saved “${n}”`, [], 2500); render(); name.value = '';
+  } }, 'Save');
+  const render = () => {
+    list.replaceChildren();
+    const saves = storage.saves();
+    const names = Object.keys(saves).sort((a, b) => saves[b].t - saves[a].t);
+    list.append(h('div', { class: 'menu-h' }, 'Saved patches'));
+    if (!names.length) list.append(h('div', { class: 'menu-empty' }, 'Nothing saved yet.'));
+    for (const n of names) list.append(h('div', { class: 'menu-row' },
+      h('span', { class: 'grow' }, n, h('small', {}, ' ' + fmtTime(saves[n].t))),
+      h('button', { class: 'btn sm', onclick: () => loadGraph(saves[n].graph, n) }, 'Load'),
+      h('button', { class: 'btn sm', title: 'Delete', onclick: () => {
+        const old = storage.deleteSave(n); render();
+        toast(`Deleted “${n}”`, [{ label: 'Undo', fn: () => { storage.restoreSave(n, old); } }]);
+      } }, '×')));
+    const prev = storage.previous();
+    if (prev) list.append(h('div', { class: 'menu-h' }, 'Previous session'), h('div', { class: 'menu-row' }, h('span', { class: 'grow' }, 'Where you left off last time'), h('button', { class: 'btn sm', id: 'restore-prev', onclick: () => loadGraph(prev, 'previous session') }, 'Restore')));
+    const hist = storage.history();
+    list.append(h('div', { class: 'menu-h' }, 'Snapshots (autosaved history)'));
+    if (!hist.length) list.append(h('div', { class: 'menu-empty' }, 'Snapshots appear as you edit.'));
+    hist.slice(0, 8).forEach((s) => list.append(h('div', { class: 'menu-row' }, h('span', { class: 'grow' }, fmtTime(s.t), h('small', {}, ` ${s.graph.nodes.length} modules`)), h('button', { class: 'btn sm', onclick: () => loadGraph(s.graph, 'snapshot ' + fmtTime(s.t)) }, 'Restore'))));
+  };
+  render();
+  showPop(savesBtn, h('div', { class: 'menu wide' }, h('div', { class: 'menu-row' }, name, save), list));
+  name.focus();
+});
+
+// ---------- export / import ----------
+function download(filename, text, type = 'text/plain') {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = h('a', { href: url, download: filename });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+exportBtn.addEventListener('click', () => {
+  showPop(exportBtn, h('div', { class: 'menu' },
+    h('button', { class: 'menu-item', id: 'export-json', onclick: () => { download('patch.patchboard.json', JSON.stringify(store.graph, null, 2), 'application/json'); closePop(); } }, 'Patch file (.json) — exact graph'),
+    h('button', { class: 'menu-item', id: 'export-strudel', onclick: () => { download('patch.strudel', strudelFile(store.graph)); closePop(); } }, 'Strudel code (.strudel) — with the patch embedded')));
+});
+// ---------- import: paste code or choose a file ----------
+function loadImported(graph, label) {
+  loadGraph(graph, label);
+  requestAnimationFrame(() => board.tidy({ merge: true }));
+}
+function reportDialog(r, label, back) {
+  const rep = r.report;
+  const total = rep.done.length + new Set(rep.skipped.map((s) => s.line)).size;
+  const list = rep.skipped.length
+    ? h('div', { class: 'imp-list' }, rep.skipped.slice(0, 40).map((s) => h('div', { class: 'imp-row' }, h('span', { class: 'imp-line' }, s.line ? 'line ' + s.line : ''), h('code', {}, s.text), h('span', { class: 'imp-why' }, s.reason))))
+    : null;
+  const notes = rep.notes.length ? h('div', { class: 'imp-notes' }, rep.notes.map((n) => h('div', {}, '• ' + n))) : null;
+  const go = h('button', { class: 'btn', id: 'import-go', onclick: () => { closeModal(); loadImported(r.graph, label); } }, rep.skipped.length ? 'Import what I can' : 'Import');
+  const body = h('div', {},
+    h('p', { class: 'imp-sum' }, r.empty ? 'Nothing in this code could be turned into modules.' : `Built ${r.graph.nodes.filter((n) => n.type !== 'output').length} modules from ${rep.done.length} pattern${rep.done.length === 1 ? '' : 's'}.`, rep.skipped.length ? ` ${rep.skipped.length} part${rep.skipped.length === 1 ? '' : 's'} could not be shown as modules:` : ' Everything was converted.'),
+    list, notes,
+    h('p', { class: 'imp-hint' }, 'Skipped parts are left out, not guessed. Importing replaces the board (Undo brings it back).'),
+    h('div', { class: 'modal-btns' }, r.empty ? null : go, h('button', { class: 'btn ghost', onclick: back }, 'Back')));
+  void total;
+  showModal('What the import found', body);
+}
+let modalEl = null;
+function closeModal() { modalEl?.remove(); modalEl = null; }
+function showModal(title, body) {
+  closeModal();
+  modalEl = h('div', { class: 'modal-back', onpointerdown: (e) => { if (e.target === modalEl) closeModal(); } },
+    h('div', { class: 'modal', role: 'dialog', 'aria-label': title }, h('h3', {}, title), body));
+  document.body.append(modalEl);
+}
+function importText(text, label, back) {
+  const t = text.trim();
+  if (!t) return toast('Paste some Strudel code first.', [], 3000);
+  try {
+    if (t.startsWith('{')) { loadGraph(parseImport(t).graph, label); return closeModal(); }
+    const m = parseImport(t);
+    if (m.graph && !m.error) { closeModal(); return loadGraph(m.graph, label); }
+    // exported by this app but edited, or code from anywhere else: read the code itself
+    const code = t.replace(/\/\*\s*patchboard-patch v1[\s\S]*?\*\/\s*$/, '').replace(/^\/\/ Strudel Patchboard export.*\n/, '');
+    const r = importStrudel(code, { sounds: new Set(soundsFor('')) });
+    if (r.error) return toast(r.error, [], 9000);
+    reportDialog(r, label, back);
+  } catch (e) { toast('Could not read that: ' + e.message, [], 8000); }
+}
+function openImport() {
+  const area = h('textarea', { class: 'imp-area', id: 'import-text', spellcheck: 'false', placeholder: 'Paste Strudel code here, e.g.\n\nsetcpm(120/4)\n\$: s("bd*2 ~ sd").bank("RolandTR909")' });
+  area.addEventListener('keydown', (e) => e.stopPropagation());
+  const body = h('div', {},
+    h('p', { class: 'imp-hint' }, 'Any Strudel code works: from strudel.cc, a .strudel file, or a patch exported from here. Parts that modules cannot express are listed, never guessed.'),
+    area,
+    h('div', { class: 'modal-btns' },
+      h('button', { class: 'btn', id: 'import-paste-go', onclick: () => importText(area.value, 'pasted code', openImport) }, 'Import this code'),
+      h('button', { class: 'btn ghost', id: 'import-choose', onclick: () => fileInput.click() }, 'Choose a file…'),
+      h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel')));
+  showModal('Import', body);
+  setTimeout(() => area.focus(), 0);
+}
+fileInput.addEventListener('change', async () => {
+  const f = fileInput.files[0];
+  fileInput.value = '';
+  if (!f) return;
+  try { importText(await f.text(), f.name, openImport); }
+  catch (e) { toast('Could not read that file: ' + e.message, [], 8000); }
+});
+
+// ---------- keyboard ----------
+window.addEventListener('keydown', (e) => {
+  const typing = e.target.closest?.('input, textarea, select, [contenteditable]');
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); openAddMenu(); return; }
+  if (mod && e.key === '\\') { e.preventDefault(); setCodeShown(!codeShown); return; }
+  if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
+  if (typing) return;
+  if ((e.key === 'Delete' || e.key === 'Backspace')) {
+    if (board.selectedWire) { e.preventDefault(); hooks.removeWire(board.selectedWire); }
+    else if (board.selection.length > 1) { e.preventDefault(); hooks.removeNodes(board.selection); }
+    else if (board.selected) { e.preventDefault(); hooks.removeNode(board.selected); }
+  }
+  if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); if (board.selection.length > 1) hooks.groupNodes(board.selection); return; }
+  if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); board.selectAll(); return; }
+  if (e.key === ' ') { e.preventDefault(); playBtn.click(); }
+  if (e.key === 'Escape') { closePop(); closeModal(); board.select(null); }
+});
+window.addEventListener('beforeunload', () => store.flush());
+
+// ---------- boot ----------
+setCodeShown(codeShown);
+setPaletteShown(paletteShown);
+afterChange();
+if (firstLesson) setBanner(firstLesson);
+requestAnimationFrame(() => (firstLesson ? board.tidy({ merge: true }) : board.fit()));
+window.addEventListener('resize', () => board.drawCables());

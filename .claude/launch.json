@@ -1,0 +1,30 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "patchboard",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5174",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "patchboard-prod",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "preview",
+        "--port",
+        "4173",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 4173
+    }
+  ]
+}

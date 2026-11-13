@@ -1,0 +1,32 @@
+{
+  "name": "strudel-patchboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "vite build",
+    "test": "node --import ./scripts/stub-loader.mjs scripts/verify.mjs",
+    "preview": "vite preview --port 4173",
+    "test:import": "node --import ./scripts/stub-loader.mjs scripts/import-test.mjs"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.1",
+    "@lezer/highlight": "^1.2.5",
+    "@strudel/soundfonts": "^1.3.0",
+    "@strudel/web": "^1.3.0",
+    "acorn": "^8.19.0",
+    "hydra-synth": "^1.3.29"
+  },
+  "devDependencies": {
+    "@strudel/core": "1.2.6",
+    "@strudel/mini": "1.2.6",
+    "@strudel/tonal": "1.2.6",
+    "@strudel/transpiler": "1.2.6",
+    "vite": "^8.3.8"
+  },
+  "license": "AGPL-3.0-or-later"
+}
