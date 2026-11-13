@@ -577,7 +577,19 @@ export function createBoard(root, store, hooks) {
     const ox = (W - (x1 - x0) * sc) / 2, oy = (H - (y1 - y0) * sc) / 2;
     miniMap = { sc, x0, y0, ox, oy };
     const A = accent();
-    for (const b of boxes) { ctx.fillStyle = selection.has(b.id) ? A : '#4a5a6a'; ctx.fillRect(ox + (b.x - x0) * sc, oy + (b.y - y0) * sc, Math.max(2, b.w * sc), Math.max(2, b.h * sc)); }
+    // each module is drawn in its category colour, whatever the colourful setting says; selected ones get a white outline
+    const MM = { sequencer: '#f2b134', source: '#78d68b', transform: '#b48cf2', combine: '#8fa0b3', effect: '#ef8f5b', number: '#4cc3f0', output: '#e6ebf0', view: '#7aa2ff' };
+    const colorOf = (id) => {
+      const el = views.get(id)?.el;
+      const cls = el ? [...el.classList].find((c) => c.startsWith('cat-')) : null;
+      return MM[cls ? cls.slice(4) : ''] || '#6b7886';
+    };
+    for (const b of boxes) {
+      const px = ox + (b.x - x0) * sc, py = oy + (b.y - y0) * sc, pw = Math.max(3, b.w * sc), ph = Math.max(3, b.h * sc), sel = selection.has(b.id);
+      ctx.globalAlpha = sel ? 1 : 0.7; ctx.fillStyle = colorOf(b.id); ctx.fillRect(px, py, pw, ph);
+      ctx.globalAlpha = 1;
+      if (sel) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.strokeRect(px, py, pw, ph); }
+    }
     ctx.strokeStyle = A; ctx.lineWidth = 1.5; ctx.strokeRect(ox + (vx - x0) * sc, oy + (vy - y0) * sc, vw * sc, vh * sc);
   }
   mini.addEventListener('pointerdown', (e) => {
