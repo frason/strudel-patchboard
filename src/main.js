@@ -97,6 +97,7 @@ const codeHead = h('div', { class: 'code-head' },
   h('label', { class: 'toggle', title: 'Show a plain-English note after each line' },
     h('input', { type: 'checkbox', id: 'notes-toggle', checked: showNotes, onchange: (e) => { showNotes = e.target.checked; localStorage.setItem('pb.notes', showNotes ? '1' : '0'); panel.setShowNotes(showNotes); } }), ' explain'),
   h('button', { class: 'btn sm', id: 'copy', onclick: copyCode }, 'Copy'),
+  h('button', { class: 'btn sm code-close', id: 'code-close', 'aria-label': 'Close the code', onclick: () => setCodeShown(false) }, 'Close'),
   h('button', { class: 'btn sm', id: 'open-cc', onclick: openInStrudel }, 'Open in strudel.cc ↗'));
 const codeHost = h('div', { class: 'code-host', id: 'code-host' });
 const issuesEl = h('div', { class: 'issues', id: 'issues' });
@@ -106,11 +107,16 @@ const codeCol = h('aside', { class: 'codecol' }, codeHead, codeHost, learnEl, is
 const toastEl = h('div', { class: 'toasts', id: 'toasts' });
 app.append(top, h('div', { class: 'main' }, paletteEl, boardEl, codeCol), popHost, toastEl);
 
+// ---------- phone layout ----------
+// On a narrow screen the board fills the screen, the code is a sheet that is closed to begin with (and not remembered), and a lesson's text moves over the board.
+const narrowQuery = window.matchMedia('(max-width: 900px)');
+const isNarrow = () => narrowQuery.matches;
+
 // ---------- show / hide the code ----------
-let codeShown = localStorage.getItem('pb.codeShown') !== '0';
+let codeShown = isNarrow() ? false : localStorage.getItem('pb.codeShown') !== '0';
 function setCodeShown(v) {
   codeShown = v;
-  try { localStorage.setItem('pb.codeShown', v ? '1' : '0'); } catch { /* private mode */ }
+  if (!isNarrow()) { try { localStorage.setItem('pb.codeShown', v ? '1' : '0'); } catch { /* private mode */ } }
   app.classList.toggle('code-hidden', !v);
   codeBtn.classList.toggle('on', v);
   codeBtn.setAttribute('aria-pressed', String(v));
@@ -814,3 +820,15 @@ afterChange();
 if (firstLesson) setBanner(firstLesson);
 requestAnimationFrame(() => (firstLesson ? board.tidy({ merge: true }) : board.fit()));
 window.addEventListener('resize', () => board.drawCables());
+// the lesson text sits in the code column on a wide screen and over the board on a phone (tap it to fold it)
+function placeLearn() {
+  if (isNarrow()) { boardEl.append(learnEl); learnEl.classList.add('mobile-learn'); }
+  else { codeCol.insertBefore(learnEl, issuesEl); learnEl.classList.remove('mobile-learn', 'collapsed'); }
+}
+learnEl.addEventListener('click', () => { if (isNarrow()) learnEl.classList.toggle('collapsed'); });
+narrowQuery.addEventListener('change', () => {
+  placeLearn();
+  setCodeShown(isNarrow() ? false : localStorage.getItem('pb.codeShown') !== '0');   // a phone starts with the code closed; a wide screen goes back to what was chosen
+  requestAnimationFrame(() => board.fit());
+});
+placeLearn();

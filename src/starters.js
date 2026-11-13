@@ -48,17 +48,27 @@ export const LESSONS = [
     graph: () => build([['s', 'sample', 60, 120, { name: 'bd' }], ['o', 'output', 380, 120, {}]], [['s', 'o']]),
   },
   {
-    id: 'repeats', title: '2 · Repeats and brackets',
+    id: 'sequence', title: '2 · Sequence: one pattern after another',
+    learned: 'Sequence plays its inputs one after another, one cycle each, then starts over: cat(a, b). Here the first cycle is the Sample\'s pattern bd*2 [bd sd], the second cycle is the Drum Machine\'s grid, and then it begins again. Stack plays things at the same time; Sequence plays them in turn. The "inputs" setting says how many it cycles through.',
+    graph: () => build([
+      ['k', 'sample', 40, 40, { name: 'bd*2 [bd sd]' }],
+      ['d', 'drums', 40, 480, { steps: 8, tracks: [trk('bd', 'x ~ x ~ x ~ ~ ~'), trk('sd', '~ ~ ~ ~ ~ ~ x ~')] }],
+      ['sq', 'cat', 440, 300, { n: 2 }],
+      ['o', 'output', 740, 300, { bpm: 120 }],
+    ], [['k', 'sq', 'in1'], ['d', 'sq', 'in2'], ['sq', 'o']]),
+  },
+  {
+    id: 'repeats', title: '3 · Repeats and brackets',
     learned: 'Inside the quotes, bd*2 repeats a sound, and [bd sd] squeezes several sounds into one step. This tiny language is called mini-notation.',
     graph: () => build([['s', 'sample', 60, 120, { name: 'bd*2 [bd sd]' }], ['o', 'output', 380, 120, {}]], [['s', 'o']]),
   },
   {
-    id: 'banks', title: '3 · Banks and chaining',
+    id: 'banks', title: '4 · Banks and chaining',
     learned: 'Methods chain with dots: .bank() picks a drum machine, .gain() sets the volume and .decay() shortens the tail. Each knob is one method.',
     graph: () => build([['s', 'sample', 60, 80, { name: 'bd sd', bank: 'RolandTR909', gain: 0.8, decay: 0.2 }], ['o', 'output', 420, 80, {}]], [['s', 'o']]),
   },
   {
-    id: 'stack', title: '4 · Layering with stack()',
+    id: 'stack', title: '5 · Layering with stack()',
     learned: 'stack(a, b) plays patterns at the same time. Wiring each sound into Output separately does the same thing with $: lines.',
     graph: () => build([
       ['k', 'sample', 40, 40, { name: 'bd*2', bank: 'RolandTR909', gain: 0.6 }],
@@ -68,7 +78,7 @@ export const LESSONS = [
     ], [['k', 'st', 'in1'], ['h', 'st', 'in2'], ['st', 'o']]),
   },
   {
-    id: 'notes', title: '5 · Notes, <> turns and fast',
+    id: 'notes', title: '6 · Notes, <> turns and fast',
     learned: 'note("c3 e3") plays pitches. Angle brackets <a b c> take one step per cycle instead of all at once, and .fast(2) doubles the speed.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c3', 'e3', 'g3', 'b3'], { mode: 'turns' })],
@@ -78,7 +88,7 @@ export const LESSONS = [
     ], [['m', 'f'], ['f', 'sy'], ['sy', 'o']]),
   },
   {
-    id: 'filter', title: '6 · Filter, resonance, delay',
+    id: 'filter', title: '7 · Filter, resonance, delay',
     learned: '.lpf() cuts the highs, .lpq() adds a peak at the cutoff and .delay() adds echoes. Order in the chain is the order in the signal path.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c2', null, 'c2', 'g2', null, 'c2', 'eb2', 'g2'], { octave: 2 })],
@@ -89,7 +99,7 @@ export const LESSONS = [
     ], [['m', 'sy'], ['sy', 'f'], ['f', 'd'], ['d', 'o']]),
   },
   {
-    id: 'sliders', title: '7 · Sliders: a live parameter',
+    id: 'sliders', title: '8 · Sliders: a live parameter',
     learned: 'A number cable replaces a knob value with something that can change: slider(...) is a number you drag while the music plays.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c2', null, 'c2', 'g2', null, 'c2', 'eb2', 'g2'], { octave: 2 })],
@@ -100,7 +110,7 @@ export const LESSONS = [
     ], [['m', 'sy'], ['sy', 'f'], ['sl', 'f', 'p:cutoff'], ['f', 'o']]),
   },
   {
-    id: 'song', title: '8 · Putting it together',
+    id: 'song', title: '9 · Putting it together',
     learned: 'Several $: lines play together; .every(4, rev) changes a pattern on every 4th cycle; .euclid(5,8) spreads hits evenly; .room() puts it all in a space.',
     graph: () => build([
       ['kd', 'sample', 40, 40, { name: 'bd hh sd hh', bank: 'RolandTR909', gain: 0.45 }],
@@ -116,7 +126,7 @@ export const LESSONS = [
     ], [['kd', 'o'], ['hh', 'eu'], ['eu', 'o'], ['bm', 'ev'], ['ev', 'bs'], ['bs', 'o'], ['lm', 'ls'], ['ls', 'rv'], ['rv', 'o']]),
   },
   {
-    id: 'harmony', title: '9 · Harmony: one key for everything',
+    id: 'harmony', title: '10 · Harmony: one key for everything',
     learned: 'n("0 2 4").scale("A3:minor") writes scale degrees instead of note names. One Key module can steer several melodies, so changing the key changes them all and they always fit together.',
     graph: () => build([
       ['k', 'key', 40, 40, { root: 'A', scale: 'minor' }],
@@ -128,7 +138,7 @@ export const LESSONS = [
     ], [['k', 'lm', 'key'], ['k', 'bm', 'key'], ['lm', 'ls'], ['bm', 'bs'], ['ls', 'o'], ['bs', 'o']]),
   },
   {
-    id: 'subdiv', title: '10 · Repeats and brackets in the grids',
+    id: 'subdiv', title: '11 · Repeats and brackets in the grids',
     learned: 'x*2 plays a step twice and [x ~ x] squeezes three tiny steps into one. In the grids, the rep row sets them (shift-click a step in the Drum Machine). It is the same mini-notation as bd*2 [bd sd].',
     graph: () => build([
       ['dm', 'drums', 40, 60, { bank: 'RolandTR909', gain: 0.28, steps: 8, tracks: [trk('bd', 'x ~ ~ ~ x ~ [x x] ~'), trk('sd', '~ ~ x ~ ~ ~ x ~'), trk('hh', 'x*2 x x*3 x x*2 x [x ~ x] x')] }],
@@ -136,7 +146,7 @@ export const LESSONS = [
     ], [['dm', 'o']]),
   },
   {
-    id: 'trance', title: '11 · Trance: acid, ducking and views',
+    id: 'trance', title: '12 · Trance: acid, ducking and views',
     learned: 'register() adds your own method (acidenv). .duck() on the kick dips whatever is on the same .orbit(), and .analyze() feeds the Scope. A break loop with fit on is stretched to fill its step. Two layers use the same Key and one rand-driven detune. In the original video the kick (tbd) and top loop come from the author\'s own sample folder, so the kick here is a TR909 and the loop is the public-domain breaks library.',
     graph: () => build([
       ['k', 'key', 40, 40, { root: 'G', scale: 'minor' }],
@@ -162,7 +172,7 @@ export const LESSONS = [
     ], [['k', 'm', 'key'], ['m', 'f'], ['f', 't'], ['t', 'sy'], ['sy', 'ac'], ['sl', 'ac', 'p:amount'], ['ac', 'pr'], ['pr', 'd', 'lead'], ['tp', 'd', 'lead'], ['k', 'm2', 'key'], ['m2', 't2'], ['t2', 'sy2'], ['wv', 'sy2', 'p:detune'], ['sy2', 'ac2'], ['sl2', 'ac2', 'p:amount'], ['ac2', 'pr2'], ['pr2', 'd', 'lead'], ['kk', 'sc'], ['sc', 'd', 'kick'], ['d', 'o']]),
   },
   {
-    id: 'instruments', title: '12 · Instruments: guitar, strings, flute',
+    id: 'instruments', title: '13 · Instruments: guitar, strings, flute',
     learned: 'Every sound is just a name in s("..."): a synth wave, a recorded piano, or a General MIDI instrument like gm_flute. Swap the name and the same notes come out on a different instrument.',
     graph: () => build([
       ['k', 'key', 40, 40, { root: 'D', scale: 'minor' }],
@@ -176,7 +186,7 @@ export const LESSONS = [
     ], [['k', 'ch', 'key'], ['k', 'ld', 'key'], ['k', 'gt', 'key'], ['ch', 'st'], ['ld', 'fl'], ['gt', 'gi'], ['st', 'o'], ['fl', 'o'], ['gi', 'o']]),
   },
   {
-    id: 'chords', title: '13 · Chords and arpeggios',
+    id: 'chords', title: '14 · Chords and arpeggios',
     learned: 'chord("<Am F C G>").voicing() writes a chord progression with chord names and turns each into well-spaced notes. With a Key plugged in, the same steps are numbers (i VI III VII), so changing the key changes every chord. .arp("0 1 2 1") plays a chord one note at a time.',
     graph: () => build([
       ['k', 'key', 40, 40, { root: 'A', scale: 'minor' }],
@@ -190,7 +200,7 @@ export const LESSONS = [
   },
   // ---------- FM synthesis path ----------
   {
-    id: 'fm-basics', section: 'FM synthesis', title: '14 · FM: one wave shakes another',
+    id: 'fm-basics', section: 'FM synthesis', title: '15 · FM: one wave shakes another',
     learned: 'FM (frequency modulation) makes one oscillator wobble the pitch of another, so a plain sine grows new overtones. The FM module\'s "index" is how hard it shakes: 0 is a pure sine, higher is brighter and edgier. In the picture, drag the disc up or down (or fill the blue arc on its left) to change the index, and listen to the same four notes get brighter.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c3', 'e3', 'g3', 'e3'])],
@@ -200,7 +210,7 @@ export const LESSONS = [
     ], [['m', 'sy'], ['sy', 'fm'], ['fm', 'o']]),
   },
   {
-    id: 'fm-harmonic', section: 'FM synthesis', title: '15 · FM harmonic: bells and basses',
+    id: 'fm-harmonic', section: 'FM synthesis', title: '16 · FM harmonic: bells and basses',
     learned: 'The harmonic is the pitch of the shaking wave compared with the note. Whole numbers (1, 2, 3) keep it musical, like a bass or an electric piano. In-between values like 3.5 give clangy, inharmonic bells. Slide a disc sideways to change it: the wave drawn inside the disc shows how many times it wiggles per note.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c4', null, 'e4', null, 'g4', null, 'b4', null], { mode: 'turns' })],
@@ -213,7 +223,7 @@ export const LESSONS = [
     ], [['m', 'sy'], ['sy', 'fm'], ['fm', 'o'], ['m2', 'sy2'], ['sy2', 'fm2'], ['fm2', 'o']]),
   },
   {
-    id: 'fm-envelopes', section: 'FM synthesis', title: '16 · FM envelopes: pluck and pad',
+    id: 'fm-envelopes', section: 'FM synthesis', title: '17 · FM envelopes: pluck and pad',
     learned: 'Two envelopes shape an FM sound. The Instrument\'s one is the loudness (attack, decay, sustain, release): drag the corners of its drawn shape. The FM module\'s decay and sustain shape the brightness: how fast the extra overtones die away. A pluck is a quick attack with the brightness falling fast. A pad fades in slowly and holds its brightness.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c3', 'e3', 'g3', 'c4'])],
@@ -226,7 +236,7 @@ export const LESSONS = [
     ], [['m', 'sy'], ['sy', 'fm'], ['fm', 'o'], ['m2', 'sy2'], ['sy2', 'fm2'], ['fm2', 'o']]),
   },
   {
-    id: 'fm-stack', section: 'FM synthesis', title: '17 · A second modulator and feedback',
+    id: 'fm-stack', section: 'FM synthesis', title: '18 · A second modulator and feedback',
     learned: 'A second modulator (index 2) shakes the first one, so the chain is modulator 2 → modulator 1 → the note. More stages, more overtones: this is where growly basses come from. Feedback makes a modulator shake itself: keep it small (the gauge below about a third), or it turns to noise. In the picture, tap the dashed "+" disc to switch the second modulator on.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c2', 'c2', 'eb2', 'g2'])],
@@ -236,7 +246,7 @@ export const LESSONS = [
     ], [['m', 'sy'], ['sy', 'fm'], ['fm', 'o']]),
   },
   {
-    id: 'fm-orbits', section: 'FM synthesis', title: '18 · FM parts, each on its own orbit',
+    id: 'fm-orbits', section: 'FM synthesis', title: '19 · FM parts, each on its own orbit',
     learned: 'Reverb and delay are shared by everything on the same orbit (mix bus). Give each part its own orbit, and a part\'s reverb stays its own: here the bell is on orbit 1 with a big reverb, and the bass on orbit 2 stays dry. This is how a four-part FM patch keeps its parts from blurring together.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c4', null, 'e4', null, 'g4', null, 'b4', null], { mode: 'turns' })],
@@ -252,7 +262,7 @@ export const LESSONS = [
     ], [['m', 'sy'], ['sy', 'fm'], ['fm', 'rv'], ['rv', 'ob'], ['ob', 'o'], ['m2', 'sy2'], ['sy2', 'fm2'], ['fm2', 'ob2'], ['ob2', 'o']]),
   },
   {
-    id: 'fm-routing', section: 'FM synthesis', title: '19 · Four operators and routing',
+    id: 'fm-routing', section: 'FM synthesis', title: '20 · Four operators and routing',
     learned: 'The FM module has four modulators. In the "tune" view they stack in a chain: 4 shakes 3, 3 shakes 2, 2 shakes 1, and 1 shakes the note. Switch to the "routes" view to wire them any way you like: drag from one disc to another to connect them, drag the dot on an arrow up or down for how hard it shakes, and tap a disc to turn its feedback on or off. Here, modulator 2 also shakes the note directly (the extra route). A modulator that nothing hears has no effect, so a route only matters once its target is connected onward.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c2', 'c2', 'eb2', 'g2'])],
@@ -263,7 +273,7 @@ export const LESSONS = [
   },
   // ---------- mixing and control ----------
   {
-    id: 'fx-rack', section: 'Mixing and control', title: '20 · The effects rack',
+    id: 'fx-rack', section: 'Mixing and control', title: '21 · The effects rack',
     learned: 'The Effects module is a rack: reverb, delay, chorus, distortion, phaser and tremolo in one place. Tap a tile\'s name to switch it on or off, and drag across its bar for how much. Only the tiles that are on write code, in the order the rack lists them (.room(), .delay() ...).',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c4', null, 'e4', null, 'g4', null, 'e4', null])],
@@ -273,7 +283,7 @@ export const LESSONS = [
     ], [['m', 'sy'], ['sy', 'fx'], ['fx', 'o']]),
   },
   {
-    id: 'mixer', section: 'Mixing and control', title: '21 · The mixer: faders, pan, mute and solo',
+    id: 'mixer', section: 'Mixing and control', title: '22 · The mixer: faders, pan, mute and solo',
     learned: 'The Mixer is a Stack with a strip for each input, in the colour of its jack. A fader writes .postgain(): it scales the part after its effects, so the part keeps its own balance (1 is unchanged). Pan writes .pan(). Mute leaves a strip out, and solo leaves out every strip that is not solo. Try soloing the bass, then the drums.',
     graph: () => build([
       ['k', 'sample', 40, 40, { name: 'bd*2', bank: 'RolandTR909', gain: 0.7 }],
@@ -286,7 +296,7 @@ export const LESSONS = [
     ], [['k', 'mx', 'in1'], ['bm', 'bs'], ['bs', 'mx', 'in2'], ['lm', 'ls'], ['ls', 'mx', 'in3'], ['mx', 'o']]),
   },
   {
-    id: 'macro', section: 'Mixing and control', title: '22 · Macro: one control for many knobs',
+    id: 'macro', section: 'Mixing and control', title: '23 · Macro: one control for many knobs',
     learned: 'A Macro is one number from 0 to 1 that you plug into several knobs. In "sweep" mode it moves each knob across that knob\'s own whole range: here one macro sets the FM index (0 to 16) and the reverb (0 to 1) together. In "multiply" mode it scales whatever each knob is set to, which keeps balance, so it suits volume across several parts. Move the macro while it plays.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c3', 'e3', 'g3', 'e3'])],
@@ -299,7 +309,7 @@ export const LESSONS = [
   },
   // ---------- randomness ----------
   {
-    id: 'random-notes', section: 'Randomness', title: '23 · Random notes and rhythm',
+    id: 'random-notes', section: 'Randomness', title: '24 · Random notes and rhythm',
     learned: 'Random Notes writes a melody for you: every step is a random note of the scale (irand picks a step number, scale turns it into a note), and it picks again on every cycle. Random Rhythm does the same for when things happen: density is how likely each step is to hit. Freeze (1 and up) takes one variation and repeats it forever, which is how you keep a random line you like. A Key plugged in changes the scale of every random melody at once.',
     graph: () => build([
       ['k', 'key', 40, 40, { root: 'D', scale: 'dorian' }],
@@ -312,7 +322,7 @@ export const LESSONS = [
     ], [['k', 'rn', 'key'], ['rn', 'sy'], ['sy', 'o'], ['rr', 'hh'], ['hh', 'o'], ['kk', 'o']]),
   },
   {
-    id: 'shuffle-sometimes', section: 'Randomness', title: '24 · Shuffle and sometimes',
+    id: 'shuffle-sometimes', section: 'Randomness', title: '25 · Shuffle and sometimes',
     learned: 'Shuffle cuts a pattern into slices and plays them in a new order every cycle (scramble may repeat or skip slices). Sometimes changes only some of the events, picked at random: here about one note in three jumps up an octave. Both are transformers, so they work on any melody or rhythm you write. Freeze picks one variation and repeats it.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['c3', 'e3', 'g3', 'b3', 'g3', 'e3', 'd3', 'f3'])],

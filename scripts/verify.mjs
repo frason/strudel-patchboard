@@ -58,7 +58,7 @@ for (const l of LESSONS) {
 
 // ---------- slider id matches what the transpiler assigns ----------
 {
-  const g = LESSONS[6].graph();
+  const g = LESSONS.find((l) => l.id === 'sliders').graph();
   const res = compile(g);
   const sl = g.nodes.find((n) => n.type === 'slider');
   const seg = res.segments.find((s) => s.node === sl.id);
@@ -101,7 +101,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
 }
 // ---------- export / import ----------
 {
-  const g = LESSONS[7].graph();
+  const g = LESSONS.find((l) => l.id === 'song').graph();
   const file = strudelFile(g);
   const back = parseImport(file);
   check('.strudel round-trips the exact graph', !back.error && JSON.stringify(back.graph) === JSON.stringify(g));
@@ -186,7 +186,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const pat = await evaluate(r.code, false);
   const notes = pat.queryArc(0, 1).filter((h) => h.hasOnset()).map((h) => h.value.note);
   console.log('notes', JSON.stringify(notes));
-  check('lesson 9 plays degrees of A minor (lead A3 C4 E4 A4 E4 C4 + bass A2 D3)', notes.includes('A3') && notes.includes('C4') && notes.includes('E4') && notes.includes('A4') && notes.includes('A2') && notes.includes('D3'));
+  check('lesson 10 plays degrees of A minor (lead A3 C4 E4 A4 E4 C4 + bass A2 D3)', notes.includes('A3') && notes.includes('C4') && notes.includes('E4') && notes.includes('A4') && notes.includes('A2') && notes.includes('D3'));
   check('both melodies use the same wired Key module', (r.code.match(/\.scale\("A3:minor"\)/g) || []).length === 2);
   const key = g.nodes.find((n) => n.type === 'key');
   key.params.root = 'D'; key.params.scale = 'minor:pentatonic'.replace(':', ' ');
@@ -308,9 +308,9 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const g = LESSONS.find((l) => l.id === 'instruments').graph();
   const r = compile(g);
   console.log(r.code);
-  check('lesson 12 uses three General MIDI sounds through s()', ['gm_string_ensemble_1', 'gm_flute', 'gm_acoustic_guitar_nylon'].every((n) => r.code.includes('.s("' + n + '")')));
+  check('lesson 13 uses three General MIDI sounds through s()', ['gm_string_ensemble_1', 'gm_flute', 'gm_acoustic_guitar_nylon'].every((n) => r.code.includes('.s("' + n + '")')));
   const ev = (await evaluate(r.code, false)).queryArc(0, 2).filter((h) => h.hasOnset());
-  check('lesson 12 plays chords (3 string notes) and a melody', ev.filter((h) => h.value.s === 'gm_string_ensemble_1').length >= 3 && ev.some((h) => h.value.s === 'gm_flute'));
+  check('lesson 13 plays chords (3 string notes) and a melody', ev.filter((h) => h.value.s === 'gm_string_ensemble_1').length >= 3 && ev.some((h) => h.value.s === 'gm_flute'));
 }
 
 {
@@ -407,9 +407,9 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const g = LESSONS.find((l) => l.id === 'chords').graph();
   const r = compile(g);
   console.log(r.code);
-  check('lesson 13 writes the progression from the key (Am F C G)', r.code.includes('chord("<Am F C G>")'));
+  check('lesson 14 writes the progression from the key (Am F C G)', r.code.includes('chord("<Am F C G>")'));
   const ev = (await evaluate(r.code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
-  check('lesson 13 plays the chord on the piano and arpeggiates it on the guitar', ev.some((h) => h.value.s === 'gm_epiano1') && ev.filter((h) => h.value.s === 'gm_acoustic_guitar_nylon').length >= 4);
+  check('lesson 14 plays the chord on the piano and arpeggiates it on the guitar', ev.some((h) => h.value.s === 'gm_epiano1') && ev.filter((h) => h.value.s === 'gm_acoustic_guitar_nylon').length >= 4);
 }
 
 {

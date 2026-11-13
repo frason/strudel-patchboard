@@ -658,3 +658,69 @@ body.hydra-on .board { background-color: transparent; }
 .cm-choice::after { content: '\25BE'; font-size: .72em; margin-left: 1px; opacity: .65; }
 .cm-choice:hover { background: rgba(255, 255, 255, .1); }
 .menu-item.on { color: var(--accent); }
+
+/* ================= phone layout (mobile first pass) =================
+   One screen at a time: the board fills the screen, the tools sit in a bar at the bottom within thumb reach, the module list becomes the "+" search
+   sheet, and the code is a full-screen sheet over the board. */
+html, body { overscroll-behavior: none; }
+#app { height: 100dvh; }
+.code-close { display: none; }
+@media (max-width: 900px) {
+  body { font-size: 14px; }
+  input, select, textarea { font-size: 16px; }   /* anything smaller makes iOS zoom the page when a field is focused */
+  #app { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+  .topbar { height: 52px; padding: 6px 8px; gap: 6px; }
+  .brand { display: none; }
+  .transport { flex: 1; margin: 0; gap: 8px; justify-content: space-between; padding: 3px 10px 3px 3px; min-width: 0; }
+  .transport .status { min-width: 0; max-width: 64px; font-size: 11px; }
+  .play-btn { width: 42px; height: 42px; }
+  .bpm-input { width: 56px; padding: 6px; font-size: 16px; }
+  .beats-sel { padding: 6px 2px; font-size: 16px; }
+  .over { margin-left: 0; }
+  /* the toolbar becomes a bottom bar */
+  .toolbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; height: calc(56px + env(safe-area-inset-bottom)); padding: 4px 4px env(safe-area-inset-bottom); gap: 0; justify-content: space-around; background: var(--panel); border-top: 1px solid var(--line); overflow-x: auto; }
+  .toolbar .btn { flex: 1 1 0; min-width: 0; height: 46px; padding: 0; border: 0; background: none; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+  .toolbar .btn svg { width: 22px; height: 22px; }
+  .toolbar .btn.on { background: var(--panel2); color: var(--accent); }
+  .toolbar .btn:disabled { opacity: .3; }
+  /* the board takes the whole width; the module list lives in the "+" sheet */
+  .main, .code-hidden .main, .palette-hidden .main, .palette-hidden.code-hidden .main { grid-template-columns: 1fr; }
+  .palette { display: none; }
+  .minimap { display: none !important; }
+  .zoom { right: 8px; bottom: 8px; }
+  .zoom button { padding: 8px 12px; }
+  /* the code is a sheet over the board, between the top bar and the bottom bar */
+  .codecol { position: fixed; z-index: 40; left: 0; right: 0; top: 52px; bottom: calc(56px + env(safe-area-inset-bottom)); border-left: 0; width: auto; }
+  .code-hidden .codecol { display: none; }
+  .code-head { flex-wrap: wrap; gap: 6px; }
+  .code-close { display: inline-flex; }
+  .ro-note { font-size: 11px; }
+  /* a lesson's text sits over the bottom of the board, tap it to fold it */
+  .learn-banner.mobile-learn { position: absolute; left: 8px; right: 8px; bottom: 56px; z-index: 6; max-height: 34vh; overflow-y: auto; border-radius: 10px; border: 1px solid #2f5a3f; font-size: 12.5px; cursor: pointer; box-shadow: 0 8px 22px #000a; }
+  .learn-banner.mobile-learn.collapsed > :not(b) { display: none; }
+  .learn-banner.mobile-learn:not(.collapsed)::after { content: 'tap to fold'; display: block; color: var(--dim); font-size: 10.5px; margin-top: 4px; }
+  /* popups become sheets above the bottom bar */
+  .pop { left: 8px !important; right: 8px !important; top: auto !important; bottom: calc(64px + env(safe-area-inset-bottom)) !important; width: auto !important; min-width: 0; max-width: none; max-height: 62vh; }
+  .menu.wide, .add-menu { width: auto; }
+  .menu-item { padding: 12px 10px; }
+  .ip-pop.wide { left: 0 !important; right: 0 !important; top: 0 !important; bottom: 0 !important; width: auto !important; max-height: none !important; border-radius: 0; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .ip-grid { grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); }
+  .toasts { bottom: calc(66px + env(safe-area-inset-bottom)); max-width: calc(100vw - 16px); }
+  .toast { max-width: calc(100vw - 16px); }
+}
+/* bigger targets for fingers */
+@media (pointer: coarse) {
+  .jack:not(.param) { position: relative; }
+  .jack::after { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
+  .btn.sm { padding: 6px 12px; }
+  .cable-hit { stroke-width: 28; }
+}
+.board.pinching { cursor: grabbing; }
+
+/* sound list: search row with a Close button (shown on phones), and a column that keeps the search and chips their own height */
+.ip-top { display: flex; gap: 8px; align-items: center; }
+.ip-top .ip-search { flex: 1; min-width: 0; width: auto; }
+.ip-close { display: none; flex: none; }
+.ip-pop.wide > * { flex: none; }
+.ip-pop.wide > .ip-grid { flex: 1 1 auto; min-height: 0; }
+@media (max-width: 900px) { .ip-close { display: inline-flex; } }

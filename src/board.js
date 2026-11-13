@@ -215,7 +215,9 @@ export function openSoundPicker({ anchor, items, cats, current, onPick }) {
   const r = anchor.getBoundingClientRect();
   const width = Math.min(740, window.innerWidth - 16);
   const top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - 560));
-  const pop = h('div', { class: 'ip-pop wide', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - width - 8))}px;top:${top}px;width:${width}px;max-height:calc(100vh - ${top}px - 12px)` }, search, chips, box, foot);
+  const closeBtn = h('button', { class: 'btn ip-close', type: 'button', 'aria-label': 'Close the sound list' }, 'Close');   // a keyboard can press Esc; a phone cannot
+  const pop = h('div', { class: 'ip-pop wide', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - width - 8))}px;top:${top}px;width:${width}px;max-height:calc(100vh - ${top}px - 12px)` }, h('div', { class: 'ip-top' }, search, closeBtn), chips, box, foot);
+  closeBtn.addEventListener('click', () => close());
   const close = () => { clearTimeout(timer); pop.remove(); soundPop = null; document.removeEventListener('pointerdown', away, true); };
   const away = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
   const choose = (it) => { onPick(it.id); close(); };
@@ -533,7 +535,7 @@ export function createBoard(root, store, hooks) {
     h('button', { title: 'Zoom out', onclick: () => zoomBy(1 / 1.2) }, '−'),
     h('span', { class: 'zoom-val' }, '100%'),
     h('button', { title: 'Zoom in', onclick: () => zoomBy(1.2) }, '+'),
-    h('button', { title: 'Fit all modules', onclick: () => fit() }, 'fit'),
+    h('button', { title: 'Fit all modules', onclick: () => fit({ overview: true }) }, 'fit'),
     h('button', { title: 'Tidy: arrange the modules by signal flow', onclick: () => api.tidy() }, 'tidy'));
   const selbar = h('div', { class: 'selbar' });
   function paintSelbar() {
@@ -606,8 +608,10 @@ export function createBoard(root, store, hooks) {
     const r = root.getBoundingClientRect();
     return { x: (cx - r.left - view.x) / view.z, y: (cy - r.top - view.y) / view.z };
   };
+  const narrow = () => root.clientWidth < 600;   // a phone-sized board
+  const minZoom = () => (narrow() ? 0.15 : 0.3);
   function zoomAt(f, cx, cy) {
-    const z = Math.min(2, Math.max(0.3, view.z * f));
+    const z = Math.min(2, Math.max(minZoom(), view.z * f));
     const r = root.getBoundingClientRect();
     const px = cx - r.left, py = cy - r.top;
     view.x = px - ((px - view.x) / view.z) * z;
@@ -616,9 +620,20 @@ export function createBoard(root, store, hooks) {
     applyView();
   }
   function zoomBy(f) { const r = root.getBoundingClientRect(); zoomAt(f, r.left + r.width / 2, r.top + r.height / 2); }
-  function fit() {
+  // On a phone the whole patch at once would be too small to read. So by default show the first module (the leftmost) at a readable size and let the
+  // person pan along; the "fit" button still gives the overview.
+  function focusStart() {
+    const g = store.graph, first = [...g.nodes].sort((a, b2) => a.x - b2.x || a.y - b2.y)[0];
+    const el = views.get(first.id)?.el, w = el?.offsetWidth || 260, r = root.getBoundingClientRect();
+    view.z = Math.min(1, Math.max(0.5, (r.width - 24) / w));
+    view.x = 12 - first.x * view.z;
+    view.y = 12 - first.y * view.z;
+    applyView();
+  }
+  function fit(opts = {}) {
     const g = store.graph;
     if (!g.nodes.length) { Object.assign(view, { x: 40, y: 20, z: 1 }); return applyView(); }
+    if (narrow() && !opts.overview) return focusStart();
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     for (const n of g.nodes) {
       const el = views.get(n.id)?.el;
@@ -626,7 +641,7 @@ export function createBoard(root, store, hooks) {
       x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + w); y1 = Math.max(y1, n.y + hh);
     }
     const r = root.getBoundingClientRect();
-    const z = Math.min(1.1, Math.max(0.3, Math.min((r.width - 80) / (x1 - x0), (r.height - 80) / (y1 - y0))));
+    const z = Math.min(1.1, Math.max(minZoom(), Math.min((r.width - 80) / (x1 - x0), (r.height - 80) / (y1 - y0))));
     view.z = z;
     view.x = (r.width - (x1 - x0) * z) / 2 - x0 * z;
     view.y = (r.height - (y1 - y0) * z) / 2 - y0 * z;
@@ -639,18 +654,58 @@ export function createBoard(root, store, hooks) {
     else { view.x -= e.deltaX; view.y -= e.deltaY; applyView(); }
   }, { passive: false });
 
+  // Panning and pinching. One finger (or the mouse) on empty board pans it; two fingers pinch to zoom and pan together. The finger tracking is
+  // registered in the capture phase so a finger that lands on a module still counts towards a pinch.
+  const touches = new Map();   // pointerId -> last position, for fingers only
+  let pan = null, pinch = null;
+  const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+  function beginPinch() {
+    const [p, q] = [...touches.values()];
+    pan = null;
+    pinch = { d0: Math.max(1, dist(p, q)), z0: view.z, mid0: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, vx0: view.x, vy0: view.y };
+    root.classList.add('pinching');
+  }
+  function updatePinch() {
+    const [p, q] = [...touches.values()], r = root.getBoundingClientRect();
+    const z = Math.min(2, Math.max(minZoom(), pinch.z0 * (dist(p, q) / pinch.d0)));
+    const mid = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+    // keep the point of the board that was between the fingers at the start between them now
+    const wx = (pinch.mid0.x - r.left - pinch.vx0) / pinch.z0, wy = (pinch.mid0.y - r.top - pinch.vy0) / pinch.z0;
+    view.z = z; view.x = mid.x - r.left - wx * z; view.y = mid.y - r.top - wy * z;
+    applyView();
+  }
+  function endPinch() {
+    pinch = null; root.classList.remove('pinching');
+    if (touches.size === 1) { const [[id, p]] = [...touches]; pan = { id, sx: p.x - view.x, sy: p.y - view.y }; }   // the finger left on the board carries on panning, without a jump
+  }
+  function startPan(e, keepSelection = false) {
+    if (pinch || touches.size >= 2) return;
+    if (!keepSelection) selectNode(null);
+    try { root.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    pan = { id: e.pointerId, sx: e.clientX - view.x, sy: e.clientY - view.y };
+    root.classList.add('panning');
+  }
+  root.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') { touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (touches.size === 2) beginPinch(); }
+  }, true);
+  root.addEventListener('pointermove', (e) => {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch) { if (touches.size >= 2) updatePinch(); return; }
+    if (pan && e.pointerId === pan.id) { view.x = e.clientX - pan.sx; view.y = e.clientY - pan.sy; applyView(); }
+  });
+  const endPointer = (e) => {
+    touches.delete(e.pointerId);
+    if (pinch && touches.size < 2) endPinch();
+    if (pan && e.pointerId === pan.id) { pan = null; root.classList.remove('panning'); }
+    if (!pan) root.classList.remove('panning');
+  };
+  root.addEventListener('pointerup', endPointer);
+  root.addEventListener('pointercancel', endPointer);
   // pan by dragging empty board
   root.addEventListener('pointerdown', (e) => {
     if (e.target.closest('.node, .zoom, .cable-hit, .minimap')) return;
     if (e.shiftKey || e.metaKey || e.ctrlKey) return startMarquee(e);
-    selectNode(null);
-    root.setPointerCapture(e.pointerId);
-    const sx = e.clientX - view.x, sy = e.clientY - view.y;
-    root.classList.add('panning');
-    const move = (ev) => { view.x = ev.clientX - sx; view.y = ev.clientY - sy; applyView(); };
-    const up = () => { root.classList.remove('panning'); root.removeEventListener('pointermove', move); root.removeEventListener('pointerup', up); };
-    root.addEventListener('pointermove', move);
-    root.addEventListener('pointerup', up);
+    startPan(e);
   });
 
   // drag a box with Shift (or Ctrl/⌘) held to select several modules
@@ -1581,6 +1636,11 @@ export function createBoard(root, store, hooks) {
       if (!selection.has(id)) selectNode(id);
       return;
     }
+    if (e.pointerType === 'touch' && !additive && !e.target.closest('.n-head')) {   // on a touch screen the body of a module is most of the screen: a finger there pans the board
+      if (!selection.has(id)) selectNode(id);
+      startPan(e, true);
+      return;
+    }
     e.preventDefault(); e.stopPropagation();
     if (additive) { if (selection.has(id)) selection.delete(id); else selection.add(id); paintSelection(); return; }
     if (!selection.has(id)) selectNode(id);
@@ -1591,6 +1651,7 @@ export function createBoard(root, store, hooks) {
     try { el.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
     el.classList.add('dragging');
     const move = (ev) => {
+      if (pinch) return;   // two fingers are zooming the board, not dragging this module
       const p = toWorld(ev.clientX, ev.clientY);
       let dx = p.x - start.x, dy = p.y - start.y;
       if (!ev.altKey) { dx = Math.round((starts[id].x + dx) / SNAP) * SNAP - starts[id].x; dy = Math.round((starts[id].y + dy) / SNAP) * SNAP - starts[id].y; }
