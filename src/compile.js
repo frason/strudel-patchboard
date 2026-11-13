@@ -57,6 +57,10 @@ export function compile(g) {
       if (src.params.mode === 'multiply') return [...base, S(`.mul(${fmt(value)})`, { ...mm, note: `.mul(${fmt(value)}) multiplies the macro by this knob's own setting (${fmt(value)}), so the knob keeps its balance and the macro scales it.` })];
       return [...base, S(`${spec.log ? '.pow(3)' : ''}.range(${fmt(spec.min)}, ${fmt(spec.max)})`, { ...mm, note: `.range(${fmt(spec.min)}, ${fmt(spec.max)}) stretches the macro (0 to 1) across this knob's whole range${spec.log ? '; .pow(3) bends it so the low end gets more room, like the knob does' : ''}.` })];
     }
+    if (src && src.type === 'numpat' && Number.isFinite(spec.min) && Number.isFinite(spec.max) && !spec.dyn) {   // a pattern whose numbers do not fit the dial it drives
+      const bad = [...new Set(String(src.params.text || '').split(/[\s\[\]<>,|()]+/).map((t) => /^-?\d*\.?\d+/.exec(t)?.[0]).filter((x) => x !== undefined).map(Number).filter((v) => v < spec.min || v > spec.max))];
+      if (bad.length) issues.push({ node: src.id, msg: `Number Pattern has ${bad.join(', ')}, but "${spec.label}" only goes from ${fmt(spec.min)} to ${fmt(spec.max)}` });
+    }
     return input(n, 'p:' + spec.key, depth, true);
   }
 

@@ -248,6 +248,26 @@ function applyX(c, pitched, f, next) {
 }
 
 // ---------- board hooks ----------
+// ---- Number Pattern and the range of the dial it drives ----
+// the numbers in a pattern like "<0.5 1*2 ~ 0..4>": the number at the start of each word
+const patNumbers = (text) => String(text || '').split(/[\s\[\]<>,|()]+/).map((t) => /^-?\d*\.?\d+/.exec(t)?.[0]).filter((x) => x !== undefined).map(Number);
+const outsideRange = (text, spec) => patNumbers(text).filter((v) => v < spec.min || v > spec.max);
+// a first pattern that fits the dial: its own setting, then a second value inside the range
+function starterPattern(spec, cur) {
+  const span = spec.max - spec.min, q = spec.step || 0.01;
+  const other = spec.log && spec.min > 0 ? Math.min(spec.max, cur * 2) : cur <= spec.min + span / 2 ? spec.min + span * 0.75 : spec.min + span * 0.25;
+  const r = (v) => Number((Math.round(v / q) * q).toFixed(4));
+  return `<${fmt(r(cur))} ${fmt(r(other))}>`;
+}
+// stretch the pattern's own lowest and highest number onto the dial's lowest and highest, keeping everything in between in proportion
+function fitPattern(text, spec) {
+  const nums = patNumbers(text);
+  if (!nums.length) return text;
+  const lo = Math.min(...nums), hi = Math.max(...nums);
+  const map = hi > lo ? (v) => spec.min + ((v - lo) / (hi - lo)) * (spec.max - spec.min) : (v) => Math.min(spec.max, Math.max(spec.min, v));
+  return text.replace(/(^|[\s\[\]<>,|(])(-?\d*\.?\d+)/g, (_, pre, num) => pre + fmt(Number(map(Number(num)).toFixed(4))));
+}
+
 const hooks = {
   preview: (item) => engine.preview(item),
   warm: () => engine.warm(),
@@ -279,7 +299,7 @@ const hooks = {
     toast(msg, [undoAction], 4000);
   },
   connect(from, to, replacedId) {
-    let warnRange = null;
+    let warnRange = null, warnNum = null;
     const removed = store.update((g) => {
       if (replacedId) g.wires = g.wires.filter((w) => w.id !== replacedId);
       const port = MODULES[nodeById(g, to.node).type];
@@ -295,11 +315,21 @@ const hooks = {
         if (src.type === 'slider') src.params.step = spec.step || 0;
         if (src.type === 'slider') src.params.value = Math.min(spec.max, Math.max(spec.min, Number(dst.params[spec.key] ?? spec.def)));
       }
+      // A Number Pattern still on its starting numbers (made for a cutoff) takes the dial's setting; any other pattern is checked against the dial's range.
+      if (src.type === 'numpat' && spec && !spec.dyn && Number.isFinite(spec.min) && Number.isFinite(spec.max)) {
+        if (fresh && src.params.text === MODULES.numpat.params[0].def) src.params.text = starterPattern(spec, Number(dst.params[spec.key] ?? spec.def));
+        else if (outsideRange(src.params.text, spec).length) warnNum = { src: src.id, spec };
+      }
       // An already-used slider or wave keeps its range, which can reach past this knob's: warn, and offer a slider of its own.
       if (!fresh && spec && !spec.dyn && Number.isFinite(spec.min) && Number.isFinite(spec.max) && (src.type === 'slider' || src.type === 'wave') && (Number(src.params.min) < spec.min || Number(src.params.max) > spec.max)) {
         warnRange = { to, src: src.id, dst: dst.id, spec, lo: Number(src.params.min), hi: Number(src.params.max) };
       }
     });
+    if (warnNum) {
+      const { src, spec } = warnNum, txt = nodeById(store.graph, src)?.params.text;
+      toast(`This Number Pattern has ${[...new Set(outsideRange(txt, spec))].join(', ')}, but "${spec.label}" only goes from ${fmt(spec.min)} to ${fmt(spec.max)}. Values outside that can be far too loud or turn the sound to noise.`,
+        [{ label: 'Fit to range', fn: () => store.update((g) => { const n0 = nodeById(g, src); if (n0) n0.params.text = fitPattern(n0.params.text, spec); }) }], 12000);
+    }
     if (warnRange) {
       const { to: t0, src, dst, spec, lo, hi } = warnRange;
       toast(`This ${MODULES[nodeById(store.graph, src).type].title.toLowerCase()} goes from ${fmt(lo)} to ${fmt(hi)}, but "${spec.label}" only goes from ${fmt(spec.min)} to ${fmt(spec.max)}. Values outside that can turn the sound to noise.`, [{
