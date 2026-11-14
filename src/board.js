@@ -540,10 +540,21 @@ export function createBoard(root, store, hooks) {
   const selbar = h('div', { class: 'selbar' });
   function paintSelbar() {
     selbar.style.display = selection.size > 1 ? 'flex' : 'none';
-    selbar.replaceChildren(h('span', {}, `${selection.size} selected`),
-      h('button', { class: 'btn sm', title: 'Group the selected modules (Ctrl/⌘ G)', onclick: () => hooks.groupNodes([...selection]) }, 'Group'),
-      h('button', { class: 'btn sm', title: 'Delete the selected modules', onclick: () => hooks.removeNodes([...selection]) }, 'Delete'),
-      h('button', { class: 'btn sm', onclick: () => selectNode(null) }, 'Clear'));
+    if (selection.size < 2) return;
+    const ids = [...selection], nodes = store.graph.nodes.filter((n) => selection.has(n.id));
+    const allCollapsed = nodes.every((n) => n.collapsed);
+    const muteable = nodes.filter((n) => MUTE_KIND[n.type]);
+    const allMuted = muteable.length > 0 && muteable.every((n) => n.muted);
+    const btn = (label, title, fn) => h('button', { class: 'btn sm', title, onclick: fn }, label);
+    selbar.replaceChildren(h('span', { class: 'sel-count' }, `${selection.size} selected`),
+      btn('Group', 'Group the selected modules so they move and fold together (Ctrl/⌘ G)', () => hooks.groupNodes(ids)),
+      btn('Duplicate', 'Copy the selected modules and the wires between them (Ctrl/⌘ D)', () => hooks.duplicateNodes(ids)),
+      btn(allCollapsed ? 'Expand' : 'Minimize', allCollapsed ? 'Open all the selected modules' : 'Fold all the selected modules down to their title bars', () => hooks.collapseNodes(ids, !allCollapsed)),
+      muteable.length ? btn(allMuted ? 'Unmute' : 'Mute', allMuted ? 'Switch the selected modules back on' : 'Mute the selected sounds and bypass the selected effects', () => hooks.muteNodes(ids, !allMuted)) : null,
+      btn('Align ⇤', 'Line the selected modules up on their left edge', () => hooks.alignNodes(ids, 'left')),
+      btn('Align ⤒', 'Line the selected modules up on their top edge', () => hooks.alignNodes(ids, 'top')),
+      btn('Delete', 'Delete the selected modules (Delete key)', () => hooks.removeNodes(ids)),
+      btn('Clear', 'Deselect (Esc)', () => selectNode(null)));
   }
   const mini = h('canvas', { class: 'minimap', width: 190, height: 120, title: 'Minimap of the whole board. Click or drag to move the view.' });
   root.append(world, hint, zoomUI, mini, selbar);
@@ -612,6 +623,7 @@ export function createBoard(root, store, hooks) {
   const applyView = () => {
     world.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.z})`;
     root.style.setProperty('--grid', `${SNAP * view.z}px`);
+    root.style.setProperty('--wk', String(Math.min(4, Math.max(1, 1 / view.z))));   // the delete button keeps a usable size when the board is zoomed out
     root.style.backgroundPosition = `${view.x}px ${view.y}px`;
     zoomUI.querySelector('.zoom-val').textContent = Math.round(view.z * 100) + '%';
     drawMini();
@@ -697,6 +709,8 @@ export function createBoard(root, store, hooks) {
     pan = { id: e.pointerId, sx: e.clientX - view.x, sy: e.clientY - view.y };
     root.classList.add('panning');
   }
+  // a press anywhere except on the selected cable (or its delete button) deselects the cable, which hides its delete button
+  root.addEventListener('pointerdown', (e) => { if (selectedWire && !e.target.closest('.cable-hit, .wdel')) { selectedWire = null; drawCables(); } }, true);
   root.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch') { touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (touches.size === 2) beginPinch(); }
   }, true);
@@ -715,7 +729,7 @@ export function createBoard(root, store, hooks) {
   root.addEventListener('pointercancel', endPointer);
   // pan by dragging empty board
   root.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.node, .zoom, .cable-hit, .minimap')) return;
+    if (e.target.closest('.node, .zoom, .cable-hit, .minimap, .selbar')) return;   // the selection bar is on the board, so a click on it must not count as a click on empty board (that would clear the selection first)
     if (e.shiftKey || e.metaKey || e.ctrlKey) return startMarquee(e);
     startPan(e);
   });
@@ -742,7 +756,7 @@ export function createBoard(root, store, hooks) {
   }
   function paintSelection() { views.forEach((v, k) => v.el.classList.toggle('selected', selection.has(k))); paintSelbar(); drawMini(); }
   const hiddenGroup = (id) => (store.graph.groups || []).find((gr) => gr.collapsed && gr.nodes.includes(id));
-  function selectNode(id) { selection.clear(); if (id) selection.add(id); paintSelection(); }
+  function selectNode(id) { selection.clear(); if (Array.isArray(id)) id.forEach((i) => selection.add(i)); else if (id) selection.add(id); paintSelection(); }
 
   // ---------- jacks & cables ----------
   function jackPos(nodeId, portId) {
@@ -791,9 +805,15 @@ export function createBoard(root, store, hooks) {
         const lr = svg('rect', { height: 14, rx: 7, y: -7 });
         const lt = svg('text', { 'text-anchor': 'middle', y: 3.5 });
         lab.append(lr, lt);
-        grp.append(cab, hit, lab);
+        // the delete button: appears in the middle of the cable once it is selected (a tap or click on the cable), so a cable can be removed without a keyboard
+        const del = svg('g', { class: 'wdel', role: 'button', 'aria-label': 'Delete this connection' });
+        del.append(svg('title', {}), svg('circle', { r: 13 }), svg('path', { d: 'M-4.5 -4.5L4.5 4.5M4.5 -4.5L-4.5 4.5' }));
+        del.firstChild.textContent = 'Delete this connection';
+        del.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); ev.preventDefault(); });
+        del.addEventListener('click', (ev) => { ev.stopPropagation(); selectedWire = null; hooks.removeWire(w.id); });
+        grp.append(cab, hit, lab, del);
         cableLayer.append(grp);
-        e = { grp, cab, hit, lab, lr, lt };
+        e = { grp, cab, hit, lab, lr, lt, del };
         wireEls.set(w.id, e);
       }
       const d = getPrefs().cables === 'step' ? stepPath(a, b) : cablePath(a, b);
@@ -801,7 +821,7 @@ export function createBoard(root, store, hooks) {
       e.grp.dataset.type = outType(g, w.from.node) || 'sound';
       const label = w.to.port.startsWith('p:') ? 'number → ' + w.to.port.slice(2) : e.grp.dataset.type;
       if (e.lt.textContent !== label) { e.lt.textContent = label; e.lr.setAttribute('width', label.length * 5.6 + 12); e.lr.setAttribute('x', -(label.length * 5.6 + 12) / 2); }
-      try { const pt = e.cab.getPointAtLength(e.cab.getTotalLength() / 2); e.lab.setAttribute('transform', `translate(${pt.x},${pt.y})`); } catch { /* not laid out yet */ }
+      try { const pt = e.cab.getPointAtLength(e.cab.getTotalLength() / 2); e.lab.setAttribute('transform', `translate(${pt.x},${pt.y})`); e.del.setAttribute('transform', `translate(${pt.x},${pt.y})`); } catch { /* not laid out yet */ }
       e.grp.classList.toggle('selwire', w.id === selectedWire);
     }
     for (const [id, e] of wireEls) if (!seen.has(id)) { e.grp.remove(); wireEls.delete(id); }
@@ -969,12 +989,17 @@ export function createBoard(root, store, hooks) {
         const stepBtn = (d) => {
           const bt = h('button', { class: 'k-step ' + (d > 0 ? 'up' : 'down'), type: 'button', tabindex: -1, title: `${d > 0 ? 'up' : 'down'} one step (Shift: ten, hold: repeat)`, 'aria-label': `${spec.label} ${d > 0 ? 'up' : 'down'}` }, d > 0 ? '▲' : '▼');
           let wait = null, rep = null;
-          const stop = () => { clearTimeout(wait); clearInterval(rep); };
+          // The module can be redrawn while the button is held (the button is then replaced and never sees its pointerup),
+          // so the repeat is ended by a pointerup anywhere (or a cancel, or the window losing focus), not by the button's own.
+          const stop = () => { clearTimeout(wait); clearInterval(rep); wait = rep = null; window.removeEventListener('pointerup', stop, true); window.removeEventListener('pointercancel', stop, true); window.removeEventListener('blur', stop); };
           bt.addEventListener('pointerdown', (e) => {
             e.stopPropagation(); e.preventDefault();   // preventDefault keeps the focus on the dial, so the arrows stay visible
+            stop();
             try { bt.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
-            knob.step(d, e.shiftKey);
-            wait = setTimeout(() => { rep = setInterval(() => knob.step(d, e.shiftKey), 70); }, 420);
+            window.addEventListener('pointerup', stop, true); window.addEventListener('pointercancel', stop, true); window.addEventListener('blur', stop);
+            const tick = () => knob.step(d, e.shiftKey);
+            tick();
+            wait = setTimeout(() => { rep = setInterval(tick, 70); }, 420);
           });
           for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) bt.addEventListener(ev, stop);
           return bt;
@@ -1087,7 +1112,7 @@ export function createBoard(root, store, hooks) {
     if (!node.collapsed) {
       // the description folds away like the settings do; Settings → Module descriptions can keep them all open
       const head = h('button', { class: 'fold-head', title: 'What this module does' }, h('span', { class: 'fold-sum' }, 'about this module'), h('span', { class: 'fold-chev' }, '▾'));
-      const about = h('div', { class: 'fold about' + (aboutOpen.has(node.id) ? ' open' : '') }, head, h('div', { class: 'fold-body' }, h('div', { class: 'blurb' }, def.blurb)));
+      const about = h('div', { class: 'fold about' + (aboutOpen.has(node.id) ? ' open' : '') }, head, h('div', { class: 'fold-body' }, h('div', { class: 'blurb' }, def.blurb), def.more ? h('button', { class: 'btn sm blurb-readmore', type: 'button', onclick: (e) => { e.stopPropagation(); hooks.showHelp(node.type); } }, `Read more about ${def.title} ▸`) : null));
       head.addEventListener('pointerdown', (e) => e.stopPropagation());
       head.addEventListener('click', () => { if (aboutOpen.has(node.id)) aboutOpen.delete(node.id); else aboutOpen.add(node.id); about.classList.toggle('open', aboutOpen.has(node.id)); setTimeout(drawCables, 0); });
       body.append(about);

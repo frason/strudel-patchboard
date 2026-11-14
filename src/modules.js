@@ -393,7 +393,16 @@ export const MODULES = {
   fm: {
     title: 'FM', cat: 'effect', out: 'sound', data: { fmdiagram: true, envelope: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'FM synthesis: one oscillator modulates another to make bells, electric pianos and growly basses. Use it after a synth wave.',
+    blurb: 'FM synthesis: one oscillator (the modulator) shakes the pitch of another (the note you hear) so fast that it adds new overtones, turning a plain sine into bells, electric pianos and growly basses. Index is how hard it shakes, harmonic is its pitch compared with the note, and decay and sustain say how long the brightness lasts. Use it after a synth wave, and start from a preset.',
+    more: [
+      ['What FM is', 'Frequency modulation: one oscillator (the modulator) wobbles the pitch of another (the carrier, the note you hear) hundreds of times a second. That is too fast to sound like vibrato. Instead it adds new overtones, so a plain sine wave can become a bell, an electric piano or a growling bass using only a few knobs. Put this module after an Instrument, ideally one set to a sine wave, because the sine is the cleanest thing to shake.'],
+      ['The two knobs that matter', 'Index is how hard the modulator shakes. 0 is a pure sine; a little (1 to 3) adds warmth and edge; a lot (6 and up) is bright, harsh and metallic. Harmonic is the modulator\'s pitch compared with the note. Whole numbers (1, 2, 3, 4) keep the new overtones in tune with the note, so the sound is musical (bass, piano, organ). In-between values (3.5, 2.75) put the overtones between the notes, which is what bells, gongs and clangs sound like.'],
+      ['Decay and sustain: the brightness envelope', 'These shape how the index changes over a note, so they control how bright it is over time, not how loud. A short decay with sustain 0 starts bright and goes soft at once: a pluck, a marimba, a piano tine. A long decay and a high sustain stays bright while the note is held: brass and organ. The Instrument\'s own envelope, above this module, shapes the loudness, and the two work together.'],
+      ['Four modulators, two views', 'There are four modulators. In the "tune" view they stack in a chain: 4 shakes 3, 3 shakes 2, 2 shakes 1, and 1 shakes the note. Slide a disc sideways for its harmonic and up or down for its index. In the "routes" view you can wire them any way you like: drag from one disc to another (or onto "note you hear") to add an arrow, and drag the dot on an arrow up or down for how hard it shakes. Several routes into the same disc add together.'],
+      ['Feedback (the orange ring)', 'Feedback makes a modulator shake itself. A little (0.05 to 0.3) adds a buzzy, sawtooth-like edge and a growl; a lot turns into noise. Tap a disc in the routes view to switch its feedback on or off. The orange arc or ring on a disc is its feedback amount.'],
+      ['Presets and recipes', 'The Presets list at the top loads a ready-made sound: Electric piano, Bell, Bass, Brass, Marimba or Metal clang. Each one replaces all the FM settings, so use it as a starting point and then change it. Some recipes to try: a bass is index 3 to 4, harmonic 1, a short decay. A bell is harmonic 3.5 with a long decay and sustain 0. An electric piano is a soft 1:1 sound plus a second modulator at harmonic 14, a quick bright "tine". A glassy pad is low indexes with slow envelopes.'],
+      ['Tips', 'Start with one modulator and get that right before adding more. If a sound is harsh or out of tune, lower the index or round the harmonic to a whole number. FM sounds change a lot with pitch, so listen at the pitch you will use. Give an FM part its own orbit if it has reverb or delay, so the effect stays on that part. Everything here is written as the .fm(), .fmh(), .fmdecay() and .fmsustain() methods (and fm2, fmh2 and so on) in the code panel, where you can see exactly what each knob does.'],
+    ],
     params: [
       { key: 'index', label: 'index', kind: 'knob', min: 0, max: 16, step: 0.1, def: 4, call: 'fm', always: true, wire: true, tip: 'how strong the modulation is (brightness)' },
       { key: 'harm', label: 'harmonic', kind: 'knob', min: 0.25, max: 16, step: 0.25, def: 1, call: 'fmh', always: true, wire: true, tip: 'modulator pitch relative to the note (whole numbers sound musical)' },
@@ -694,3 +703,14 @@ export const MUTE_KIND = Object.fromEntries([
   ...['melody', 'rhythm', 'chords', 'drums', 'synth', 'sample', 'hydra', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
   ...['fast', 'slow', 'rev', 'transpose', 'ply', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'ring', 'vowel', 'djf', 'leslie', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'chorus', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
 ]);
+
+// FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.
+// They are starting points to hear what FM can do (the Instrument's envelope matters too: a bell wants a long release, a bass a short one).
+export const FM_PRESETS = [
+  { id: 'epiano', label: 'Electric piano', tip: 'a soft tone (1:1) with a bright, quick "tine" on top (harmonic 14) that fades fast', params: { index: 2, harm: 1, decay: 0.5, sustain: 0.1, index2: 0.8, harm2: 14 } },
+  { id: 'bell', label: 'Bell', tip: 'an in-between harmonic (3.5) makes clangy overtones that do not line up with the note, which is what a bell sounds like', params: { index: 5, harm: 3.5, decay: 1.2, sustain: 0 } },
+  { id: 'bass', label: 'Bass', tip: 'a 1:1 shake that is bright for an instant and then settles: a tight, punchy bass', params: { index: 3.5, harm: 1, decay: 0.18, sustain: 0.25, fb1: 0.1 } },
+  { id: 'brass', label: 'Brass', tip: 'a 1:1 shake that stays on while the note is held, so the tone stays bright and buzzy', params: { index: 3, harm: 1, decay: 0.6, sustain: 0.7 } },
+  { id: 'marimba', label: 'Marimba', tip: 'a high harmonic (4) with a very short burst of brightness: a wooden "tok"', params: { index: 2.5, harm: 4, decay: 0.12, sustain: 0 } },
+  { id: 'clang', label: 'Metal clang', tip: 'a big index with two in-between harmonics: harsh, metallic and not in tune', params: { index: 9, harm: 2.75, decay: 0.5, sustain: 0, index2: 4, harm2: 1.5 } },
+];

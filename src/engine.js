@@ -7,17 +7,37 @@ import { registerSoundfonts } from './soundfonts.js';
 
 const DS = 'https://raw.githubusercontent.com/felixroos/dough-samples/main';
 
-// Safe output: a soft limiter between Strudel's output and the speakers. Below 0.8 the signal passes untouched; above it the peaks are rounded
-// off smoothly and can never pass 0.97, so a hot patch becomes a little denser instead of crackling. It is part of this app's audio path, not of the
-// generated code, so it is not in the code panel and is not there when the same code runs on strudel.cc.
+// Safe output: a limiter between Strudel's output and the speakers, in two stages. A compressor with a fast attack and a high ratio takes hot peaks down
+// smoothly (it starts at -2 dB, so anything below 0.8 passes untouched). Behind it a soft clipper rounds off what is left, so the output can never pass 0.97.
+// A soft clipper alone is not enough: a very hot patch (a ring mod or a stack of FM voices can reach +10 dB or more) would be flattened against its ceiling
+// and crackle, which is the "serious clipping" you hear. It is part of this app's audio path, not of the generated code, so it is not in the code panel
+// and is not there when the same code runs on strudel.cc.
+const LIMIT = { threshold: -2, knee: 1, ratio: 20, attack: 0.003, release: 0.15 };
+const SHAPER_RANGE = 4;   // the shaper sees -1..1 times this; the gain before it divides the signal by the same number
 function softCurve() {
   const N = 8192, c = new Float32Array(N);
   for (let i = 0; i < N; i++) {
-    const x = ((i / (N - 1)) * 2 - 1) * 2, a = Math.abs(x);   // the shaper sees -1..1; the gain before it halves the signal, so this covers -2..2
+    const x = ((i / (N - 1)) * 2 - 1) * SHAPER_RANGE, a = Math.abs(x);
     const y = a <= 0.8 ? a : 0.8 + 0.17 * Math.tanh((a - 0.8) / 0.17);   // leaves a little margin: never above 0.97
     c[i] = Math.sign(x) * y;
   }
   return c;
+}
+function makeCompressor(ctx) {
+  const c = ctx.createDynamicsCompressor();
+  c.threshold.value = LIMIT.threshold; c.knee.value = LIMIT.knee; c.ratio.value = LIMIT.ratio; c.attack.value = LIMIT.attack; c.release.value = LIMIT.release;
+  return c;
+}
+// A Web Audio compressor adds an automatic make-up gain that differs a little between browsers. Measure it once, on a quiet tone, and undo it,
+// so that quiet and normal material passes at exactly the level it came in.
+async function compressorTrim() {
+  try {
+    const sr = 44100, ctx = new OfflineAudioContext(1, sr / 4, sr), o = ctx.createOscillator(), g = ctx.createGain(), c = makeCompressor(ctx);
+    o.frequency.value = 220; g.gain.value = 0.05; o.connect(g); g.connect(c); c.connect(ctx.destination); o.start();
+    const d = (await ctx.startRendering()).getChannelData(0).slice(sr / 8);
+    let pk = 0; for (const v of d) pk = Math.max(pk, Math.abs(v));
+    return pk > 0.001 ? Math.min(1.5, Math.max(0.5, 0.05 / pk)) : 1;
+  } catch { return 1; }
 }
 let safe = null;
 function ensureSafeOutput() {
@@ -25,11 +45,14 @@ function ensureSafeOutput() {
   try {
     const ctx = getAudioContext(), dg = getSuperdoughAudioController().output.destinationGain;
     if (!dg) return null;
-    const pre = ctx.createGain(); pre.gain.value = 0.5;
+    const comp = makeCompressor(ctx), trim = ctx.createGain();
+    const pre = ctx.createGain(); pre.gain.value = 1 / SHAPER_RANGE;
+    comp.connect(trim); trim.connect(pre);
+    compressorTrim().then((t) => { trim.gain.value = t; });
     const shaper = ctx.createWaveShaper(); shaper.curve = softCurve(); shaper.oversample = '2x';
     const meter = ctx.createAnalyser(); meter.fftSize = 1024;
     shaper.connect(ctx.destination);
-    safe = { ctx, dg, pre, shaper, meter, buf: new Float32Array(meter.fftSize), on: null };
+    safe = { ctx, dg, comp, trim, pre, shaper, meter, buf: new Float32Array(meter.fftSize), on: null };
   } catch { safe = null; }
   return safe;
 }
@@ -41,7 +64,7 @@ function routeSafeOutput() {
   try {
     s.dg.disconnect();
     s.dg.connect(s.meter);                       // the meter always listens to the signal as Strudel makes it
-    if (on) s.dg.connect(s.pre); else s.dg.connect(s.ctx.destination);
+    if (on) s.dg.connect(s.comp); else s.dg.connect(s.ctx.destination);
     s.pre.disconnect(); if (on) s.pre.connect(s.shaper);
     s.on = on;
   } catch { /* leave the output as it was */ }
@@ -122,6 +145,12 @@ export function createEngine() {
       if (!repl) return;
       const seq = ++evalSeq;
       setStatus('ok', '');
+      // An orbit (mix bus) only exists once the first sound has played on it, and .duck("3") on a kick that hits before that logs
+      // "duck target orbit 3 does not exist". Create the orbits that the code ducks up front.
+      try {
+        const ctrl = getSuperdoughAudioController();
+        for (const m of code.matchAll(/\.duck\(\s*["'`]?([\d:\s]+)/g)) for (const n of m[1].split(/[:\s]+/).filter(Boolean)) ctrl.getOrbit(Number(n), [0, 1]);
+      } catch { /* the sound will still play; at worst the first hit is not ducked */ }
       await repl.evaluate(code, playing);
       if (seq === evalSeq && repl.state.evalError) setStatus('error', repl.state.evalError.message);
       else if (seq === evalSeq) setStatus(playing ? 'playing' : 'ready', '');

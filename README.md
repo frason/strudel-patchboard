@@ -1,6 +1,6 @@
 # Strudel Patchboard
 
-A patch system for sound. Wire modules on a page; a live panel shows the Strudel code the patch compiles to, and that code is what plays.
+**An unofficial visual editor for [Strudel](https://strudel.cc)** (not made or endorsed by the Strudel team). Wire modules together on a page; a live panel shows the Strudel code the patch compiles to, and that code is what plays.
 
 ```
 npm install
@@ -59,8 +59,10 @@ npm test         # evaluates every starter in real Strudel, checks graph rules, 
 - Everything dragged also works from the keyboard (Tab to a handle, then the arrow keys; Shift for bigger steps).
 
 ## Safe output (stops clipping)
-The app puts a soft limiter between Strudel and the speakers (Settings → Sound → Safe output, on by default). Up to 0.8 of full scale the
-signal is untouched; above that, peaks are rounded off smoothly and cannot pass 0.97, so a hot patch gets denser instead of crackling.
+The app puts a limiter between Strudel and the speakers (Settings → Sound → Safe output, on by default). It has two stages. A fast compressor
+starts at -2 dB and takes hot peaks down smoothly; behind it a soft clipper rounds off what is left, so the output cannot pass 0.97.
+Below about 0.8 of full scale the signal is untouched (the compressor's automatic make-up gain is measured once per browser and cancelled).
+A very hot patch, a stack of FM voices for example, therefore gets denser instead of crackling.
 A small "limiting" light by the transport shows when the sound went past full scale a moment ago (it reads "clipping" with Safe output off).
 It is part of this app's audio, not of the generated code, so it is not in the code panel and not there when the same code runs on strudel.cc.
 Turning the Output volume or a loud part down is still the better fix: the limiter only protects the speakers.
@@ -88,8 +90,13 @@ npm run build
 npx wrangler login                                   # opens a browser to sign in to Cloudflare
 npx wrangler pages deploy dist --project-name strudel-patchboard
 ```
-Or connect a Git repository in the Cloudflare dashboard (Workers & Pages → Create → Pages → Connect to Git) with build command
-`npm run build` and output directory `dist`.
+Or, better, connect the GitHub repository in the Cloudflare dashboard (Workers & Pages → Create → Pages → Connect to Git) so every push
+to `main` deploys itself: build command `npm run build`, output directory `dist`, and an environment variable `NODE_VERSION` = `22`
+(Vite 8 needs a recent Node).
+
+### A custom domain
+Pages project → Custom domains → Set up a custom domain. If the domain is registered with (or its nameservers point to) Cloudflare, the DNS
+record and the HTTPS certificate are added automatically. Add both the bare name and `www`, and a redirect from one to the other.
 
 Check the production build locally with `npm run build && npm run preview` (http://localhost:4173).
 

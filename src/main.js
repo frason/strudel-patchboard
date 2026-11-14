@@ -15,7 +15,7 @@ import { strudelFile, parseImport, b64 } from './io.js';
 import { importStrudel } from './importer.js';
 import { setHydraMode, prepareWindow, hydraNotes } from './hydra.js';
 import { LESSONS } from './starters.js';
-import { SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
+import { FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
 import { effectiveKey, makeNode, nodeById, wiresFrom, uid, validateShape, normalize, whyNot, clone } from './graph.js';
 
 // Link to this app's source code (the AGPL asks public copies to offer it). Fill in once the repository exists.
@@ -444,6 +444,39 @@ const hooks = {
     store.update((g) => { g.nodes = g.nodes.filter((x) => !set.has(x.id)); g.wires = g.wires.filter((w) => !set.has(w.from.node) && !set.has(w.to.node)); });
     toast(`Removed ${ids.length} modules`, [undoAction]);
   },
+  duplicateNodes(ids) {
+    const g0 = store.graph, picked = g0.nodes.filter((n) => ids.includes(n.id) && !MODULES[n.type].single);
+    if (!picked.length) return toast('Nothing to copy: that kind of module is only allowed once.');
+    const map = new Map(), copies = [];
+    for (const src of picked) { const c = JSON.parse(JSON.stringify(src)); c.id = uid('n'); c.x += 56; c.y += 56; map.set(src.id, c.id); copies.push(c); }
+    const wires = g0.wires.filter((w) => map.has(w.from.node) && map.has(w.to.node)).map((w) => ({ id: uid('w'), from: { node: map.get(w.from.node), port: w.from.port }, to: { node: map.get(w.to.node), port: w.to.port } }));
+    store.update((g) => { g.nodes.push(...copies); g.wires.push(...wires); }, { label: 'duplicate' });
+    board.select(copies.map((c) => c.id));
+    toast(`Duplicated ${copies.length} module${copies.length > 1 ? 's' : ''}`, [undoAction], 3500);
+  },
+  collapseNodes(ids, collapsed) {
+    store.update((g) => { for (const n of g.nodes) if (ids.includes(n.id)) { if (collapsed) n.collapsed = true; else delete n.collapsed; } }, { label: collapsed ? 'minimize' : 'expand' });
+  },
+  muteNodes(ids, muted) {
+    store.update((g) => { for (const n of g.nodes) if (ids.includes(n.id) && MUTE_KIND[n.type]) { if (muted) n.muted = true; else delete n.muted; } }, { label: muted ? 'mute' : 'unmute' });
+  },
+  alignNodes(ids, mode) {
+    const sel = store.graph.nodes.filter((n) => ids.includes(n.id));
+    if (sel.length < 2) return;
+    const edge = mode === 'left' ? Math.min(...sel.map((n) => n.x)) : Math.min(...sel.map((n) => n.y));
+    store.update((g) => { for (const n of g.nodes) if (ids.includes(n.id)) { if (mode === 'left') n.x = edge; else n.y = edge; } }, { label: 'align' });
+  },
+  applyFmPreset(id, presetId) {
+    const preset = FM_PRESETS.find((x) => x.id === presetId), def = MODULES.fm;
+    if (!preset) return;
+    store.update((g) => {
+      const n = nodeById(g, id);
+      for (const spec of def.params) n.params[spec.key] = spec.def;
+      Object.assign(n.params, preset.params);
+    }, { label: 'FM preset ' + preset.label });
+    toast(`FM preset: ${preset.label}`, [undoAction], 2500);
+  },
+  showHelp,
   moveNode(id, x, y) {
     store.update((g) => { const n = nodeById(g, id); n.x = x; n.y = y; }, { coalesce: 'move:' + id });
   },
@@ -632,7 +665,7 @@ function openSettings() {
     seg('safeOutput', 'Safe output', [[true, 'on'], [false, 'off']]),
     h('div', { class: 'menu-empty' }, 'Safe output softly rounds off peaks above about 0.8 so a loud patch does not crackle. It is part of this app, not of the code, so it is not in the code panel and is not there on strudel.cc: on, the board sounds a little different from the same code elsewhere only when a patch is very loud.'),
     h('div', { class: 'menu-empty' }, 'These only change how the board looks. The patch and the code are untouched.'),
-    h('div', { class: 'menu-empty about' }, 'Built on ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ' (AGPL-3.0).', SOURCE_URL ? [' ', h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code')] : null)));
+    h('div', { class: 'menu-empty about' }, 'An unofficial visual editor for ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ', not made or endorsed by the Strudel team. Built on Strudel (AGPL-3.0).', SOURCE_URL ? [' ', h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code')] : null)));
 }
 settingsBtn.addEventListener('click', openSettings);
 const applyPrefs = () => { app.classList.toggle('colourful', !!getPrefs().colourful); app.classList.toggle('desc-shown', getPrefs().descriptions === 'shown'); setTimeout(() => board.drawCables(), 0); };
@@ -750,6 +783,19 @@ function reportDialog(r, label, back) {
   showModal('What the import found', body);
 }
 let modalEl = null;
+// the long description of a module (its "more" sections) in a panel on the right, over the code column, so the module itself stays short
+let helpEl = null;
+function closeHelp() { helpEl?.remove(); helpEl = null; }
+function showHelp(type) {
+  const def = MODULES[type];
+  if (!def?.more) return;
+  closeHelp();
+  helpEl = h('aside', { class: 'help-drawer', role: 'dialog', 'aria-label': def.title + ' in depth' },
+    h('div', { class: 'help-head' }, h('b', {}, def.title + ' in depth'), h('button', { class: 'btn sm', type: 'button', onclick: closeHelp }, 'Close')),
+    h('div', { class: 'help-body' }, ...def.more.map(([hd, tx]) => h('section', {}, h('h4', {}, hd), h('p', {}, tx)))));
+  document.body.append(helpEl);
+  helpEl.querySelector('.help-body').focus?.();
+}
 function closeModal() { modalEl?.remove(); modalEl = null; }
 function showModal(title, body) {
   closeModal();
@@ -806,10 +852,11 @@ window.addEventListener('keydown', (e) => {
     else if (board.selection.length > 1) { e.preventDefault(); hooks.removeNodes(board.selection); }
     else if (board.selected) { e.preventDefault(); hooks.removeNode(board.selected); }
   }
+  if (mod && e.key.toLowerCase() === 'd' && board.selection.length > 1) { e.preventDefault(); hooks.duplicateNodes(board.selection); return; }
   if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); if (board.selection.length > 1) hooks.groupNodes(board.selection); return; }
   if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); board.selectAll(); return; }
   if (e.key === ' ') { e.preventDefault(); playBtn.click(); }
-  if (e.key === 'Escape') { closePop(); closeModal(); board.select(null); }
+  if (e.key === 'Escape') { closePop(); closeModal(); closeHelp(); board.select(null); }
 });
 window.addEventListener('beforeunload', () => store.flush());
 

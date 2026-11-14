@@ -4,6 +4,7 @@
 //   routes:  the four discs in a square. Drag from one disc to another (or to the note) to connect them; drag the dot on an arrow
 //            up or down to change how hard it shakes (down to 0 removes it); tap a dot to remove it; tap a disc to switch its feedback on or off.
 // Every handle also works from the keyboard (Tab to it, then the arrow keys), and a number grid under the routes picture does the same.
+import { FM_PRESETS } from './modules.js';
 const NS = 'http://www.w3.org/2000/svg';
 const W = 240;
 export const IDX = ['index', 'index2', 'index3', 'index4'];
@@ -18,6 +19,7 @@ const snapH = (v) => { const s = v < 2 ? 0.25 : v < 4 ? 0.5 : 1; return clamp(Ma
 const idx1 = (v) => clamp(Math.round(v * 10) / 10, 0, 16);
 const fb2 = (v) => clamp(Math.round(v * 100) / 100, 0, 1);
 
+const viewMemory = new Map();   // which tab (tune or routes) each FM module was showing, so a redraw of the module does not flip it back
 export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
   const paramsOf = () => (store.graph.nodes.find((x) => x.id === node.id) || node).params;
   const set = (k, v) => { if (paramsOf()[k] !== v) hooks.setParam(node.id, k, v); };
@@ -250,20 +252,33 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
   })();
 
   // ======================= tabs =======================
-  let view = 'tune';
+  let view = viewMemory.get(node.id) || 'tune';
   const tabs = h('div', { class: 'fm-tabs', role: 'tablist' },
     ...[['tune', 'tune'], ['routes', 'routes']].map(([v, label]) => h('button', { class: 'fm-tab' + (v === view ? ' on' : ''), role: 'tab', 'aria-selected': String(v === view), dataset: { v }, onclick: () => show(v) }, label)));
   tabs.addEventListener('pointerdown', (e) => e.stopPropagation());
-  const wrap = h('div', { class: 'fmwrap' }, tabs, tune.svg, routes.svg, grid.el);
+  // presets: pick one and every FM knob is set to it (all the others go back to their defaults first)
+  const pick = h('select', { class: 'sel fm-presets', 'aria-label': 'FM preset', title: 'Load a ready-made FM sound. It replaces the FM settings; the Instrument above keeps its own.' },
+    h('option', { value: '' }, 'Presets: pick a sound…'), ...FM_PRESETS.map((pr) => h('option', { value: pr.id, title: pr.tip }, pr.label)));
+  pick.addEventListener('pointerdown', (e) => e.stopPropagation());
+  pick.addEventListener('keydown', (e) => e.stopPropagation());
+  pick.addEventListener('change', () => { if (pick.value) hooks.applyFmPreset(node.id, pick.value); pick.value = ''; });
+  const legendTune = h('div', { class: 'fm-legend' }, 'Each disc is one modulator, the wave that shakes the one below it (or the note you hear at the bottom). ',
+    h('b', {}, 'Slide sideways'), ' for its pitch (harmonic): whole numbers sound musical, in-between ones sound like bells. ',
+    h('b', {}, 'Slide up or down'), ' for how hard it shakes (index). A dashed disc is off. The orange arc is feedback: the disc shaking itself.');
+  const legendRoutes = h('div', { class: 'fm-legend' }, 'An arrow means “this disc shakes that one”. The number on it, and the dot you drag up or down, is how hard (0 removes it). ',
+    'Drag from a disc onto another disc, or onto “note you hear”, to add an arrow. The ', h('b', { style: 'color:#ffb454' }, 'orange ring'),
+    ' on a disc is its feedback: it shakes itself. Tap a disc to switch it on or off. A dashed disc has nothing connected, so it is not in the sound.');
+  const wrap = h('div', { class: 'fmwrap' }, pick, tabs, tune.svg, routes.svg, grid.el, legendTune, legendRoutes);
   function show(v) {
-    view = v;
+    view = v; viewMemory.set(node.id, v);
     tune.svg.style.display = v === 'tune' ? '' : 'none';
     routes.svg.style.display = v === 'routes' ? '' : 'none';
     grid.el.style.display = v === 'routes' ? '' : 'none';
+    legendTune.style.display = v === 'tune' ? '' : 'none'; legendRoutes.style.display = v === 'routes' ? '' : 'none';
     tabs.querySelectorAll('.fm-tab').forEach((b) => { const on = b.dataset.v === v; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
     relayout?.();
   }
-  show('tune');
+  show(view);
   ctl.fmdiagram = { draw(p) { tune.draw(p); routes.draw(p); grid.draw(p); } };
   ctl.fmdiagram.draw(node.params);
   return wrap;

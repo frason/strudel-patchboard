@@ -237,7 +237,8 @@ export function compile(g) {
           knobCall(n, def.params[2], 'duckattack', depth + 1, { say: `duckattack(${fmt(p.attack)}) is how long, in seconds, the ducked sound takes to swell back.` }),
         ];
         const leadCall = [[S(`.orbit(${orbit})`, { ...m, role: 'knob', key: 'orbit', note: `orbit(${orbit}) puts this sound on mix bus ${orbit}, the one the triggers duck.` })]];
-        const items = [...triggers.map((t) => chain(t, trigCalls, depth + 1, false)), ...leads.map((l) => chain(l, leadCall, depth + 1, false))];
+        // the ducked sounds come first: an orbit only exists once something has played on it, and a trigger that fires before that logs "duck target orbit N does not exist"
+        const items = [...leads.map((l) => chain(l, leadCall, depth + 1, false)), ...triggers.map((t) => chain(t, trigCalls, depth + 1, false))];
         const parts = [S('stack(', { ...m, role: 'fn', note: 'stack(a, b) plays the trigger and ducked sounds together; each trigger dips the sounds on the ducked orbit.' })];
         items.forEach((it, i) => { parts.push(NL(depth + 1), ...it); if (i < items.length - 1) parts.push(S(',', m)); });
         parts.push(NL(depth), S(')', m));

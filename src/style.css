@@ -57,7 +57,7 @@ button { font: inherit; color: inherit; }
 .cable-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
 .wire:hover .cable, .wire.selwire .cable { stroke-width: 8; filter: drop-shadow(0 0 6px var(--t)); }
 .wire.lifted { opacity: .25; }
-.cable.ghost { stroke: var(--t, #fff); stroke-dasharray: 2 10; stroke-width: 5; opacity: .9; }
+.cable.ghost { stroke: var(--t, #fff); stroke-dasharray: 2 10; stroke-width: 4; opacity: .9; }
 .ghost[data-type=notes] { --t: var(--notes); } .ghost[data-type=trigger] { --t: var(--trigger); } .ghost[data-type=number] { --t: var(--number); } .ghost[data-type=sound] { --t: var(--sound); }
 .pulse { fill: #fff; stroke: var(--t); stroke-width: 3; filter: drop-shadow(0 0 5px var(--t)); }
 .pulse[data-type=notes] { --t: var(--notes); } .pulse[data-type=trigger] { --t: var(--trigger); } .pulse[data-type=number] { --t: var(--number); } .pulse[data-type=sound] { --t: var(--sound); }
@@ -97,7 +97,7 @@ button { font: inherit; color: inherit; }
 .jack:not([data-type]) { --t: #6b7886; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 4px 6px; }
-.kcell { position: relative; width: 56px; display: flex; flex-direction: column; align-items: center; padding: 3px 0 2px; border-radius: 8px; }
+.kcell { position: relative; min-width: 56px; width: max-content; display: flex; flex-direction: column; align-items: center; padding: 3px 0 2px; border-radius: 8px; }
 .kcell.hl { background: #ffffff18; outline: 1px solid var(--cat); }
 .kcell.is-default .knob-svg { opacity: .55; }
 .kcell.is-default .k-label { color: #6c7886; }
@@ -112,7 +112,7 @@ button { font: inherit; color: inherit; }
 .knob:hover .k-cap, .knob.turning .k-cap { fill: #44515e; }
 .k-ind { stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
 .k-val { font: 11px var(--mono); color: var(--text); margin-top: -2px; }
-.k-label { font: 10.5px var(--mono); color: var(--c-prop); }
+.k-label { font: 10.5px var(--mono); color: var(--c-prop); white-space: nowrap; }
 
 .field { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dim); }
 .field > span { width: 42px; flex: none; }
@@ -284,7 +284,7 @@ button { font: inherit; color: inherit; }
 .node[data-type=drums] .field { min-width: 0; grid-column: 1 / -1; }
 .node[data-type=drums] .controls { grid-column: 1 / -1; }
 .node[data-type=drums] .blurb { grid-column: 1 / -1; max-width: none; width: 0; min-width: 100%; }
-.node[data-type=drums] .kcell { width: 48px; }
+.node[data-type=drums] .kcell { min-width: 48px; width: 48px; }
 .hintline { white-space: nowrap; }
 
 .btn.on { border-color: #3f8a52; color: #cfe8d8; }
@@ -399,10 +399,12 @@ button { font: inherit; color: inherit; }
 #app.colourful { --accent: #f2b134; }
 /* calm: every module uses one warm accent; cables and jacks keep their type colours */
 #app:not(.colourful) .node { --cat: var(--accent); }
+/* in the plain look only the selected module has the coloured stripe on its title bar; the others are grey */
+#app:not(.colourful) .node:not(.selected) .n-head { border-top-color: #4a5563; }
 #app:not(.colourful) .pal-item .pal-dot { background: #6b7886; }
 #app:not(.colourful) .pal-item .pal-dot[data-type] { background: var(--t, #6b7886); }
-.cable { stroke-width: 4.5; filter: drop-shadow(0 2px 1.5px rgba(0,0,0,.45)); }
-.wire:hover .cable, .wire.selwire .cable { stroke-width: 6.5; }
+.cable { stroke-width: 3; filter: drop-shadow(0 2px 1.5px rgba(0,0,0,.45)); }
+.wire:hover .cable, .wire.selwire .cable { stroke-width: 4.5; }
 
 .marquee { position: absolute; border: 1px dashed var(--accent); background: #f3c9a01a; z-index: 6; pointer-events: none; }
 .minimap { position: absolute; left: 10px; bottom: 10px; z-index: 5; width: 190px; height: 120px; border: 1px solid #3a4756; border-radius: 8px; cursor: pointer; }
@@ -424,8 +426,9 @@ button { font: inherit; color: inherit; }
 .gframe.collapsed .g-head { height: 100%; }
 .gframe.live { box-shadow: 0 0 0 2px var(--accent), 0 0 22px var(--accent); }
 .node.gh { display: none; }
-.selbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; display: none; align-items: center; gap: 8px; background: var(--panel); border: 1px solid #44525f; border-radius: 10px; padding: 5px 10px; font-size: 12px; box-shadow: 0 8px 24px #0009; }
+.selbar { flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px); position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; display: none; align-items: center; gap: 8px; background: var(--panel); border: 1px solid #44525f; border-radius: 10px; padding: 5px 10px; font-size: 12px; box-shadow: 0 8px 24px #0009; }
 
+.selbar .sel-count { white-space: nowrap; }
 .about a { color: var(--accent); }
 
 .kcell.wide { width: 100%; align-items: stretch; padding: 6px 0 2px; }
@@ -724,3 +727,26 @@ html, body { overscroll-behavior: none; }
 .ip-pop.wide > * { flex: none; }
 .ip-pop.wide > .ip-grid { flex: 1 1 auto; min-height: 0; }
 @media (max-width: 900px) { .ip-close { display: inline-flex; } }
+
+.fm-presets { width: 100%; margin-bottom: 6px; }
+.fm-legend { font-size: 11px; line-height: 1.45; color: #9aa7b5; margin: 6px 2px 2px; }
+.fm-legend b { color: #cfd8e1; font-weight: 600; }
+
+.blurb-readmore { align-self: flex-start; }
+
+.help-drawer { position: fixed; z-index: 55; top: 52px; right: 0; bottom: 0; width: min(440px, 100%); display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid #44525f; box-shadow: -12px 0 32px #0008; }
+.help-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #2c3641; }
+.help-body { overflow-y: auto; padding: 12px 16px 24px; font-size: 13px; line-height: 1.55; color: #c3ccd6; }
+.help-body .help-lead { margin: 0 0 12px; color: #9aa7b5; }
+.help-body h4 { margin: 16px 0 3px; font-size: 12px; letter-spacing: .03em; color: #e6ebf0; }
+.help-body p { margin: 0; }
+@media (max-width: 900px) { .help-drawer { top: 0; bottom: calc(56px + env(safe-area-inset-bottom)); width: 100%; } }
+
+.wdel { display: none; cursor: pointer; pointer-events: all; }
+.wire.selwire .wdel { display: block; }
+.wire.selwire .wlabel { display: none; }
+.wdel circle, .wdel path { transform: scale(var(--wk, 1)); }
+.wdel circle { fill: #2a2f36; stroke: var(--t, #888); stroke-width: 2; }
+.wdel path { stroke: #e6ebf0; stroke-width: 2; stroke-linecap: round; fill: none; }
+.wdel:hover circle { fill: #ef5b5b; stroke: #ef5b5b; }
+@media (pointer: coarse) { .wdel circle { r: 18; } .wdel path { transform: scale(calc(var(--wk, 1) * 1.3)); } }
