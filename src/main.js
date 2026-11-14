@@ -15,9 +15,9 @@ import { strudelFile, parseImport, b64 } from './io.js';
 import { importStrudel } from './importer.js';
 import { setHydraMode, prepareWindow, hydraNotes } from './hydra.js';
 import { LESSONS } from './starters.js';
-import { getAI, setAI, clearAI, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, STARTER_SYSTEM, REVIEW_SYSTEM } from './ai.js';
-import { MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
-import { effectiveKey, makeNode, nodeById, wiresFrom, uid, validateShape, normalize, whyNot, clone } from './graph.js';
+import { getAI, setAI, clearAI, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
+import { SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
+import { effectiveKey, makeNode, nodeById, wiresFrom, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
 
 // Link to this app's source code (the AGPL asks public copies to offer it). Fill in once the repository exists.
 const SOURCE_URL = 'https://github.com/frason/strudel-patchboard';
@@ -45,8 +45,33 @@ const playBtn = h('button', { class: 'play-btn', id: 'play', title: 'Start (Spac
 function setPlayUI(on) { playBtn.replaceChildren(icon(on ? 'stop' : 'play', 20)); playBtn.classList.toggle('on', on); playBtn.title = on ? 'Stop (Space)' : 'Start (Space)'; playBtn.setAttribute('aria-label', on ? 'Stop' : 'Start'); }
 setPlayUI(false);
 const statusEl = h('span', { class: 'status', id: 'status' }, 'ready');
+const scopeCv = h('canvas', { class: 'out-scope', id: 'out-scope', width: 280, height: 64, title: 'The sound coming out, live (before the limiter). A pure tone is a smooth wave; flat tops mean the sound is too loud and is clipping.' });
 const overEl = h('span', { class: 'over', id: 'over', title: 'The sound went past full volume a moment ago: turn the Output volume or a loud part down', hidden: true }, 'over');
 const busyEl = h('span', { class: 'over busy', id: 'busy', title: 'The computer could not keep up and the sound broke up a moment ago. Fewer voices will fix it: shorter release times, a smaller reverb room, fewer layers, or turn Animations off in Settings.', hidden: true }, 'overloaded');
+// ---- live output waveform in the top bar ----
+const scopeBuf = new Float32Array(1024);
+let scopeRaf = null;
+function drawOutScope() {
+  scopeRaf = null;
+  const ctx = scopeCv.getContext('2d'), W = scopeCv.width, H = scopeCv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = '#2a3440'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+  const live = engine.playing && engine.waveform(scopeBuf);
+  if (live) {
+    let s0 = 0; for (let i = 1; i < 512; i++) if (scopeBuf[i - 1] <= 0 && scopeBuf[i] > 0) { s0 = i; break; }   // start on a rising zero crossing so a steady tone holds still
+    let pk = 0; for (let i = 0; i < scopeBuf.length; i++) pk = Math.max(pk, Math.abs(scopeBuf[i]));
+    ctx.strokeStyle = pk > 1 ? '#ff6b6b' : '#f3c9a0'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
+    for (let x = 0; x < W; x++) { const v = Math.max(-1.2, Math.min(1.2, scopeBuf[s0 + Math.floor((x * 512) / W)])); const y = H / 2 - v * (H / 2 - 5); if (x) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    ctx.stroke();
+  }
+  if (live || engine.playing) scopeRaf = requestAnimationFrame(drawOutScope);
+}
+const syncOutScope = () => {
+  const on = getPrefs().outScope !== false && getPrefs().animations !== false;
+  scopeCv.style.display = getPrefs().outScope === false ? 'none' : '';
+  if (on && !scopeRaf) scopeRaf = requestAnimationFrame(drawOutScope);
+  if (!on) { cancelAnimationFrame(scopeRaf); scopeRaf = null; scopeCv.getContext('2d').clearRect(0, 0, scopeCv.width, scopeCv.height); }
+};
 let lastOver = 0, lastBusy = 0, seenUnder = null;
 setInterval(() => {
   if (engine.playing && engine.peak() > 1.0) lastOver = Date.now();
@@ -90,7 +115,7 @@ iconify(learnBtn, 'book', 'Learning path'); iconify(savesBtn, 'folder', 'Saves a
 iconify(addBtn, 'plus', 'Add a module (Ctrl/⌘ K)'); iconify(codeBtn, 'code', 'Show or hide the Strudel code (Ctrl/⌘ \\)'); iconify(settingsBtn, 'sliders', 'Display settings');
 const top = h('header', { class: 'topbar' },
   h('div', { class: 'brand' }, h('b', {}, 'Strudel'), ' Patchboard'),
-  h('div', { class: 'transport' }, playBtn, bpmBox, beatsBox, statusEl, overEl, busyEl),
+  h('div', { class: 'transport' }, playBtn, bpmBox, beatsBox, scopeCv, statusEl, overEl, busyEl),
   h('div', { class: 'toolbar' }, addBtn, newBtn, undoBtn, redoBtn, learnBtn, savesBtn, exportBtn, importBtn, aiBtn, settingsBtn, codeBtn), fileInput);
 
 const paletteEl = h('aside', { class: 'palette' }, h('div', { class: 'pal-head' },
@@ -326,7 +351,30 @@ const hooks = {
     board.select(node.id);
     board.reveal(node.id);   // in the phone flow view the new module opens and scrolls into view
   },
+  cableHover(cx, cy, subject) { return board.cableHover(cx, cy, subject); },
+  // Drop a module (new, or one already on the board) into a cable: the cable's start plugs into it and it plugs into the cable's end. One undo step.
+  insertOnWire(wireId, subject, cx, cy) {
+    let done = null;
+    store.update((g) => {
+      const w = g.wires.find((x) => x.id === wireId);
+      if (!w) return;
+      let node;
+      if (subject.nodeId) node = nodeById(g, subject.nodeId);
+      else { const p = cx === undefined ? { x: 0, y: 0 } : board.toWorld(cx, cy); node = makeNode(subject.type, Math.round((p.x - 90) / 24) * 24, Math.round((p.y - 20) / 24) * 24); }
+      const plan = node && insertPlan(g, w, node);
+      if (!plan) return;
+      if (!subject.nodeId) g.nodes.push(node);
+      g.wires = g.wires.filter((x) => x.id !== w.id);
+      g.wires.push({ id: uid('w'), from: w.from, to: { node: node.id, port: plan.inPort } }, { id: uid('w'), from: { node: node.id, port: 'out' }, to: w.to });
+      done = node;
+    }, { label: 'drop into cable' });
+    if (done) { board.select(done.id); board.reveal(done.id); toast(`${MODULES[done.type].title} is now in the cable`, [undoAction], 3500); }
+    return !!done;
+  },
   dropFromPalette(type, cx, cy) {
+    const target = cx === undefined ? null : board.insertHighlight;
+    board.cableHover(null, null, {});
+    if (target && hooks.insertOnWire(target, { type }, cx, cy)) return;
     if (cx === undefined) hooks.addNode(type);
     else board.placeFromPalette(type, cx, cy);
   },
@@ -524,7 +572,11 @@ const hooks = {
       n.params.steps = tpl.degrees.length;
       n.params.mode = tpl.degrees.length > 8 ? 'pace' : 'steps';
       if (tpl.octave) n.params.octave = tpl.octave;
-      n.params.cells = tpl.degrees.map((d, i) => ({ n: null, d, len: tpl.len[i] || 1, vel: 1 }));
+      // a melody in "off: note names" mode has no scale to count steps in, so the tune is written out as notes of C major
+      const noScale = !effectiveKey(g, n);
+      const oct = n.params.octave || 3;
+      const note = (d) => { const semi = SCALES.major[((d % 7) + 7) % 7] + 12 * Math.floor(d / 7); return NOTE_NAMES[semi % 12] + (oct + Math.floor(semi / 12)); };
+      n.params.cells = tpl.degrees.map((d, i) => (noScale ? { n: d === null ? null : [note(d)], d: null, len: tpl.len[i] || 1, vel: 1 } : { n: null, d, len: tpl.len[i] || 1, vel: 1 }));
     }, { label: 'melody ' + tpl.label });
     toast(`Melody: ${tpl.label}`, [undoAction], 2500);
   },
@@ -659,6 +711,7 @@ engine.onHap(({ locations, delayMs, durMs }) => {
 
 // ---------- engine / transport ----------
 engine.onStatus((s) => {
+  if (s.state === 'playing') syncOutScope();
   statusEl.textContent = { idle: 'ready', loading: s.message, ok: 'ok', ready: 'stopped', playing: 'playing', error: 'error: ' + s.message, warn: s.message }[s.state] || s.state;
   statusEl.className = 'status ' + s.state;
   setPlayUI(engine.playing);
@@ -722,6 +775,7 @@ function openSettings() {
     seg('minimap', 'Board minimap', [[true, 'show'], [false, 'hide']]),
     seg('descriptions', 'Module descriptions', [['folded', 'fold away'], ['shown', 'always show']]),
     seg('jackHelp', 'Socket help (?)', [[true, 'show'], [false, 'hide']]),
+    seg('outScope', 'Output waveform', [[true, 'show'], [false, 'hide']]),
     seg('animations', 'Animations', [[true, 'on'], [false, 'off']]),
     h('div', { class: 'menu-empty' }, 'Off stops the flashing steps, cable pulses, playheads and the live drawing in Piano Roll and Scope, which saves memory and processor time on a big patch. The sound is not affected.'),
     h('div', { class: 'menu-h' }, 'Sound'),
@@ -731,7 +785,7 @@ function openSettings() {
     h('div', { class: 'menu-empty about' }, 'An unofficial visual editor for ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ', not made or endorsed by the Strudel team. Built on Strudel (AGPL-3.0).', SOURCE_URL ? [' ', h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code')] : null)));
 }
 settingsBtn.addEventListener('click', openSettings);
-const applyPrefs = () => { app.classList.toggle('colourful', !!getPrefs().colourful); app.classList.toggle('desc-shown', getPrefs().descriptions === 'shown'); app.classList.toggle('no-anim', getPrefs().animations === false); app.classList.toggle('jack-help', getPrefs().jackHelp !== false); board.clearPulses?.(); views?.dirty?.(); setTimeout(() => board.drawCables(), 0); };
+const applyPrefs = () => { syncOutScope(); app.classList.toggle('colourful', !!getPrefs().colourful); app.classList.toggle('desc-shown', getPrefs().descriptions === 'shown'); app.classList.toggle('no-anim', getPrefs().animations === false); app.classList.toggle('jack-help', getPrefs().jackHelp !== false); board.clearPulses?.(); views?.dirty?.(); setTimeout(() => board.drawCables(), 0); };
 onPrefs(applyPrefs);
 applyPrefs();
 
@@ -838,7 +892,14 @@ function reportDialog(r, label, back) {
     : null;
   const notes = rep.notes.length ? h('div', { class: 'imp-notes' }, rep.notes.map((n) => h('div', {}, '• ' + n))) : null;
   const go = h('button', { class: 'btn', id: 'import-go', onclick: () => { closeModal(); loadImported(r.graph, label); } }, rep.skipped.length ? 'Import what I can' : 'Import');
+  const note = aiNote; aiNote = null;
+  const still = (note?.left || []).filter((x) => !/cannot read this/.test(x));
+  const aiBox = note && (note.plan || note.limits || still.length) ? h('div', { class: 'ai-note' },
+    note.plan ? h('div', {}, h('b', {}, 'The AI\'s plan: '), note.plan) : null,
+    note.limits ? h('div', {}, h('b', {}, 'What it could not do: '), note.limits) : null,
+    still.length ? h('div', { class: 'ai-left' }, h('b', {}, 'Still not right after a rewrite: '), still.join(' ')) : null) : null;
   const body = h('div', {},
+    aiBox,
     h('p', { class: 'imp-sum' }, r.empty ? 'Nothing in this code could be turned into modules.' : `Built ${r.graph.nodes.filter((n) => n.type !== 'output').length} modules from ${rep.done.length} pattern${rep.done.length === 1 ? '' : 's'}.`, rep.skipped.length ? ` ${rep.skipped.length} part${rep.skipped.length === 1 ? '' : 's'} could not be shown as modules:` : ' Everything was converted.'),
     list, notes,
     h('p', { class: 'imp-hint' }, 'Skipped parts are left out, not guessed. Importing replaces the board (Undo brings it back).'),
@@ -911,6 +972,14 @@ function openAI(view) {
   const status = h('div', { class: 'ai-status', id: 'ai-status', 'aria-live': 'polite' });
   const buttons = [];
   const busy = (on, text = '') => { buttons.forEach((b) => { b.disabled = on; }); status.textContent = text; };
+  const refineBox = noKeys(h('textarea', { class: 'imp-area ai-desc', id: 'ai-refine-text', rows: 2, spellcheck: 'false', placeholder: 'Change what is on the board, e.g. "make the hats more syncopated", "bigger, slower swell", "darker bass"' }));
+  const refine = h('button', { class: 'btn', id: 'ai-refine', onclick: async () => {
+    const q = refineBox.value.trim();
+    if (!q) return toast('Say what to change first.', [], 3000);
+    if (!store.graph.nodes.length) return toast('The board is empty: make a starter first.', [], 4000);
+    busy(true, 'Changing your patch…');
+    try { await aiRefine(q, (t) => busy(true, t)); } catch (e) { busy(false, e.message); }
+  } }, 'Change my patch');
   const make = h('button', { class: 'btn', id: 'ai-make', onclick: async () => {
     const q = desc.value.trim();
     if (!q) return toast('Describe the song first.', [], 3000);
@@ -922,10 +991,13 @@ function openAI(view) {
     busy(true, 'Listening to your patch…');
     try { await aiReview(); } catch (e) { busy(false, e.message); }
   } }, 'Review my patch');
-  buttons.push(make, review);
+  buttons.push(make, review, refine);
   showModal('AI helper', h('div', { class: 'ai-box' },
     h('p', { class: 'imp-hint' }, 'Make a starter from a description, or get plain-language feedback on the patch on the board. The AI writes Strudel code and it comes in through Import, so you see what was understood before anything changes (Undo brings your board back).'),
     desc, h('div', { class: 'modal-btns' }, make),
+    h('hr', { class: 'ai-hr' }),
+    h('p', { class: 'imp-hint' }, 'Already have something on the board? Ask for a change and the AI rewrites the patch with it.'),
+    refineBox, h('div', { class: 'modal-btns' }, refine),
     h('hr', { class: 'ai-hr' }),
     h('p', { class: 'imp-hint' }, 'Review sends the code of your patch, any warnings, and whether it clipped or overloaded.'),
     h('div', { class: 'modal-btns' }, review, h('button', { class: 'btn ghost', onclick: () => openAI('key') }, 'Key and model'), h('button', { class: 'btn ghost', onclick: closeModal }, 'Close')),
@@ -950,22 +1022,35 @@ function aiKeyDialog() {
       h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'))));
   setTimeout(() => key.focus(), 0);
 }
-async function aiStarter(desc, say) {
-  const sounds = new Set(soundsFor(''));
-  let code = extractCode(await askAI({ system: STARTER_SYSTEM, user: desc }));
-  if (!code) throw new Error('The answer had no code in it. Try again, or describe it differently.');
-  let r = importStrudel(code, { sounds });
-  if (r.error || r.report.skipped.length) {   // one retry, telling it exactly what could not be read
-    say('Fixing parts the editor could not read…');
-    const why = r.error ? r.error : r.report.skipped.map((s) => `line ${s.line}: ${s.reason || s.text}`).join('\n');
+// One attempt = the AI's reply, read by the importer, plus everything that is wrong with it (what could not be read, the editor's own warnings, and the checks in ai.js)
+function judgeAttempt(reply, desc) {
+  const p = parseReply(reply);
+  if (!p.code) return { ...p, problems: ['The reply had no code block.'], r: null };
+  const r = importStrudel(p.code, { sounds: new Set(soundsFor('')) });
+  const problems = lintStarter(p.code, desc);
+  if (r.error) problems.push(r.error);
+  else {
+    r.report.skipped.forEach((s) => problems.push(`line ${s.line}: ${s.reason || s.text} (the editor cannot read this)`));
+    try { compile(r.graph).issues.forEach((i) => problems.push(i.msg)); } catch { /* the import dialog will say */ }
+  }
+  return { ...p, problems, r };
+}
+let aiNote = null;   // the AI's plan and limits, shown at the top of the import dialog
+async function aiGenerate({ system, user, desc, say }) {
+  let a = judgeAttempt(await askAI({ system, user, maxTokens: 4000 }), desc);
+  if (a.problems.length) {   // one rewrite, with every problem spelled out
+    say('Improving it (' + a.problems.length + (a.problems.length === 1 ? ' problem' : ' problems') + ' found)…');
     try {
-      const again = extractCode(await askAI({ system: STARTER_SYSTEM, user: `${desc}\n\nYour earlier attempt:\n${code}\n\nThe editor could not read these parts:\n${why}\nRewrite the whole patch using only what is allowed.` }));
-      const r2 = again && importStrudel(again, { sounds });
-      if (r2 && !r2.error && (r.error || r2.report.skipped.length < r.report.skipped.length)) code = again;
+      const b = judgeAttempt(await askAI({ system, user: `${user}\n\nYour earlier attempt:\n\`\`\`js\n${a.code}\n\`\`\`\n\nProblems with it:\n- ${a.problems.join('\n- ')}\n\nFix every one of them and return the whole patch in the same reply shape.`, maxTokens: 4000 }), desc);
+      if (b.code && b.problems.length <= a.problems.length) a = b;
     } catch { /* keep the first attempt: the import dialog lists what was left out */ }
   }
-  importText(code, 'AI starter', () => openAI());
+  if (!a.code) throw new Error('The answer had no code in it. Try again, or describe it differently.');
+  aiNote = { plan: a.plan, limits: a.limits, left: a.problems };
+  importText(a.code, 'AI patch', () => openAI());
 }
+const aiStarter = (desc, say) => aiGenerate({ system: STARTER_SYSTEM, user: desc, desc, say });
+const aiRefine = (request, say) => aiGenerate({ system: REFINE_SYSTEM, user: `Current patch:\n\`\`\`js\n${current.code}\n\`\`\`\n\nChange requested: ${request}`, desc: request, say });
 async function aiReview() {
   const measured = [];
   if (Date.now() - lastOver < 8000) measured.push(engine.limiterOn() ? 'the sound reached full volume and the limiter had to work' : 'the sound clipped');
@@ -983,6 +1068,13 @@ async function aiReview() {
 }
 
 // ---------- keyboard ----------
+let spaceTimer = null;
+window.addEventListener('keyup', (e) => {
+  if (e.key !== ' ' || board.tool !== 'select') return;
+  if (spaceTimer) { clearTimeout(spaceTimer); spaceTimer = null; if (!e.target.closest?.('input, textarea, select, [contenteditable]')) playBtn.click(); }   // a quick tap: play or stop
+  else board.holdHand(false);                                                                                                                                  // it was held: back to the Select tool
+});
+window.addEventListener('blur', () => { clearTimeout(spaceTimer); spaceTimer = null; board.holdHand(false); });
 window.addEventListener('keydown', (e) => {
   const typing = e.target.closest?.('input, textarea, select, [contenteditable]');
   const mod = e.metaKey || e.ctrlKey;
@@ -999,7 +1091,16 @@ window.addEventListener('keydown', (e) => {
   if (mod && e.key.toLowerCase() === 'd' && board.selection.length > 1) { e.preventDefault(); hooks.duplicateNodes(board.selection); return; }
   if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); if (board.selection.length > 1) hooks.groupNodes(board.selection); return; }
   if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); board.selectAll(); return; }
-  if (e.key === ' ') { e.preventDefault(); playBtn.click(); }
+  if (!mod && !e.altKey && (e.key === 'v' || e.key === 'V' || e.key === 'h' || e.key === 'H')) {   // V: select tool (drag empty canvas to box-select); H: hand tool (drag to move the canvas)
+    const sel = e.key.toLowerCase() === 'v';
+    if (board.tool !== (sel ? 'select' : 'hand')) { board.setTool(sel ? 'select' : 'hand'); toast(sel ? 'Select tool: drag on empty canvas to box-select. H for the hand, or hold Space.' : 'Hand tool: drag the canvas to move it. V to select.', [], 2600); }
+    return;
+  }
+  if (e.key === ' ') {
+    e.preventDefault();
+    if (board.tool === 'select') { if (!e.repeat && !spaceTimer) spaceTimer = setTimeout(() => { spaceTimer = null; board.holdHand(true); }, 220); return; }   // in the Select tool a quick tap still plays; holding Space is the hand
+    if (!e.repeat) playBtn.click();
+  }
   if (e.key === 'Escape') { closePop(); closeModal(); closeHelp(); closeIntro(); board.select(null); }
 });
 window.addEventListener('beforeunload', () => store.flush());

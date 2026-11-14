@@ -192,3 +192,20 @@ export function legalTargets(g, fromNode) {
 export function legalSources(g, toNode, toPort) {
   return g.nodes.filter((n) => n.id !== toNode && MODULES[n.type].out && !whyNot(g, n.id, toNode, toPort)).map((n) => n.id);
 }
+
+// Can this module be dropped into this cable? The module needs an input that takes what the cable carries, and an output the cable's end accepts.
+// Returns { inPort } (the input to plug the cable's start into) or null. The module must not be wired to anything yet.
+export function insertPlan(g, wire, node) {
+  if (!wire || !node || !MODULES[node.type]?.out) return null;
+  if (wire.from.node === node.id || wire.to.node === node.id) return null;
+  if (MODULES[node.type].single && g.nodes.some((n) => n.type === node.type && n.id !== node.id)) return null;
+  if (g.wires.some((w) => w.from.node === node.id || w.to.node === node.id)) return null;
+  const base = { ...g, nodes: g.nodes.some((n) => n.id === node.id) ? g.nodes : [...g.nodes, node], wires: g.wires.filter((w) => w.id !== wire.id) };
+  for (const p of portsOf(node)) {
+    if (p.dir !== 'in' || p.param) continue;
+    if (whyNot(base, wire.from.node, node.id, p.id)) continue;
+    const mid = { ...base, wires: [...base.wires, { id: 'tmp-insert', from: wire.from, to: { node: node.id, port: p.id } }] };
+    if (!whyNot(mid, node.id, wire.to.node, wire.to.port)) return { inPort: p.id };
+  }
+  return null;
+}

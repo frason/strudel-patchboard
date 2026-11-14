@@ -17,6 +17,8 @@ const el = (tag, attrs = {}, ...kids) => { const e = document.createElementNS(NS
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const snapH = (v) => { const s = v < 2 ? 0.25 : v < 4 ? 0.5 : 1; return clamp(Math.round(v / s) * s, 0.25, 16); };
 const idx1 = (v) => clamp(Math.round(v * 10) / 10, 0, 16);
+// Dragging a disc changes the index on a cubic curve: fine steps in the musical range (0 to 3), faster only past that. 125 pixels is the whole 0 to 16.
+const dragIndex = (start, dy) => idx1(16 * clamp(Math.cbrt(Math.max(0, start) / 16) + dy * 0.008, 0, 1) ** 3);
 const fb2 = (v) => clamp(Math.round(v * 100) / 100, 0, 1);
 
 const viewMemory = new Map();   // which tab (tune or routes) each FM module was showing, so a redraw of the module does not flip it back
@@ -84,7 +86,7 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
         const p = paramsOf(); hint.textContent = `modulator ${i}: harmonic ×${p[HARM[i - 1]]} · index ${(+p[IDX[i - 1]]).toFixed(1)}`;
       }, ({ moved, start }) => { hint.textContent = HINT; if (!moved && !(outOf(start, i) > 0) && !(start[IDX[i - 1]] > 0)) set(IDX[i - 1], 4); });
       drag(svg, hit, ({ dy, start }) => { set(FB[i - 1], fb2(start[FB[i - 1]] + dy / 40)); hint.textContent = `feedback ${i}: ${paramsOf()[FB[i - 1]].toFixed(2)}`; }, () => { hint.textContent = HINT; });
-      drag(svg, ihit, ({ dy, start }) => { set(IDX[i - 1], idx1(start[IDX[i - 1]] + dy * 0.4)); hint.textContent = `index ${i}: ${(+paramsOf()[IDX[i - 1]]).toFixed(1)}`; }, ({ moved, start }) => { hint.textContent = HINT; if (!moved && !(start[IDX[i - 1]] > 0)) set(IDX[i - 1], 4); });
+      drag(svg, ihit, ({ dy, start }) => { set(IDX[i - 1], dragIndex(start[IDX[i - 1]], dy)); const v = +paramsOf()[IDX[i - 1]]; hint.textContent = `index ${i}: ${v.toFixed(1)}${v > 6 ? ' · very bright, harsh' : v > 3 ? ' · bright' : ''}`; }, ({ moved, start }) => { hint.textContent = HINT; if (!moved && !(start[IDX[i - 1]] > 0)) set(IDX[i - 1], 1.5); });
       keys(circ, `Modulator ${i}. Up and down change its index, left and right its harmonic`, ([dx, dy], shift) => {
         const p = paramsOf();
         if (dy) set(IDX[i - 1], idx1(p[IDX[i - 1]] + dy * (shift ? 2 : 0.5)));

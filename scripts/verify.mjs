@@ -353,7 +353,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const g = chainOf(N('sample', { name: 'bd' }), [
     N('vibrato', { rate: 6, depth: 1 }), N('ring', { mix: 0.4, freq: 300 }), N('vowel', { vowel: 'ae' }), N('djf', { amount: 0.3 }),
     N('leslie', { wet: 0.8, rate: 5, size: 0.3 }), N('lofi', { coarse: 4, squiz: 2 }), N('distortion', { amount: 2, shape: 0.4 }),
-    N('pitchenv', { amount: -12, attack: 0.02, decay: 0.3 }), N('fm', { index: 5, harm: 2, decay: 0.4 }),
+    N('pitchenv', { amount: -12, attack: 0.02, decay: 0.3 }), N('fm', { index: 5, harm: 2, decay: 0.45 }),
     N('filter', { type: 'lpf', cutoff: 500, ftype: 'ladder', env: 4, fa: 0.02, fd: 0.2, fs: 0.1 }),
   ]);
   const r = compile(g);
@@ -363,7 +363,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
     const ev = (await evaluate(r.code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
     v = ev[0]?.value || {};
   } catch (e) { check('all new effects evaluate: ' + e.message, false); }
-  const want = { vib: 6, vibmod: 1, ring: 0.4, ringf: 300, vowel: 'ae', djf: 0.3, leslie: 0.8, lrate: 5, lsize: 0.3, coarse: 4, squiz: 2, shape: 0.4, penv: -12, pattack: 0.02, pdecay: 0.3, fmi: 5, fmh: 2, fmdecay: 0.4, ftype: 'ladder', lpenv: 4, lpattack: 0.02, lpdecay: 0.2, lpsustain: 0.1 };
+  const want = { vib: 6, vibmod: 1, ring: 0.4, ringf: 300, vowel: 'ae', djf: 0.3, leslie: 0.8, lrate: 5, lsize: 0.3, coarse: 4, squiz: 2, shape: 0.4, penv: -12, pattack: 0.02, pdecay: 0.3, fmi: 5, fmh: 2, fmdecay: 0.45, ftype: 'ladder', lpenv: 4, lpattack: 0.02, lpdecay: 0.2, lpsustain: 0.1 };
   const bad = Object.entries(want).filter(([k, x]) => v[k] !== x).map(([k, x]) => k + ' expected ' + x + ' got ' + v[k]);
   check('every new effect reaches the event with its value' + (bad.length ? ' [' + bad.join('; ') + ']' : ''), bad.length === 0);
 }
@@ -585,5 +585,47 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   check('tap-to-connect: the sources that can feed the Instrument include the melody, not Output', legalSources(g, syn.id, 'in').includes(mel.id) && !legalSources(g, syn.id, 'in').includes(out.id));
   const loop = emptyGraph(); const f1 = N('filter', 0, 0), f2 = N('filter', 0, 0); loop.nodes.push(f1, f2); loop.wires.push({ id: 'l1', from: { node: f1.id, port: 'out' }, to: { node: f2.id, port: 'in' } }, { id: 'l2', from: { node: f2.id, port: 'out' }, to: { node: f1.id, port: 'in' } });
   check('flow view order does not hang on a feedback loop', flowOrder(loop).length === 2);
+}
+{
+  const { EXAMPLE, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM } = await import('../src/ai.js');
+  const { importStrudel } = await import('../src/importer.js');
+  const ex = importStrudel(EXAMPLE);
+  check('AI example song: imports with nothing skipped, compiles without warnings', !ex.error && ex.report.skipped.length === 0 && compile(ex.graph).issues.length === 0);
+  const pat = await evaluate(EXAMPLE, false);
+  const evs = (a, b) => pat.queryArc(a, b).filter((h) => h.hasOnset());
+  check('AI example song: drums play in the first 8 cycles and drop out for the swell in the next 8', evs(0, 8).some((h) => h.value.s === 'bd') && !evs(8, 16).some((h) => h.value.s === 'bd') && evs(8, 16).some((h) => h.value.s === 'supersaw'));
+  const rep = parseReply('PLAN: Key A minor.\nTwo sections.\n```js\nsetcpm(135/4)\n$: s("bd")\n```\nLIMITS: no real vocals');
+  check('AI reply: plan, code and limits are read apart ("none" means no limits)', /A minor/.test(rep.plan) && rep.code.startsWith('setcpm') && rep.limits === 'no real vocals' && parseReply('LIMITS: none').limits === '');
+  const bad = lintStarter('setcpm(120/4)\n$: cat(s("bd").gain(0), s("hh")).slow(2)', 'A 139 BPM track. Halfway through, the drums drop out into a lush detuned synth swell.');
+  check('AI checks: silent placeholder, cat/slow sections, missing arrange, wrong BPM and a missing supersaw are all caught', bad.length >= 5 && /gain\(0\)/.test(bad.join()) && /139/.test(bad.join()) && /arrange/.test(bad.join()) && /supersaw/.test(bad.join()));
+  check('AI checks: the example song passes its own checks for a description it fits', lintStarter(EXAMPLE, 'A 135 BPM track; halfway through the drums drop out into a lush detuned swell').length === 0);
+  check('AI prompts: the starter prompt teaches arrange, supersaw and the reply shape; refine asks for the whole patch', /arrange\(\[/.test(STARTER_SYSTEM) && /supersaw/.test(STARTER_SYSTEM) && /PLAN:/.test(STARTER_SYSTEM) && /LIMITS:/.test(STARTER_SYSTEM) && /WHOLE updated patch/.test(REFINE_SYSTEM));
+}
+{
+  const { emptyGraph, insertPlan } = await import('../src/graph.js');
+  const g = emptyGraph(), N = (t) => makeNode(t, 0, 0);
+  const mel = N('melody'), syn = N('synth'), out = N('output');
+  g.nodes.push(mel, syn, out);
+  const wN = { id: 'wn', from: { node: mel.id, port: 'out' }, to: { node: syn.id, port: 'in' } }, wS = { id: 'ws', from: { node: syn.id, port: 'out' }, to: { node: out.id, port: 'in' } };
+  g.wires.push(wN, wS);
+  check('drop into a cable: a transpose fits a notes cable, a reverb fits a sound cable, and each is refused on the other',
+    !!insertPlan(g, wN, N('transpose')) && !insertPlan(g, wN, N('reverb')) && !!insertPlan(g, wS, N('reverb')) && !!insertPlan(g, wS, N('filter')) && !insertPlan(g, wS, N('transpose')));
+  check('drop into a cable: modules with no input (a melody, a key), a second Output, and a module that already has cables are refused', !insertPlan(g, wS, N('melody')) && !insertPlan(g, wS, N('key')) && !insertPlan(g, wS, N('output')) && !insertPlan(g, wN, mel));
+  const out2 = insertPlan(g, wS, N('reverb'));
+  check('drop into a cable: the plan names the input the cable should plug into', out2 && out2.inPort === 'in');
+}
+{
+  const { emptyGraph } = await import('../src/graph.js');
+  const fmWarn = (wave) => {
+    const g = emptyGraph(), N = (t, p = {}) => makeNode(t, 0, 0, p);
+    const m = N('melody'), sy = N('synth', { wave }), f = N('fm'), o = N('output');
+    g.nodes.push(m, sy, f, o);
+    g.wires.push({ id: 'a', from: { node: m.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: 'b', from: { node: sy.id, port: 'out' }, to: { node: f.id, port: 'in' } }, { id: 'c', from: { node: f.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+    return compile(g).issues.filter((i) => i.node === f.id && /harsh/.test(i.msg)).length;
+  };
+  check('FM hint: a sawtooth, square or supersaw carrier is called harsh; sine and triangle are not', fmWarn('sawtooth') === 1 && fmWarn('supersaw') === 1 && fmWarn('sine') === 0 && fmWarn('triangle') === 0);
+  const { MODULES } = await import('../src/modules.js');
+  const ix = MODULES.fm.params.find((q) => q.key === 'index');
+  check('FM defaults are gentle: index 1.5 on a cubic dial, with a decaying brightness', ix.def === 1.5 && ix.log === true && MODULES.fm.params.find((q) => q.key === 'sustain').def <= 0.5);
 }
 process.exit(failures ? 1 : 0);

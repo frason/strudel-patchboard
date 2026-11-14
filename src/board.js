@@ -8,9 +8,10 @@ import { ROOT_NAMES, CHORD_QUALITIES, EXTENSIONS, chordSymbol, romanName, degree
 import { INSTRUMENTS, CATEGORIES as INST_CATS, instrumentOf } from './instruments.js';
 import { buildFmDiagram } from './fmdiagram.js';
 import { soundIconSvg, hasSoundIcon, soundGlyph } from './soundicons.js';
+import { icon } from './icons.js';
 import { buildFxRack } from './fxrack.js';
 import { buildMixer } from './mixer.js';
-import { effectiveKey, makeNode, nodeById, outType, whyNot, wiresInto, uid, flowOrder, legalTargets, legalSources } from './graph.js';
+import { effectiveKey, makeNode, nodeById, outType, whyNot, wiresInto, uid, flowOrder, legalTargets, legalSources, insertPlan } from './graph.js';
 
 const SNAP = 24;
 const NS = 'http://www.w3.org/2000/svg';
@@ -585,16 +586,16 @@ export function createBoard(root, store, hooks) {
     const allCollapsed = nodes.every((n) => n.collapsed);
     const muteable = nodes.filter((n) => MUTE_KIND[n.type]);
     const allMuted = muteable.length > 0 && muteable.every((n) => n.muted);
-    const btn = (label, title, fn) => h('button', { class: 'btn sm', title, onclick: fn }, label);
+    const btn = (label, title, fn, ic) => h('button', { class: 'btn sm sel-btn', title, 'aria-label': label, onclick: fn }, ic ? icon(ic, 15) : null, label);
     selbar.replaceChildren(h('span', { class: 'sel-count' }, `${selection.size} selected`),
-      btn('Group', 'Group the selected modules so they move and fold together (Ctrl/⌘ G)', () => hooks.groupNodes(ids)),
-      btn('Duplicate', 'Copy the selected modules and the wires between them (Ctrl/⌘ D)', () => hooks.duplicateNodes(ids)),
-      btn(allCollapsed ? 'Expand' : 'Minimize', allCollapsed ? 'Open all the selected modules' : 'Fold all the selected modules down to their title bars', () => hooks.collapseNodes(ids, !allCollapsed)),
-      muteable.length ? btn(allMuted ? 'Unmute' : 'Mute', allMuted ? 'Switch the selected modules back on' : 'Mute the selected sounds and bypass the selected effects', () => hooks.muteNodes(ids, !allMuted)) : null,
-      btn('Align ⇤', 'Line the selected modules up on their left edge', () => hooks.alignNodes(ids, 'left')),
-      btn('Align ⤒', 'Line the selected modules up on their top edge', () => hooks.alignNodes(ids, 'top')),
-      btn('Delete', 'Delete the selected modules (Delete key)', () => hooks.removeNodes(ids)),
-      btn('Clear', 'Deselect (Esc)', () => selectNode(null)));
+      btn('Group', 'Group the selected modules so they move and fold together (Ctrl/⌘ G)', () => hooks.groupNodes(ids), 'group'),
+      btn('Duplicate', 'Copy the selected modules and the wires between them (Ctrl/⌘ D)', () => hooks.duplicateNodes(ids), 'duplicate'),
+      btn(allCollapsed ? 'Expand' : 'Minimize', allCollapsed ? 'Open all the selected modules' : 'Fold all the selected modules down to their title bars', () => hooks.collapseNodes(ids, !allCollapsed), allCollapsed ? 'expand' : 'collapse'),
+      muteable.length ? btn(allMuted ? 'Unmute' : 'Mute', allMuted ? 'Switch the selected modules back on' : 'Mute the selected sounds and bypass the selected effects', () => hooks.muteNodes(ids, !allMuted), allMuted ? 'unmute' : 'mute') : null,
+      btn('Align left', 'Line the selected modules up on their left edge', () => hooks.alignNodes(ids, 'left'), 'alignleft'),
+      btn('Align top', 'Line the selected modules up on their top edge', () => hooks.alignNodes(ids, 'top'), 'aligntop'),
+      btn('Delete', 'Delete the selected modules (Delete key)', () => hooks.removeNodes(ids), 'trash'),
+      btn('Clear', 'Deselect (Esc)', () => selectNode(null), 'close'));
   }
   const mini = h('canvas', { class: 'minimap', width: 190, height: 120, title: 'Minimap of the whole board. Click or drag to move the view.' });
   root.append(world, hint, zoomUI, mini, selbar);
@@ -762,7 +763,14 @@ export function createBoard(root, store, hooks) {
     h('button', { type: 'button', class: 'vt-flow', onclick: () => setPref('layout', 'flow') }, 'Flow'),
     h('button', { type: 'button', class: 'vt-board', onclick: () => setPref('layout', 'board') }, 'Board'));
   const paintViewUI = () => { const f = flowMode(); viewUI.querySelector('.vt-flow').classList.toggle('on', f); viewUI.querySelector('.vt-board').classList.toggle('on', !f); };
-  root.append(viewUI); paintViewUI();
+  // ---- tools: Hand (drag the canvas to move it) and Select (drag the canvas to draw a selection box) ----
+  let tool = 'hand', spaceHeld = false, insertHi = null;
+  const toolUI = h('div', { class: 'tool-toggle', role: 'group', 'aria-label': 'Canvas tool' },
+    h('button', { type: 'button', class: 'tt-hand', title: 'Hand: drag the canvas to move around (H)', 'aria-label': 'Hand tool', onclick: () => api.setTool('hand') }, icon('hand', 18)),
+    h('button', { type: 'button', class: 'tt-select', title: 'Select: drag on empty canvas to box-select modules (V). Hold Space to move the canvas.', 'aria-label': 'Select tool', onclick: () => api.setTool('select') }, icon('select', 18)));
+  const paintTool = () => { toolUI.querySelector('.tt-hand').classList.toggle('on', tool === 'hand'); toolUI.querySelector('.tt-select').classList.toggle('on', tool === 'select'); root.classList.toggle('tool-select', tool === 'select'); root.classList.toggle('space-hand', spaceHeld); };
+  const toolsBar = h('div', { class: 'board-tools' }, viewUI, toolUI);
+  root.append(toolsBar); paintViewUI(); paintTool();
   let wasFlow = false;
   // Switching layouts keeps your place: Board -> Flow scrolls to the module nearest the middle of the board; Flow -> Board shows the module that was at the top of the list
   const visibleNodes = () => [...views].filter(([, v]) => v.el.offsetWidth && !v.el.classList.contains('gh') && !v.el.classList.contains('fg-hidden'));
@@ -884,8 +892,8 @@ export function createBoard(root, store, hooks) {
   // pan by dragging empty board
   root.addEventListener('pointerdown', (e) => {
     if (flowMode()) return;   // the flow view scrolls; there is no panning or box selecting
-    if (e.target.closest('.node, .zoom, .cable-hit, .minimap, .selbar, .view-toggle, .tap-banner')) return;   // the Flow/Board switch and the connect banner are buttons on the board: a press on them must not start a pan (it captures the pointer, so the click never reaches the button). The selection bar is on the board, so a click on it must not count as a click on empty board (that would clear the selection first)
-    if (e.shiftKey || e.metaKey || e.ctrlKey) return startMarquee(e);
+    if (e.target.closest('.node, .zoom, .cable-hit, .minimap, .selbar, .board-tools, .tap-banner')) return;   // the Flow/Board switch and the connect banner are buttons on the board: a press on them must not start a pan (it captures the pointer, so the click never reaches the button). The selection bar is on the board, so a click on it must not count as a click on empty board (that would clear the selection first)
+    if (e.shiftKey || e.metaKey || e.ctrlKey || (tool === 'select' && !spaceHeld)) return startMarquee(e);   // Select tool: dragging empty canvas draws a selection box. Space held turns it into the hand for a moment
     startPan(e);
   });
 
@@ -896,18 +904,21 @@ export function createBoard(root, store, hooks) {
     const box = h('div', { class: 'marquee' });
     root.append(box);
     try { root.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    const keep = e.shiftKey ? new Set(selection) : null;   // Shift adds to the current selection
     const draw = (ev) => Object.assign(box.style, { left: Math.min(x0, ev.clientX) - rr.left + 'px', top: Math.min(y0, ev.clientY) - rr.top + 'px', width: Math.abs(ev.clientX - x0) + 'px', height: Math.abs(ev.clientY - y0) + 'px' });
     const up = (ev) => {
       draw(ev);
       const b = box.getBoundingClientRect();
       box.remove();
       selection.clear();
-      views.forEach((v, k) => { const r = v.el.getBoundingClientRect(); if (r.left < b.right && r.right > b.left && r.top < b.bottom && r.bottom > b.top) selection.add(k); });
+      keep?.forEach((k) => selection.add(k));
+      views.forEach((v, k) => { const r = v.el.getBoundingClientRect(); if (v.el.offsetWidth && r.left < b.right && r.right > b.left && r.top < b.bottom && r.bottom > b.top) selection.add(k); });
       paintSelection();
-      root.removeEventListener('pointermove', draw); root.removeEventListener('pointerup', up);
+      root.removeEventListener('pointermove', draw); root.removeEventListener('pointerup', up); root.removeEventListener('pointercancel', up);
     };
     root.addEventListener('pointermove', draw);
     root.addEventListener('pointerup', up);
+    root.addEventListener('pointercancel', up);
   }
   function paintSelection() { views.forEach((v, k) => v.el.classList.toggle('selected', selection.has(k))); paintSelbar(); drawMini(); }
   const hiddenGroup = (id) => (store.graph.groups || []).find((gr) => gr.collapsed && gr.nodes.includes(id));
@@ -1087,7 +1098,7 @@ export function createBoard(root, store, hooks) {
     if (src.type === 'slider') return clamp(Number(src.params.value), Number(src.params.min), Number(src.params.max));
     if (src.type === 'macro') {   // the same maths the code uses: .mul(setting), or .range(lo, hi) with .pow(3) on a log knob
       const v = clamp(Number(src.params.value), 0, 1);
-      return src.params.mode === 'multiply' ? v * Number(node.params[key]) : spec.min + (spec.log && spec.min > 0 ? v ** 3 : v) * (spec.max - spec.min);
+      return src.params.mode === 'multiply' ? v * Number(node.params[key]) : spec.min + (spec.log ? v ** 3 : v) * (spec.max - spec.min);
     }
     return null;
   }
@@ -1881,8 +1892,14 @@ export function createBoard(root, store, hooks) {
       let dx = p.x - start.x, dy = p.y - start.y;
       if (!ev.altKey) { dx = Math.round((starts[id].x + dx) / SNAP) * SNAP - starts[id].x; dy = Math.round((starts[id].y + dy) / SNAP) * SNAP - starts[id].y; }
       hooks.moveNodes(Object.fromEntries(ids.map((i) => [i, { x: starts[i].x + dx, y: starts[i].y + dy }])));
+      if (loose) api.cableHover(ev.clientX, ev.clientY, { nodeId: id });   // a module with no cables of its own can be dropped onto a cable
     };
-    const up = () => { el.classList.remove('dragging'); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); };
+    const loose = ids.length === 1 && !store.graph.wires.some((w) => w.from.node === id || w.to.node === id);
+    const up = () => {
+      el.classList.remove('dragging'); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up);
+      const target = api.insertHighlight; api.cableHover(null, null, {});
+      if (loose && target) hooks.insertOnWire(target, { nodeId: id });
+    };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
   }
@@ -2104,6 +2121,28 @@ export function createBoard(root, store, hooks) {
       s.lenBtns[step]?.classList.add('now');
       setTimeout(() => { els.forEach((c) => c.classList.remove('now')); s.lenBtns[step]?.classList.remove('now'); }, ms);
     },
+    // While a module is dragged over the board: the cable under the pointer that it could be dropped into (highlighted), or null.
+    // subject is { type } for a new module from the list, or { nodeId } for a module already on the board. Nothing lights up when it would not fit.
+    cableHover(cx, cy, subject) {
+      let id = null;
+      if (cx != null && !flowMode()) {
+        const hit = document.elementsFromPoint(cx, cy).find((el) => el.classList?.contains('cable-hit'));
+        const found = hit && [...wireEls].find(([, e]) => e.hit === hit);
+        if (found) {
+          const g = store.graph, w = g.wires.find((x) => x.id === found[0]);
+          const node = subject.nodeId ? nodeById(g, subject.nodeId) : makeNode(subject.type, 0, 0);
+          if (w && insertPlan(g, w, node)) id = w.id;
+        }
+      }
+      if (id !== insertHi) { wireEls.get(insertHi)?.grp.classList.remove('insert-target'); if (id) wireEls.get(id)?.grp.classList.add('insert-target'); insertHi = id; }
+      return id;
+    },
+    get insertHighlight() { return insertHi; },
+    get tool() { return tool; },
+    setTool(t) { tool = t === 'select' ? 'select' : 'hand'; paintTool(); },
+    // Space held in the Select tool is the hand (returns true while it is held)
+    holdHand(on) { if (spaceHeld === on) return; spaceHeld = on; paintTool(); },
+    get handHeld() { return spaceHeld; },
     reveal(id) { if (flowMode()) { flowOpen.add(id); sync(); requestAnimationFrame(() => scrollToNode(id)); } },
     pulse(wireId, delayMs = 0, dur = 220) {
       const e = wireEls.get(wireId);
@@ -2203,7 +2242,7 @@ export function buildPalette(root, hooks, getGraph) {
             ghost = h('div', { class: `pal-ghost cat-${def.cat}` }, def.title);
             document.body.append(ghost);
           }
-          if (ghost) ghost.style.transform = `translate(${ev.clientX + 8}px,${ev.clientY + 8}px)`;
+          if (ghost) { ghost.style.transform = `translate(${ev.clientX + 8}px,${ev.clientY + 8}px)`; hooks.cableHover?.(ev.clientX, ev.clientY, { type }); }
         };
         const up = (ev) => {
           window.removeEventListener('pointermove', move);
@@ -2211,7 +2250,7 @@ export function buildPalette(root, hooks, getGraph) {
           ghost?.remove();
           const board = document.getElementById('board').getBoundingClientRect();
           const inside = ev.clientX > board.left && ev.clientX < board.right && ev.clientY > board.top && ev.clientY < board.bottom;
-          if (ghost) { if (inside) hooks.dropFromPalette(type, ev.clientX, ev.clientY); }
+          if (ghost) { if (inside) hooks.dropFromPalette(type, ev.clientX, ev.clientY); else hooks.cableHover?.(null, null, {}); }
           else hooks.dropFromPalette(type);
         };
         window.addEventListener('pointermove', move);

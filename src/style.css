@@ -805,10 +805,17 @@ html, body { overscroll-behavior: none; }
 .ai-answer { white-space: pre-wrap; line-height: 1.5; font-size: 13px; max-height: 50vh; overflow: auto; }
 
 /* ---- the flow view (one column in signal-flow order, every module folded until opened); the phone default, a choice on bigger screens ---- */
-.view-toggle { display: flex; position: absolute; left: 8px; top: 8px; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.board-tools { position: absolute; left: 8px; top: 8px; z-index: 5; display: flex; gap: 8px; }
+.tool-toggle { display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.tool-toggle button { border: 0; background: none; color: var(--dim); padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.tool-toggle button.on { background: var(--panel2); color: var(--accent); }
+.board.flow .tool-toggle { display: none; }
+.board.tool-select { cursor: crosshair; }
+.board.tool-select.space-hand { cursor: grab; }
+.view-toggle { display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .view-toggle button { border: 0; background: none; color: var(--dim); padding: 8px 12px; font: 600 12px var(--sans, inherit); cursor: pointer; }
 .view-toggle button.on { background: var(--panel2); color: var(--accent); }
-@media (max-width: 900px) { .view-toggle { top: auto; bottom: 8px; } }
+@media (max-width: 900px) { .board-tools { top: auto; bottom: 8px; } }
 .board.flow { overflow: hidden; touch-action: pan-y; cursor: default; }
 .board.flow .world { position: absolute; inset: 0; transform: none !important; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-y; display: flex; flex-direction: column; gap: 10px; padding: 52px 10px 110px; box-sizing: border-box; }
 .board.flow .world > * { width: 100%; max-width: 720px; align-self: center; box-sizing: border-box; }
@@ -850,3 +857,20 @@ html, body { overscroll-behavior: none; }
 .fg-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 10px 9px; }
 .fg-chip { border: 1px solid var(--line); border-left: 4px solid #6b7886; background: var(--panel2); color: var(--text); border-radius: 8px; padding: 5px 9px; font: 12px var(--sans, inherit); cursor: pointer; }
 .fgroup.open .fg-chips { display: none; }
+
+.ai-note { display: grid; gap: 6px; font-size: 12px; line-height: 1.45; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); margin-bottom: 8px; }
+.ai-note .ai-left { color: #f3c9a0; }
+
+.selbar .sel-btn { display: inline-flex; align-items: center; gap: 6px; }
+.selbar .sel-btn svg { flex: none; }
+/* the selection bar sits under the Flow/Board and tool switches (they are top-left on a desktop) */
+.selbar { top: 52px; }
+@media (max-width: 900px) { .selbar { top: 10px; } }
+
+/* a cable a dragged module can be dropped into lights up (nothing lights up when it would not fit) */
+.wire.insert-target .cable { stroke-width: 8; filter: drop-shadow(0 0 10px var(--t)) drop-shadow(0 0 4px #fff); opacity: 1; }
+.wire.insert-target .wlabel { opacity: 1; }
+
+/* live output waveform in the top bar (desktop) */
+.out-scope { width: 180px; height: 34px; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; flex: none; }
+@media (max-width: 900px) { .out-scope { display: none !important; } }

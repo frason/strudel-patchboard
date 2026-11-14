@@ -455,7 +455,7 @@ export function compile(g) {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'sound');
         if (n.type === 'fm') {   // FM shakes an oscillator, so it does nothing on a recorded sound (a sample, a drum, a gm_ instrument or the piano)
-          const seen = new Set(), todo = [n.id], bad = [];
+          const seen = new Set(), todo = [n.id], bad = [], bright = [];
           while (todo.length) {
             const id = todo.pop();
             for (const w of g.wires) {
@@ -463,11 +463,12 @@ export function compile(g) {
               seen.add(w.from.node);
               const u = nodeById(g, w.from.node);
               if (!u) continue;
-              if (u.type === 'synth') { if (!FM_WAVES.has(String(u.params.wave))) bad.push(`the Instrument "${u.params.wave}"`); }
+              if (u.type === 'synth') { if (!FM_WAVES.has(String(u.params.wave))) bad.push(`the Instrument "${u.params.wave}"`); else if (['sawtooth', 'saw', 'square', 'sqr', 'supersaw', 'pulse'].includes(String(u.params.wave))) bright.push(u.params.wave); }
               else if (u.type === 'sample' || u.type === 'drums') bad.push(u.type === 'drums' ? 'the Drum Machine' : 'a Sample');
               else todo.push(u.id);
             }
           }
+          if (!bad.length && bright.length) issues.push({ node: n.id, msg: `FM on a ${bright[0]} wave is harsh, because the wave already has bright overtones. A sine (or triangle) with a small index (0.5 to 3) is the clean starting point.` });
           if (bad.length) issues.push({ node: n.id, msg: `FM has no effect on ${[...new Set(bad)].join(' and ')}: it is a recorded sound, and FM only shakes a synth wave. Set the Instrument's sound to sine, sawtooth, square, triangle or supersaw.` });
         }
         return chain(up, paramCalls(n, depth), depth, inline);

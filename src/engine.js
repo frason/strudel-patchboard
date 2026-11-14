@@ -192,6 +192,8 @@ export function createEngine() {
       let p = 0; for (let i = 0; i < s.buf.length; i++) { const v = Math.abs(s.buf[i]); if (v > p) p = v; }
       return p;
     },
+    // fill buf (1024 floats) with the latest moment of the output as Strudel makes it, before the limiter; false until something has played
+    waveform(buf) { const s = safe; if (!s || s.on === null) return false; s.meter.getFloatTimeDomainData(buf); return true; },
     limiterOn: () => getPrefs().safeOutput !== false,
     // how many times the speakers ran dry since the page loaded (the computer could not keep up). Chrome-based browsers only; null elsewhere.
     underruns() { try { const n = getAudioContext().playbackStats?.underrunEvents; return Number.isFinite(n) ? n : null; } catch { return null; } },
