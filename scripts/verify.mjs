@@ -628,4 +628,52 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const ix = MODULES.fm.params.find((q) => q.key === 'index');
   check('FM defaults are gentle: index 1.5 on a cubic dial, with a decaying brightness', ix.def === 1.5 && ix.log === true && MODULES.fm.params.find((q) => q.key === 'sustain').def <= 0.5);
 }
+{
+  const { MODULES, FM_ALGORITHMS, fmLinkKey, fmLinks, fmAlgorithmOf, FM_PRESETS } = await import('../src/modules.js');
+  const { emptyGraph } = await import('../src/graph.js');
+  const keys = new Set(MODULES.fm.params.map((q) => q.key));
+  const setAlgo = (al) => { const p = {}; for (let i = 1; i <= 4; i++) for (let j = 0; j <= 4; j++) if (i !== j && keys.has(fmLinkKey(i, j))) p[fmLinkKey(i, j)] = 0; for (const [a, b, amt] of al.links) p[fmLinkKey(a, b)] = amt; return p; };
+  check('FM algorithms: every link is a real dial in range, and each algorithm is recognised from its own settings', FM_ALGORITHMS.length >= 8 && FM_ALGORITHMS.every((al) => al.links.every(([a, b, amt]) => { const sp = MODULES.fm.params.find((q) => q.key === fmLinkKey(a, b)); return sp && amt >= sp.min && amt <= sp.max; }) && fmAlgorithmOf({ ...Object.fromEntries([...keys].map((k) => [k, 0])), ...setAlgo(al) }) === al.id));
+  // each algorithm plays in real Strudel, and the code carries its links
+  let ok = true, why = '';
+  for (const al of FM_ALGORITHMS) {
+    const g = emptyGraph(), N = (t, p = {}) => makeNode(t, 0, 0, p);
+    const m = N('melody'), sy = N('synth', { wave: 'sine' }), f = N('fm', setAlgo(al)), o = N('output');
+    g.nodes.push(m, sy, f, o);
+    g.wires.push({ id: 'a', from: { node: m.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: 'b', from: { node: sy.id, port: 'out' }, to: { node: f.id, port: 'in' } }, { id: 'c', from: { node: f.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+    const code = compile(g).code;
+    try { const ev = (await evaluate(code, false)).queryArc(0, 1).filter((h) => h.hasOnset()); const v = ev[0]?.value || {}; if (!ev.length) { ok = false; why += al.id + ' silent; '; } for (const [a, b] of al.links) { const call = a === b + 1 ? (a === 1 ? 'fmi' : 'fmi' + a) : 'fmi' + a + b; if (!(v[call] > 0)) { ok = false; why += `${al.id}: ${call} missing; `; } } } catch (e) { ok = false; why += al.id + ' ' + e.message + '; '; }
+  }
+  check('FM algorithms: each one plays in Strudel and writes its links' + (why ? ' [' + why + ']' : ''), ok);
+  // per-operator envelopes
+  const env = (p) => { const g = emptyGraph(), N = (t, q = {}) => makeNode(t, 0, 0, q); const m = N('melody'), sy = N('synth', { wave: 'sine' }), f = N('fm', p), o = N('output'); g.nodes.push(m, sy, f, o); g.wires.push({ id: 'a', from: { node: m.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: 'b', from: { node: sy.id, port: 'out' }, to: { node: f.id, port: 'in' } }, { id: 'c', from: { node: f.id, port: 'out' }, to: { node: o.id, port: 'in' } }); return compile(g).code; };
+  const base = env({ index2: 1 }), shaped = env({ index2: 1, decay2: 0.1, sustain2: 0, attack2: 0.05 });
+  check('FM envelopes: operator 1 always writes its envelope; operator 2 only once shaped, then all three stages (attack only when above 0)', /fmdecay\(0\.4\)\.fmsustain\(0\.4\)|\.fmdecay\(0\.4\)[\s\S]*\.fmsustain\(0\.4\)/.test(base) && !/fmdecay2/.test(base) && /fmattack2\(0\.05\)/.test(shaped) && /fmdecay2\(0\.1\)/.test(shaped) && /fmsustain2\(0\)/.test(shaped) && !/fmattack\(/.test(shaped));
+  const ev = (await evaluate(shaped, false)).queryArc(0, 1).filter((h) => h.hasOnset())[0]?.value || {};
+  check('FM envelopes: the shaped operator reaches the event as fmattack2, fmdecay2 and fmsustain2', ev.fmattack2 === 0.05 && ev.fmdecay2 === 0.1 && ev.fmsustain2 === 0);
+  const { importStrudel } = await import('../src/importer.js');
+  const back = importStrudel(shaped);
+  const fm = back.graph?.nodes.find((n) => n.type === 'fm');
+  check('FM envelopes: code with per-operator envelopes imports back into the same dials; code with no fm envelope imports as a steady one', fm && fm.params.decay2 === 0.1 && fm.params.attack2 === 0.05 && importStrudel('$: note("c3").s("sine").fm(3)').graph.nodes.find((n) => n.type === 'fm').params.sustain === 1);
+  check('FM presets: Electric piano gives its tine its own quick envelope', FM_PRESETS.find((x) => x.id === 'epiano').params.decay2 === 0.12);
+}
+{
+  const { fmShape, fmWaveFn, MODULES, FM_WAVE_NAMES } = await import('../src/modules.js');
+  const { emptyGraph } = await import('../src/graph.js');
+  const { importStrudel } = await import('../src/importer.js');
+  const base = Object.fromEntries(MODULES.fm.params.map((q) => [q.key, q.def]));
+  const sine = fmShape({ ...base, index: 0 }, 'sine', 512, 1);
+  let err = 0; for (let k = 0; k < 512; k++) err = Math.max(err, Math.abs(sine[k] - Math.sin((2 * Math.PI * k) / 512)));
+  check('FM wave preview: with no modulation the note is the plain carrier wave (a sine matches sin to rounding)', err < 0.02 && fmShape({ ...base, index: 0 }, 'square', 64, 1)[10] === 1);
+  const shaken = fmShape({ ...base, index: 2, harm: 1 }, 'sine', 1024, 1), plain = fmShape({ ...base, index: 0 }, 'sine', 1024, 1);
+  let diff = 0; for (let k = 0; k < 1024; k++) diff += Math.abs(shaken[k] - plain[k]);
+  check('FM wave preview: modulation changes the shape, and stays between -1 and 1', diff > 50 && shaken.every((v) => v >= -1 && v <= 1));
+  check('FM operator waves: four named waves, each a real wave from -1 to 1', FM_WAVE_NAMES.length === 4 && FM_WAVE_NAMES.every((w) => Math.abs(fmWaveFn(w, 0.25)) <= 1 && fmWaveFn(w, 0.1) !== fmWaveFn(w, 0.6)));
+  const wv = (w) => { const g = emptyGraph(), N = (t, q = {}) => makeNode(t, 0, 0, q); const m = N('melody'), sy = N('synth', { wave: 'sine' }), f = N('fm', { index: 2, owave: w, owave2: w, index2: 1 }), o = N('output'); g.nodes.push(m, sy, f, o); g.wires.push({ id: 'a', from: { node: m.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: 'b', from: { node: sy.id, port: 'out' }, to: { node: f.id, port: 'in' } }, { id: 'c', from: { node: f.id, port: 'out' }, to: { node: o.id, port: 'in' } }); return compile(g).code; };
+  const code = wv('triangle');
+  const ev = (await evaluate(code, false)).queryArc(0, 1).filter((h) => h.hasOnset())[0]?.value || {};
+  check('FM operator waves: a non-sine wave is written as fmwave / fmwave2 and reaches Strudel; sine writes nothing', /\.fmwave\("triangle"\)/.test(code) && /\.fmwave2\("triangle"\)/.test(code) && ev.fmwave === 'triangle' && ev.fmwave2 === 'triangle' && !/fmwave/.test(wv('sine')));
+  const back = importStrudel(code).graph?.nodes.find((n) => n.type === 'fm');
+  check('FM operator waves: the code reads back into the same dials, and an unknown wave is reported', back && back.params.owave === 'triangle' && back.params.owave2 === 'triangle' && importStrudel('$: note("c3").s("sine").fm(2).fmwave("pink")').report.skipped.length === 1);
+}
 process.exit(failures ? 1 : 0);

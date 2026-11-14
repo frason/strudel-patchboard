@@ -874,3 +874,21 @@ html, body { overscroll-behavior: none; }
 /* live output waveform in the top bar (desktop) */
 .out-scope { width: 180px; height: 34px; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; flex: none; }
 @media (max-width: 900px) { .out-scope { display: none !important; } }
+
+/* FM: which operator's brightness envelope is drawn */
+.fm-envops { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.fm-envl { font-size: 11px; color: var(--dim); margin-right: 4px; }
+.fm-envop { width: 26px; height: 24px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 6px; cursor: pointer; font: 600 12px var(--mono); padding: 0; }
+.fm-envop.on { border-color: #f3c9a0; color: #f3c9a0; }
+.fm-envop.off { opacity: .45; }
+
+.fm-pickrow { display: flex; gap: 6px; align-items: center; }
+.fm-pickrow .fm-presets { flex: 1; min-width: 0; }
+.fm-algopop .preset-card.on { border-color: #f3c9a0; }
+.fm-algopop .preset-card svg { color: #f3c9a0; }
+
+.fm-shape { width: 100%; height: 70px; display: block; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; }
+.fm-shapelab { font-size: 11px; color: var(--dim); margin: 6px 0 2px; }
+.fm-waverow { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.fm-wv { width: 36px; height: 24px; border: 1px solid var(--line); background: var(--panel2); color: var(--dim); border-radius: 6px; cursor: pointer; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.fm-wv.on { border-color: #f3c9a0; color: #f3c9a0; }

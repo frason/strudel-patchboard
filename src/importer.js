@@ -224,11 +224,12 @@ export function importStrudel(code, { sounds = null } = {}) {
     ring: ['ring', 'mix'], ringf: ['ring', 'freq'], vowel: ['vowel', 'vowel'], djf: ['djf', 'amount'],
     leslie: ['leslie', 'wet'], lrate: ['leslie', 'rate'], lsize: ['leslie', 'size'], coarse: ['lofi', 'coarse'], squiz: ['lofi', 'squiz'],
     penv: ['pitchenv', 'amount'], pattack: ['pitchenv', 'attack'], pdecay: ['pitchenv', 'decay'],
+    fmwave: ['fm', 'owave'], fmwave2: ['fm', 'owave2'], fmwave3: ['fm', 'owave3'], fmwave4: ['fm', 'owave4'], fmattack: ['fm', 'attack'], fmatt: ['fm', 'attack'], fmattack2: ['fm', 'attack2'], fmattack3: ['fm', 'attack3'], fmattack4: ['fm', 'attack4'], fmatt2: ['fm', 'attack2'], fmatt3: ['fm', 'attack3'], fmatt4: ['fm', 'attack4'], fmdecay2: ['fm', 'decay2'], fmdecay3: ['fm', 'decay3'], fmdecay4: ['fm', 'decay4'], fmdec2: ['fm', 'decay2'], fmdec3: ['fm', 'decay3'], fmdec4: ['fm', 'decay4'], fmsustain2: ['fm', 'sustain2'], fmsustain3: ['fm', 'sustain3'], fmsustain4: ['fm', 'sustain4'], fmsus2: ['fm', 'sustain2'], fmsus3: ['fm', 'sustain3'], fmsus4: ['fm', 'sustain4'], fmdec: ['fm', 'decay'], fmsus: ['fm', 'sustain'],
     fm: ['fm', 'index'], fmh: ['fm', 'harm'], fmdecay: ['fm', 'decay'], fmsustain: ['fm', 'sustain'], fms: ['fm', 'sustain'], fm2: ['fm', 'index2'], fm11: ['fm', 'fb1'], fm22: ['fm', 'fb2'], fmh2: ['fm', 'harm2'], acidenv: ['acid', 'amount'],
     hpf: ['filter', 'cutoff', { type: 'hpf' }], hp: ['filter', 'cutoff', { type: 'hpf' }], bpf: ['filter', 'cutoff', { type: 'bpf' }], bandf: ['filter', 'cutoff', { type: 'bpf' }],
     hpq: ['filter', 'q'], bpq: ['filter', 'q'], lpenv: ['filter', 'env'], lpattack: ['filter', 'fa'], lpa: ['filter', 'fa'], lpdecay: ['filter', 'fd'], lpd: ['filter', 'fd'], lpsustain: ['filter', 'fs'], lps: ['filter', 'fs'], ftype: ['filter', 'ftype'],
   };
-  const STRING_PARAMS = new Set(['vowel', 'tremoloshape', 'ftype']);
+  const STRING_PARAMS = new Set(['vowel', 'tremoloshape', 'ftype', 'fmwave', 'fmwave2', 'fmwave3', 'fmwave4']);
   const VIZ = new Set(['pianoroll', '_pianoroll', 'scope', '_scope', 'tscope', 'punchcard', '_punchcard', 'spiral', '_spiral', 'pitchwheel', '_pitchwheel']);
   const OTHER_VIZ = new Set(['spectrum', '_spectrum', 'fscope', '_fscope', 'color', 'viz', 'markcss']);
 
@@ -419,6 +420,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     for (const p of pending) seq.push(p);
     if (S.kind === 'notes' && S.instrument) seq.push(S.instrument);
     for (const f of S.fx.values()) {
+      if (f.type === 'fm' && !('decay' in f.params || 'sustain' in f.params || 'attack' in f.params)) f.params.sustain = 1;   // code with no fm envelope holds a steady brightness; the module's own default is a decaying one
       const nd = add(f.type, f.params, stmt);
       f.signals.forEach(([key, sig]) => { const sn = sig.kind === 'slider' ? add('slider', { value: sig.value, min: sig.min, max: sig.max }, stmt) : add('wave', { shape: sig.shape, min: sig.min, max: sig.max, slow: sig.slow }, stmt); wire(sn, nd, 'p:' + key); });
       seq.push(nd);
@@ -563,7 +565,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       Object.assign(f.params, fixed || {});
       if (['lpenv', 'lpattack', 'lpa', 'lpdecay', 'lpd', 'lpsustain', 'lps', 'ftype', 'hpq', 'bpq'].includes(n)) S.filterTouched = true;
       if (type === 'compressor') return;
-      if (STRING_PARAMS.has(n)) { const t = str(a[0]); if (t === null) throw new Skip(`${n} with something other than a name`); f.params[key] = n === 'ftype' && /^\d$/.test(t) ? ['12db', 'ladder', '24db'][Number(t)] : t; return; }
+      if (STRING_PARAMS.has(n)) { const t = str(a[0]); if (t === null) throw new Skip(`${n} with something other than a name`); if (/^fmwave/.test(n) && !['sine', 'triangle', 'sawtooth', 'square'].includes(t)) throw new Skip(`${n}("${t}"): modules offer sine, triangle, sawtooth and square`); f.params[key] = n === 'ftype' && /^\d$/.test(t) ? ['12db', 'ladder', '24db'][Number(t)] : t; return; }
       if (n === 'ftype') { const v = num(a[0]); f.params.ftype = ['12db', 'ladder', '24db'][v] ?? '12db'; return; }
       const v = num(a[0]);
       if (v !== null) { f.params[key] = v; return; }

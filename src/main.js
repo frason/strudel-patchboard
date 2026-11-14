@@ -16,7 +16,7 @@ import { importStrudel } from './importer.js';
 import { setHydraMode, prepareWindow, hydraNotes } from './hydra.js';
 import { LESSONS } from './starters.js';
 import { getAI, setAI, clearAI, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
-import { SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
+import { FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
 import { effectiveKey, makeNode, nodeById, wiresFrom, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
 
 // Link to this app's source code (the AGPL asks public copies to offer it). Fill in once the repository exists.
@@ -563,6 +563,16 @@ const hooks = {
       Object.assign(n.params, preset.params);
     }, { label: 'FM preset ' + preset.label });
     toast(`FM preset: ${preset.label}`, [undoAction], 2500);
+  },
+  applyFmAlgorithm(id, algoId) {
+    const al = FM_ALGORITHMS.find((x) => x.id === algoId);
+    if (!al) return;
+    store.update((g) => {
+      const n = nodeById(g, id), spec = (k) => MODULES.fm.params.find((s) => s.key === k);
+      for (let i = 1; i <= 4; i++) for (let j = 0; j <= 4; j++) if (i !== j) { const k = fmLinkKey(i, j); if (spec(k)) n.params[k] = 0; }
+      for (const [a, b, amt] of al.links) { const k = fmLinkKey(a, b); if (spec(k)) n.params[k] = amt; }
+    }, { label: 'FM algorithm ' + al.label });
+    toast(`FM algorithm: ${al.label}`, [undoAction], 2500);
   },
   applyMelodyTemplate(id, tplId) {
     const tpl = MELODY_TEMPLATES.find((x) => x.id === tplId);

@@ -4,7 +4,7 @@
 //   routes:  the four discs in a square. Drag from one disc to another (or to the note) to connect them; drag the dot on an arrow
 //            up or down to change how hard it shakes (down to 0 removes it); tap a dot to remove it; tap a disc to switch its feedback on or off.
 // Every handle also works from the keyboard (Tab to it, then the arrow keys), and a number grid under the routes picture does the same.
-import { FM_PRESETS } from './modules.js';
+import { FM_PRESETS, FM_ALGORITHMS, fmAlgorithmOf, FM_WAVE_NAMES, OWAVE, fmWaveFn, fmShape } from './modules.js';
 const NS = 'http://www.w3.org/2000/svg';
 const W = 240;
 export const IDX = ['index', 'index2', 'index3', 'index4'];
@@ -101,13 +101,13 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
     const more = el('text', { class: 'fm-read', x: 6 });
     svg.append(more);
     let lastH = 0;
-    const place = (o, x, y, to, index, harm, fb, ghost) => {
+    const place = (o, x, y, to, index, harm, fb, ghost, wt = 'sine') => {
       const i = o.i;
       o.g.classList.toggle('ghost', ghost); o.g.classList.toggle('off', ghost);
       o.circ.setAttribute('cx', x); o.circ.setAttribute('cy', y);
       o.txt.setAttribute('x', x); o.txt.setAttribute('y', y + 4); o.txt.textContent = ghost ? '+' : '×' + harm;
       const pts = [];
-      for (let k = 0; k <= 80; k++) pts.push(`${(x - 13 + (26 * k) / 80).toFixed(1)} ${(y - 8 - Math.sin((k / 80) * Math.PI * 2 * harm) * 3.5).toFixed(1)}`);
+      for (let k = 0; k <= 80; k++) pts.push(`${(x - 13 + (26 * k) / 80).toFixed(1)} ${(y - 8 - fmWaveFn(wt, (k / 80) * harm) * 3.5).toFixed(1)}`);   // the operator's own wave, harm times over
       o.wave.setAttribute('d', ghost ? '' : 'M' + pts.join('L'));
       const y0 = y + R + 1, y1 = to.y - (to.pill ? 13 : R + 2), my = (y0 + y1) / 2;
       o.link.setAttribute('d', `M${x} ${y0}C${x} ${my} ${to.x} ${my} ${to.x} ${y1}`);
@@ -140,7 +140,7 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
           o.g.style.display = i > rows ? 'none' : '';
           if (i > rows) return;
           const to = i === 1 ? { x: CXN, y: noteY, pill: true } : { x: xOf(p[HARM[i - 2]]), y: rowY(i - 1) };
-          place(o, xOf(p[HARM[i - 1]]), rowY(i), to, p[IDX[i - 1]], p[HARM[i - 1]], p[FB[i - 1]], !(outOf(p, i) > 0));
+          place(o, xOf(p[HARM[i - 1]]), rowY(i), to, p[IDX[i - 1]], p[HARM[i - 1]], p[FB[i - 1]], !(outOf(p, i) > 0), p[OWAVE[i - 1]] || 'sine');
         });
         const extra = Object.keys(p).filter((k) => /^r\d\d$/.test(k) && p[k] > 0).length;
         more.textContent = extra ? `+ ${extra} extra route${extra > 1 ? 's' : ''} (see routes)` : '';
@@ -264,13 +264,65 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
   pick.addEventListener('pointerdown', (e) => e.stopPropagation());
   pick.addEventListener('keydown', (e) => e.stopPropagation());
   pick.addEventListener('change', () => { if (pick.value) hooks.applyFmPreset(node.id, pick.value); pick.value = ''; });
+  // algorithms: a small picture of who shakes whom; pick one and the arrows (indexes) are set to it
+  const algoThumb = (links) => {
+    const NSs = 'http://www.w3.org/2000/svg', Wd = 84, Ht = 62;
+    const e = (t, a = {}) => { const x = document.createElementNS(NSs, t); for (const [k, v] of Object.entries(a)) x.setAttribute(k, v); return x; };
+    const sv = e('svg', { viewBox: `0 0 ${Wd} ${Ht}`, width: Wd, height: Ht });
+    const ops = [...new Set(links.flatMap(([a, b]) => [a, b]).filter((o) => o > 0))];
+    const depth = new Map(); const dOf = (o) => { if (depth.has(o)) return depth.get(o); depth.set(o, 1); const d = Math.max(1, ...links.filter(([a]) => a === o).map(([, b]) => (b === 0 ? 1 : dOf(b) + 1))); depth.set(o, d); return d; };
+    ops.forEach(dOf);
+    const levels = Math.max(1, ...depth.values());
+    const pos = new Map(); pos.set(0, [Wd / 2, Ht - 8]);
+    for (let l = 1; l <= levels; l++) { const row = ops.filter((o) => depth.get(o) === l); row.forEach((o, i) => pos.set(o, [(Wd * (i + 1)) / (row.length + 1), Ht - 8 - (l * (Ht - 16)) / levels])); }
+    links.forEach(([a, b]) => { const [x1, y1] = pos.get(a), [x2, y2] = pos.get(b); if (!pos.has(a) || !pos.has(b)) return; sv.append(e('line', { x1, y1: y1 + 5, x2, y2: y2 - 5, stroke: 'currentColor', 'stroke-width': 1.4, opacity: 0.8 })); });
+    sv.append(e('rect', { x: pos.get(0)[0] - 6, y: pos.get(0)[1] - 4, width: 12, height: 8, rx: 2, fill: 'currentColor', opacity: 0.8 }));
+    ops.forEach((o) => { const [x, y] = pos.get(o); sv.append(e('circle', { cx: x, cy: y, r: 6, fill: '#1d242c', stroke: 'currentColor', 'stroke-width': 1.4 })); const t = e('text', { x, y: y + 3, 'text-anchor': 'middle', 'font-size': 8, fill: 'currentColor' }); t.textContent = String(o); sv.append(t); });
+    return sv;
+  };
+  const algoBtn = h('button', { type: 'button', class: 'btn sm fm-algo', title: 'Pick an algorithm: which operators shake which' }, 'Algorithm…');
+  algoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  let algoPop = null;
+  const closeAlgo = () => { algoPop?.remove(); algoPop = null; document.removeEventListener('pointerdown', awayAlgo, true); };
+  const awayAlgo = (e) => { if (algoPop && !algoPop.contains(e.target) && e.target !== algoBtn) closeAlgo(); };
+  algoBtn.addEventListener('click', () => {
+    if (algoPop) return closeAlgo();
+    const cur = fmAlgorithmOf(paramsOf());
+    const r = algoBtn.getBoundingClientRect();
+    algoPop = h('div', { class: 'cpick presets fm-algopop', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - 340))}px;top:${Math.min(r.bottom + 6, window.innerHeight - 320)}px` },
+      h('div', { class: 'cp-h' }, 'Algorithms: who shakes whom (the box is the note you hear)'),
+      h('div', { class: 'preset-grid' }, FM_ALGORITHMS.map((al) => h('button', { class: 'preset-card' + (al.id === cur ? ' on' : ''), type: 'button', title: al.tip, onclick: () => { closeAlgo(); hooks.applyFmAlgorithm(node.id, al.id); } }, algoThumb(al.links), h('b', {}, al.label)))));
+    document.body.append(algoPop);
+    setTimeout(() => document.addEventListener('pointerdown', awayAlgo, true), 0);
+  });
   const legendTune = h('div', { class: 'fm-legend' }, 'Each disc is one modulator, the wave that shakes the one below it (or the note you hear at the bottom). ',
     h('b', {}, 'Slide sideways'), ' for its pitch (harmonic): whole numbers sound musical, in-between ones sound like bells. ',
     h('b', {}, 'Slide up or down'), ' for how hard it shakes (index). A dashed disc is off. The orange arc is feedback: the disc shaking itself.');
   const legendRoutes = h('div', { class: 'fm-legend' }, 'An arrow means “this disc shakes that one”. The number on it, and the dot you drag up or down, is how hard (0 removes it). ',
     'Drag from a disc onto another disc, or onto “note you hear”, to add an arrow. The ', h('b', { style: 'color:#ffb454' }, 'orange ring'),
     ' on a disc is its feedback: it shakes itself. Tap a disc to switch it on or off. A dashed disc has nothing connected, so it is not in the sound.');
-  const wrap = h('div', { class: 'fmwrap' }, pick, tabs, tune.svg, routes.svg, grid.el, legendTune, legendRoutes);
+  // the wave of the note, worked out from the settings (full brightness): what the oscilloscope would show for one held note
+  const shapeCv = h('canvas', { class: 'fm-shape', width: 300, height: 70, role: 'img', 'aria-label': 'The wave of one note with these FM settings' });
+  const shapeLab = h('div', { class: 'fm-shapelab' }, 'wave of one note, at full brightness');
+  const carrierOf = () => {
+    const g = store.graph; let cur = node.id;
+    for (let k = 0; k < 8; k++) {
+      const w = g.wires.find((x) => x.to.node === cur && !x.to.port.startsWith('p:')), u = w && g.nodes.find((n) => n.id === w.from.node);
+      if (!u) return 'sine';
+      if (u.type === 'synth') { const wv = String(u.params.wave); return FM_WAVE_NAMES.includes(wv) ? wv : wv === 'supersaw' || wv === 'saw' ? 'sawtooth' : wv === 'sqr' ? 'square' : wv === 'tri' ? 'triangle' : 'sine'; }
+      cur = u.id;
+    }
+    return 'sine';
+  };
+  const drawShape = (p) => {
+    const ctx = shapeCv.getContext('2d'), W2 = shapeCv.width, H2 = shapeCv.height, s = fmShape(p, carrierOf(), 1024, 2);
+    ctx.clearRect(0, 0, W2, H2);
+    ctx.strokeStyle = '#2a3440'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, H2 / 2); ctx.lineTo(W2, H2 / 2); ctx.stroke();
+    ctx.strokeStyle = '#f3c9a0'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.beginPath();
+    for (let x = 0; x < W2; x++) { const v = s[Math.floor((x * s.length) / W2)]; const y = H2 / 2 - v * (H2 / 2 - 5); if (x) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    ctx.stroke();
+  };
+  const wrap = h('div', { class: 'fmwrap' }, h('div', { class: 'fm-pickrow' }, pick, algoBtn), tabs, tune.svg, routes.svg, grid.el, shapeLab, shapeCv, legendTune, legendRoutes);
   function show(v) {
     view = v; viewMemory.set(node.id, v);
     tune.svg.style.display = v === 'tune' ? '' : 'none';
@@ -281,7 +333,7 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
     relayout?.();
   }
   show(view);
-  ctl.fmdiagram = { draw(p) { tune.draw(p); routes.draw(p); grid.draw(p); } };
+  ctl.fmdiagram = { draw(p) { tune.draw(p); routes.draw(p); grid.draw(p); drawShape(p); } };
   ctl.fmdiagram.draw(node.params);
   return wrap;
 }

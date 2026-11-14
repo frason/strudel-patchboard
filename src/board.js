@@ -1,5 +1,5 @@
 // The patchboard: pannable/zoomable page, module panels with real controls, typed jacks, cables.
-import { MUTE_KIND, cellNotes, noteRank as pitchRank, pitchModel, SCALES, parseX, leafAt, stepHas, slotWidth, xLabel, MODULES, PORT_TYPES, NOTE_NAMES, fmt, portsOf, CATEGORIES, DRUM_PRESETS, MELODY_TEMPLATES } from './modules.js';
+import { MUTE_KIND, cellNotes, noteRank as pitchRank, pitchModel, SCALES, parseX, leafAt, stepHas, slotWidth, xLabel, MODULES, PORT_TYPES, NOTE_NAMES, fmt, portsOf, CATEGORIES, DRUM_PRESETS, MELODY_TEMPLATES, FM_WAVE_NAMES, OWAVE, fmWaveFn } from './modules.js';
 import { soundsFor, isValidSound, describe, sampleItems, sampleCategoryOf, SAMPLE_CATS } from './catalog.js';
 import { isFav, toggleFav, favCount } from './favorites.js';
 import { getPrefs, onPrefs, setPref } from './prefs.js';
@@ -1436,7 +1436,9 @@ export function createBoard(root, store, hooks) {
   function buildEnvelope(node, ctl, def) {
     const NS = 'http://www.w3.org/2000/svg', W = 240, H = 84, PAD = 12, TOP = 12, BASE = H - 18, SEG = 54, HOLD = 34;
     const el = (tag, attrs = {}, ...kids) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); kids.forEach((c) => e.append(c)); return e; };
-    const K = def.data.envelope === true ? { a: 'attack', d: 'decay', s: 'sustain', r: 'release' } : def.data.envelope;   // which parameters hold each stage
+    const fmOp = node.type === 'fm' ? Math.min(4, Math.max(1, Number(node.params.envop) || 1)) : 0;   // FM: which operator's brightness envelope is drawn
+    const fmSfx = fmOp > 1 ? String(fmOp) : '';
+    const K = node.type === 'fm' ? { a: 'attack' + fmSfx, d: 'decay' + fmSfx, s: 'sustain' + fmSfx } : def.data.envelope === true ? { a: 'attack', d: 'decay', s: 'sustain', r: 'release' } : def.data.envelope;   // which parameters hold each stage
     const spec = (k) => (k ? def.params.find((p) => p.key === k) : null);
     const A = spec(K.a), D = spec(K.d), S = spec(K.s), R = spec(K.r), AMT = spec(K.amt);
     const peakOf = (p) => (AMT ? Math.max(0.12, Math.min(1, p[K.amt] / AMT.max)) : 1);   // how tall the top corner is (the filter's amount; always full for loudness)
@@ -1519,6 +1521,29 @@ export function createBoard(root, store, hooks) {
     svg.append(read);
     ['a', 'd', 'r'].forEach((n) => handles[n] && svg.append(handles[n]));   // handles on top
     ctl.envelope.draw(node.params);
+    if (node.type === 'fm') {   // one envelope per operator: pick which one to draw
+      const idxKey = (i) => (i === 1 ? 'index' : 'index' + i);
+      const steady = (p) => fmOp > 1 && p[K.a] === A.def && p[K.d] === D.def && p[K.s] === S.def;
+      const baseDraw = ctl.envelope.draw;
+      ctl.envelope.draw = (p) => { baseDraw(p); if (steady(p)) read.textContent = `operator ${fmOp} is steady: drag the corner to shape its brightness`; };
+      ctl.envelope.draw(node.params);
+      const chips = h('div', { class: 'fm-envops', role: 'group', 'aria-label': 'Which operator\'s brightness envelope to edit' }, h('span', { class: 'fm-envl' }, 'envelope of'),
+        [1, 2, 3, 4].map((i) => h('button', { type: 'button', class: 'fm-envop' + (i === fmOp ? ' on' : '') + (node.params[idxKey(i)] > 0 ? '' : ' off'), title: `Operator ${i}${node.params[idxKey(i)] > 0 ? '' : ' (off: its index is 0)'}`, onclick: () => hooks.setParam(node.id, 'envop', i) }, String(i))));
+      const waveGlyph = (name) => {
+        const NSs = 'http://www.w3.org/2000/svg', sv = document.createElementNS(NSs, 'svg'), pa = document.createElementNS(NSs, 'path');
+        sv.setAttribute('viewBox', '0 0 24 14'); sv.setAttribute('width', 24); sv.setAttribute('height', 14);
+        let d = ''; for (let k = 0; k <= 48; k++) d += (k ? 'L' : 'M') + (1 + (22 * k) / 48).toFixed(1) + ' ' + (7 - fmWaveFn(name, k / 48) * 5).toFixed(1);
+        pa.setAttribute('d', d); pa.setAttribute('fill', 'none'); pa.setAttribute('stroke', 'currentColor'); pa.setAttribute('stroke-width', '1.6'); pa.setAttribute('stroke-linejoin', 'round');
+        sv.append(pa); return sv;
+      };
+      const waveKey = OWAVE[fmOp - 1];
+      const wbtns = FM_WAVE_NAMES.map((w) => h('button', { type: 'button', class: 'fm-wv' + ((node.params[waveKey] || 'sine') === w ? ' on' : ''), title: `Operator ${fmOp} plays a ${w} wave` + (w === 'sine' ? ' (the cleanest)' : ' (adds overtones of its own)'), 'aria-label': `${w} wave`, onclick: () => hooks.setParam(node.id, waveKey, w) }, waveGlyph(w)));
+      const wrow = h('div', { class: 'fm-waverow', role: 'group', 'aria-label': `The wave operator ${fmOp} plays` }, h('span', { class: 'fm-envl' }, `wave of ${fmOp}`), wbtns);
+      const drawWithWave = ctl.envelope.draw;
+      ctl.envelope.draw = (p) => { drawWithWave(p); FM_WAVE_NAMES.forEach((w, i) => wbtns[i].classList.toggle('on', (p[waveKey] || 'sine') === w)); };
+      ctl.envelope.draw(node.params);
+      return h('div', { class: 'fmwrap' }, chips, wrow, svg);
+    }
     return h('div', { class: 'fmwrap' }, svg);
   }
   // The song strip: one block per section, as wide as its cycle count, in the same colour as its input.
@@ -1678,7 +1703,7 @@ export function createBoard(root, store, hooks) {
   const sigOf = (n) => {
     const k = effectiveKey(store.graph, n);
     const xs = n.params.cells ? n.params.cells.map((c) => c.x || '').join(',') : n.params.tracks ? n.params.tracks.map((t) => t.cells.map((c) => c.x || '').join(',')).join(';') : '';
-    return [n.type, n.params.steps, n.params.n, n.params.tracks?.length, k ? (SCALES[k.scale] || []).length : 0, xs, isCol(n) ? 1 : 0, n.params.cells || n.params.tracks ? beatsNow() : ''].join('|');   // a sequencer is redrawn when the beats per cycle change
+    return [n.type, n.params.steps, n.params.n, n.params.tracks?.length, k ? (SCALES[k.scale] || []).length : 0, xs, isCol(n) ? 1 : 0, n.params.cells || n.params.tracks ? beatsNow() : '', n.params.envop || ''].join('|');   // a sequencer is redrawn when the beats per cycle change
   };
 
   function syncNode(v, node) {

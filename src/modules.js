@@ -23,6 +23,17 @@ export const SCALES = {
 };
 export const ROOTS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const WAVES = ['sine', 'sawtooth', 'square', 'triangle', 'supersaw', 'piano'];
+// ---- FM operator waves ----
+export const FM_WAVE_NAMES = ['sine', 'triangle', 'sawtooth', 'square'];
+export const OWAVE = ['owave', 'owave2', 'owave3', 'owave4'];
+// one wave at phase ph (any number; the whole part is ignored), from -1 to 1
+export const fmWaveFn = (type, ph) => {
+  const x = ph - Math.floor(ph);
+  if (type === 'triangle') return 1 - 4 * Math.abs(x - 0.5);
+  if (type === 'sawtooth') return 2 * x - 1;
+  if (type === 'square') return x < 0.5 ? 1 : -1;
+  return Math.sin(2 * Math.PI * x);
+};
 const BANKS = ['', 'RolandTR808', 'RolandTR909', 'RolandTR707', 'LinnDrum', 'AkaiLinn', 'CasioRZ1', 'KorgM1'];
 
 // FM matrix routes that are not part of the plain chain 4 -> 3 -> 2 -> 1 -> note and are not feedback
@@ -401,6 +412,7 @@ export const MODULES = {
     more: [
       ['What FM is', 'Frequency modulation: one oscillator (the modulator) wobbles the pitch of another (the carrier, the note you hear) hundreds of times a second. That is too fast to sound like vibrato. Instead it adds new overtones, so a plain sine wave can become a bell, an electric piano or a growling bass using only a few knobs. Put this module after an Instrument, ideally one set to a sine wave, because the sine is the cleanest thing to shake.'],
       ['The two knobs that matter', 'Index is how hard the modulator shakes. 0 is a pure sine; a little (1 to 3) adds warmth and edge; a lot (6 and up) is bright, harsh and metallic. Harmonic is the modulator\'s pitch compared with the note. Whole numbers (1, 2, 3, 4) keep the new overtones in tune with the note, so the sound is musical (bass, piano, organ). In-between values (3.5, 2.75) put the overtones between the notes, which is what bells, gongs and clangs sound like.'],
+      ['One envelope for each operator', 'Under the picture, pick an operator (1 to 4) and draw its own brightness envelope: drag the top corner sideways for the attack, the second corner for the decay and the level it holds. Giving the modulators different shapes is what makes FM sound alive: a bright quick "tine" from operator 2 over a slowly fading body from operator 1 is an electric piano. An operator you have not shaped holds a steady level. The Algorithm button sets who shakes whom in one go.'],
       ['Decay and sustain: the brightness envelope', 'These shape how the index changes over a note, so they control how bright it is over time, not how loud. A short decay with sustain 0 starts bright and goes soft at once: a pluck, a marimba, a piano tine. A long decay and a high sustain stays bright while the note is held: brass and organ. The Instrument\'s own envelope, above this module, shapes the loudness, and the two work together.'],
       ['Four modulators, two views', 'There are four modulators. In the "tune" view they stack in a chain: 4 shakes 3, 3 shakes 2, 2 shakes 1, and 1 shakes the note. Slide a disc sideways for its harmonic and up or down for its index. In the "routes" view you can wire them any way you like: drag from one disc to another (or onto "note you hear") to add an arrow, and drag the dot on an arrow up or down for how hard it shakes. Several routes into the same disc add together.'],
       ['Feedback (the orange ring)', 'Feedback makes a modulator shake itself. A little (0.05 to 0.3) adds a buzzy, sawtooth-like edge and a growl; a lot turns into noise. Tap a disc in the routes view to switch its feedback on or off. The orange arc or ring on a disc is its feedback amount.'],
@@ -410,8 +422,8 @@ export const MODULES = {
     params: [
       { key: 'index', label: 'index', kind: 'knob', min: 0, max: 16, step: 0.1, def: 1.5, log: true, call: 'fm', always: true, wire: true, tip: 'how strong the modulation is (brightness). 0.5 to 3 sounds musical; above 6 turns harsh and metallic. The dial is finest near zero.' },
       { key: 'harm', label: 'harmonic', kind: 'knob', min: 0.25, max: 16, step: 0.25, def: 1, call: 'fmh', always: true, wire: true, tip: 'modulator pitch relative to the note (whole numbers sound musical)' },
-      { key: 'decay', label: 'decay', kind: 'knob', min: 0.01, max: 2, step: 0.01, def: 0.4, call: 'fmdecay', unit: 's', tip: 'how fast the brightness dies away', fold: true },
-      { key: 'sustain', label: 'sustain', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.4, call: 'fmsustain', tip: 'how much of the modulation is held while the note lasts (1 = all of it)', fold: true },
+      { key: 'decay', label: 'decay', kind: 'knob', min: 0.01, max: 2, step: 0.01, def: 0.4, call: 'fmdecay', always: true, unit: 's', tip: 'how fast the brightness dies away', fold: true },
+      { key: 'sustain', label: 'sustain', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.4, call: 'fmsustain', always: true, tip: 'how much of the modulation is held while the note lasts (1 = all of it)', fold: true },
       { key: 'index2', label: 'index 2', kind: 'knob', min: 0, max: 16, step: 0.1, def: 0, log: true, call: 'fm2', wire: true, tip: 'a second modulator on top of the first (0 = off): three-operator FM', fold: true },
       { key: 'fb1', label: 'feedback 1', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0, call: 'fm11', wire: true, tip: 'the first modulator feeds back into itself (0 = off); keep it small, 0.05 to 0.3', fold: true },
       { key: 'fb2', label: 'feedback 2', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0, call: 'fm22', wire: true, tip: 'the second modulator feeds back into itself (0 = off); keep it small, 0.05 to 0.3; needs index and index 2 above 0 to be heard', fold: true },
@@ -423,6 +435,16 @@ export const MODULES = {
       { key: 'fb3', label: 'feedback 3', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0, call: 'fm33', tip: 'the third modulator feeds back into itself (0 = off); keep it small', fold: true },
       { key: 'fb4', label: 'feedback 4', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0, call: 'fm44', tip: 'the fourth modulator feeds back into itself (0 = off); keep it small', fold: true },
       // the other routes of the 4x4 matrix: modulator i into j (0 = the note). Edited in the routing view, so they have no knob.
+      // the brightness envelope of each operator (operator 1's attack here; its decay and sustain are the two dials above). Operators 2 to 4 have no envelope until one of
+      // their three values is changed (the modulator then holds a steady level, like before). Edited by drawing the shape, so the dials are hidden.
+      { key: 'attack', label: 'attack', kind: 'knob', hide: true, min: 0, max: 2, step: 0.001, def: 0, call: 'fmattack', tip: 'seconds for the modulation to reach full strength' },
+      ...[2, 3, 4].flatMap((k) => [
+        { key: 'attack' + k, label: `attack ${k}`, kind: 'knob', hide: true, min: 0, max: 2, step: 0.001, def: 0, call: 'fmattack' + k },
+        { key: 'decay' + k, label: `decay ${k}`, kind: 'knob', hide: true, min: 0.01, max: 2, step: 0.01, def: 0.2, call: 'fmdecay' + k },
+        { key: 'sustain' + k, label: `sustain ${k}`, kind: 'knob', hide: true, min: 0, max: 1, step: 0.01, def: 1, call: 'fmsustain' + k },
+      ]),
+      { key: 'envop', label: 'envelope of', kind: 'view', hide: true, def: 1 },
+      ...[1, 2, 3, 4].map((k) => ({ key: OWAVE[k - 1], label: `wave ${k}`, kind: 'select', hide: true, def: 'sine', options: FM_WAVE_NAMES.map((w) => [w, w]), str: true, call: 'fmwave' + (k === 1 ? '' : k), tip: `the wave operator ${k} plays (sine is the cleanest; the others add overtones of their own)` })),
       ...ROUTES.map(([i, j]) => ({ key: 'r' + i + j, label: 'op ' + i + ' into ' + (j ? 'op ' + j : 'note'), kind: 'knob', hide: true, min: 0, max: 16, step: 0.1, def: 0, call: 'fm' + i + j })),
     ],
   },
@@ -753,11 +775,57 @@ export const MUTE_KIND = Object.fromEntries([
 
 // FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.
 // They are starting points to hear what FM can do (the Instrument's envelope matters too: a bell wants a long release, a bass a short one).
+// ---- FM operator waves and a preview of the note they make ----
+// What one note looks like once the operators have shaken it, at full brightness: the same sums Strudel's oscillators do, worked out in code.
+// The carrier plays once per unit of time; operator k plays harm[k] times faster, and each link shakes its target's pitch by (amount x the source's pitch).
+export function fmShape(p, carrier = 'sine', N = 1024, cycles = 2) {
+  const links = [];
+  for (let i = 1; i <= 4; i++) for (let j = 0; j <= 4; j++) if (i !== j) { const v = Number(p[fmLinkKey(i, j)]); if (v > 0) links.push([i, j, v]); }
+  const harm = [1, 2, 3, 4].map((i) => Number(p[i === 1 ? 'harm' : 'harm' + i]) || 1);
+  const fb = [1, 2, 3, 4].map((i) => Number(p['fb' + i]) || 0);
+  const wave = [1, 2, 3, 4].map((i) => p[OWAVE[i - 1]] || 'sine');
+  const used = new Set();
+  for (let pass = 0; pass < 4; pass++) for (const [i, j] of links) if (j === 0 || used.has(j)) used.add(i);
+  const ops = [...used], phase = [0, 0, 0, 0, 0], out = [0, 0, 0, 0, 0], samples = new Float32Array(N * cycles);
+  let cph = 0;
+  for (let n = 0; n < samples.length; n++) {
+    const freq = [0, 0, 0, 0, 0];
+    for (const k of ops) freq[k] = harm[k - 1] + fb[k - 1] * out[k] * harm[k - 1];
+    let cf = 1;
+    for (const [i, j, v] of links) { if (!used.has(i)) continue; if (j === 0) cf += out[i] * v * harm[i - 1]; else freq[j] += out[i] * v * harm[i - 1]; }
+    samples[n] = fmWaveFn(carrier, cph);
+    cph += cf / N;
+    for (const k of ops) { phase[k] += freq[k] / N; out[k] = fmWaveFn(wave[k - 1], phase[k]); }
+  }
+  return samples;
+}
+
+// ---- FM algorithms: which operator shakes which. A link is [from, to, amount]: "operator 2 shakes operator 1" is [2, 1, 1]; to 0 is the note itself. ----
+// The chain links (1 to the note, 2 to 1, 3 to 2, 4 to 3) are the dials index, index2, index3, index4; every other link is a hidden route dial like r31.
+export const fmLinkKey = (from, to) => (from === to + 1 ? (from === 1 ? 'index' : 'index' + from) : 'r' + from + to);
+export const fmLinks = (p) => {
+  const out = [];
+  for (let i = 1; i <= 4; i++) for (let j = 0; j <= 4; j++) { if (i === j) continue; const k = fmLinkKey(i, j), v = Number(p[k]); if (v > 0) out.push([i, j, v]); }
+  return out;
+};
+export const FM_ALGORITHMS = [
+  { id: 'one', label: 'One shaker', tip: 'a single modulator shakes the note: the classic simple FM', links: [[1, 0, 1.5]] },
+  { id: 'two', label: 'Two in a row', tip: '2 shakes 1, and 1 shakes the note: a bell or electric-piano start', links: [[1, 0, 1.5], [2, 1, 1]] },
+  { id: 'three', label: 'Stack of three', tip: '3 shakes 2, 2 shakes 1, 1 shakes the note: a richer, moving tone', links: [[1, 0, 1.5], [2, 1, 1], [3, 2, 0.8]] },
+  { id: 'four', label: 'Stack of four', tip: '4 shakes 3, 3 shakes 2, 2 shakes 1, 1 shakes the note: deep, evolving timbres (and the easiest to make harsh)', links: [[1, 0, 1.5], [2, 1, 1], [3, 2, 0.8], [4, 3, 0.6]] },
+  { id: 'pair-stacks', label: 'Two stacks', tip: '2 shakes 1 and 4 shakes 3, and both 1 and 3 shake the note: two shakers that add together', links: [[1, 0, 1.2], [2, 1, 1], [3, 0, 1.2], [4, 3, 1]] },
+  { id: 'fan-in', label: 'Three into one', tip: 'modulators 2, 3 and 4 all shake operator 1, which shakes the note', links: [[1, 0, 1.5], [2, 1, 0.8], [3, 1, 0.8], [4, 1, 0.5]] },
+  { id: 'y', label: 'Y shape', tip: '4 shakes 3; 3 and 2 both shake 1; 1 shakes the note', links: [[1, 0, 1.5], [2, 1, 1], [3, 1, 1], [4, 3, 0.8]] },
+  { id: 'all-note', label: 'All shake the note', tip: 'operators 1, 2 and 3 each shake the note directly: a bright, even sound', links: [[1, 0, 1], [2, 0, 0.8], [3, 0, 0.6]] },
+];
+// the algorithm whose links are exactly the ones switched on, or null
+export const fmAlgorithmOf = (p) => { const on = fmLinks(p).map(([a, b]) => a + '>' + b).sort().join(','); return FM_ALGORITHMS.find((al) => al.links.map(([a, b]) => a + '>' + b).sort().join(',') === on)?.id ?? null; };
+
 export const FM_PRESETS = [
-  { id: 'epiano', label: 'Electric piano', tip: 'a soft tone (1:1) with a bright, quick "tine" on top (harmonic 14) that fades fast', params: { index: 2, harm: 1, decay: 0.5, sustain: 0.1, index2: 0.8, harm2: 14 } },
+  { id: 'epiano', label: 'Electric piano', tip: 'a soft tone (1:1) with a bright, quick "tine" on top (harmonic 14) that fades fast', params: { index: 2, harm: 1, decay: 0.5, sustain: 0.1, index2: 0.8, harm2: 14, decay2: 0.12, sustain2: 0 } },
   { id: 'bell', label: 'Bell', tip: 'an in-between harmonic (3.5) makes clangy overtones that do not line up with the note, which is what a bell sounds like', params: { index: 5, harm: 3.5, decay: 1.2, sustain: 0 } },
   { id: 'bass', label: 'Bass', tip: 'a 1:1 shake that is bright for an instant and then settles: a tight, punchy bass', params: { index: 3.5, harm: 1, decay: 0.18, sustain: 0.25, fb1: 0.1 } },
   { id: 'brass', label: 'Brass', tip: 'a 1:1 shake that stays on while the note is held, so the tone stays bright and buzzy', params: { index: 3, harm: 1, decay: 0.6, sustain: 0.7 } },
   { id: 'marimba', label: 'Marimba', tip: 'a high harmonic (4) with a very short burst of brightness: a wooden "tok"', params: { index: 2.5, harm: 4, decay: 0.12, sustain: 0 } },
-  { id: 'clang', label: 'Metal clang', tip: 'a big index with two in-between harmonics: harsh, metallic and not in tune', params: { index: 9, harm: 2.75, decay: 0.5, sustain: 0, index2: 4, harm2: 1.5 } },
+  { id: 'clang', label: 'Metal clang', tip: 'a big index with two in-between harmonics: harsh, metallic and not in tune', params: { index: 9, harm: 2.75, decay: 0.5, sustain: 0, index2: 4, harm2: 1.5, decay2: 0.9, sustain2: 0.2 } },
 ];
