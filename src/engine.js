@@ -70,6 +70,24 @@ function routeSafeOutput() {
   } catch { /* leave the output as it was */ }
 }
 
+// iPhones mute Web Audio when the ring/silent switch is on silent, unless the page counts as playing media. Two ways to say so, both
+// started from a tap: the audio session type (Safari 16.4+), and a looping silent <audio> element (older iOS).
+let keepAlive = null;
+function unlockAudioSession() {
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* not supported */ }
+  try {
+    if (!keepAlive) {
+      const n = 800, b = new Uint8Array(44 + n), dv = new DataView(b.buffer), w = (o, s) => [...s].forEach((c, i) => b.set([c.charCodeAt(0)], o + i));
+      w(0, 'RIFF'); dv.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+      dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); w(36, 'data'); dv.setUint32(40, n, true);
+      b.fill(128, 44);   // 8-bit silence
+      keepAlive = new Audio(URL.createObjectURL(new Blob([b], { type: 'audio/wav' })));
+      keepAlive.loop = true; keepAlive.setAttribute('playsinline', ''); keepAlive.setAttribute('aria-hidden', 'true');
+    }
+    keepAlive.play()?.catch(() => {});
+  } catch { /* the sound still plays when the switch is on ring */ }
+}
+
 export function createEngine() {
   let repl = null;
   let starting = null;
@@ -134,6 +152,7 @@ export function createEngine() {
     onStatus(f) { statusSubs.add(f); return () => statusSubs.delete(f); },
     // must be called from the click handler: initAudio has to run inside the user gesture
     async start(code) {
+      unlockAudioSession();                // inside the click: lets sound play with the iPhone silent switch on
       const audio = initAudio();           // inside the click, before any await that could lose the gesture
       await audio;
       await ensure();
@@ -157,13 +176,14 @@ export function createEngine() {
     },
     stop() {
       playing = false;
+      try { keepAlive?.pause(); } catch { /* ignore */ }
       clearHydra();
       repl?.stop();
       setStatus('ready', '');
     },
     setSlider(id, value) { sliderValues[id] = value; },
     // Sound previews (hover in the pickers). warm() must run inside a click so the browser lets audio start.
-    warm() { try { initAudio(); } catch { /* already running */ } ensure().then(() => routeSafeOutput()).catch(() => {}); },
+    warm() { unlockAudioSession(); try { initAudio(); } catch { /* already running */ } ensure().then(() => routeSafeOutput()).catch(() => {}); },
     // the highest level of the last moment, as Strudel makes it (above 1 would have clipped without the limiter)
     peak() {
       const s = safe;
