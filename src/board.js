@@ -764,7 +764,26 @@ export function createBoard(root, store, hooks) {
   const paintViewUI = () => { const f = flowMode(); viewUI.querySelector('.vt-flow').classList.toggle('on', f); viewUI.querySelector('.vt-board').classList.toggle('on', !f); };
   root.append(viewUI); paintViewUI();
   let wasFlow = false;
-  const relayout = () => { const f = flowMode(); if (f !== wasFlow) { wasFlow = f; paintViewUI(); sync(); if (!f) setTimeout(() => fit(), 0); } };
+  // Switching layouts keeps your place: Board -> Flow scrolls to the module nearest the middle of the board; Flow -> Board shows the module that was at the top of the list
+  const visibleNodes = () => [...views].filter(([, v]) => v.el.offsetWidth && !v.el.classList.contains('gh') && !v.el.classList.contains('fg-hidden'));
+  function focusNode(id) {
+    const n = nodeById(store.graph, id), el = views.get(id)?.el;
+    if (!n || !el) return fit();
+    const r = root.getBoundingClientRect();
+    view.z = Math.min(1, Math.max(0.5, (r.width - 24) / (el.offsetWidth || 260)));
+    view.x = 12 - n.x * view.z; view.y = 12 - n.y * view.z;
+    applyView();
+  }
+  const relayout = () => {
+    const f = flowMode();
+    if (f === wasFlow) return;
+    const rr = root.getBoundingClientRect();
+    let keep = null;
+    if (wasFlow) keep = visibleNodes().filter(([, v]) => v.el.getBoundingClientRect().bottom > rr.top + 20).sort((a, b) => a[1].el.getBoundingClientRect().top - b[1].el.getBoundingClientRect().top)[0]?.[0];
+    else keep = visibleNodes().sort((a, b) => { const d = (v) => { const q = v.el.getBoundingClientRect(); return Math.hypot(q.x + q.width / 2 - (rr.x + rr.width / 2), q.y + q.height / 2 - (rr.y + rr.height / 2)); }; return d(a[1]) - d(b[1]); })[0]?.[0];
+    wasFlow = f; paintViewUI(); sync();
+    setTimeout(() => { if (f) { if (keep) { const el = views.get(keep)?.el; el?.scrollIntoView({ block: 'start' }); } } else if (keep) focusNode(keep); else fit(); }, 0);
+  };
   window.addEventListener('resize', relayout);
   onPrefs((p, k) => { if (k === 'layout') relayout(); });
   function zoomAt(f, cx, cy) {
@@ -865,7 +884,7 @@ export function createBoard(root, store, hooks) {
   // pan by dragging empty board
   root.addEventListener('pointerdown', (e) => {
     if (flowMode()) return;   // the flow view scrolls; there is no panning or box selecting
-    if (e.target.closest('.node, .zoom, .cable-hit, .minimap, .selbar')) return;   // the selection bar is on the board, so a click on it must not count as a click on empty board (that would clear the selection first)
+    if (e.target.closest('.node, .zoom, .cable-hit, .minimap, .selbar, .view-toggle, .tap-banner')) return;   // the Flow/Board switch and the connect banner are buttons on the board: a press on them must not start a pan (it captures the pointer, so the click never reaches the button). The selection bar is on the board, so a click on it must not count as a click on empty board (that would clear the selection first)
     if (e.shiftKey || e.metaKey || e.ctrlKey) return startMarquee(e);
     startPan(e);
   });
