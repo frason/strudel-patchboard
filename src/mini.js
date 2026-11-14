@@ -13,7 +13,8 @@ export function parseMini(src, { euclid = false } = {}) {
       if (c === '*') { i++; item.rep = (item.rep || 1) * number(); }
       else if (c === '@') { i++; item.len = number(); }
       else if (c === '!') { i++; item.copies = /[0-9]/.test(src[i] || '') ? number() : 2; }
-      else if (c && '?/%.|{}:'.includes(c)) throw new Unsupported(`"${c}" in the pattern string`);
+      else if (c === '/') { i++; let s = ''; while (/[0-9.]/.test(src[i] || '')) s += src[i++]; if (!s || Number.isNaN(Number(s))) throw new Unsupported('a number was expected after /'); item.slow = Number(s); }
+      else if (c && '?%.|{}:'.includes(c)) throw new Unsupported(`"${c}" in the pattern string`);
       else break;
     }
     return item;

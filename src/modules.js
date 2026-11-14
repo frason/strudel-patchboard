@@ -50,6 +50,10 @@ const modeParam = {
   options: [['steps', 'all steps in a cycle'], ['turns', 'one step per cycle <>']],
 };
 
+// the Melody Sequencer's play options: the steps squeezed into one cycle, a steady pace (8 steps a cycle, so more steps make a longer loop), or one per cycle
+const paceModeParam = { ...modeParam, options: [['steps', 'all steps in a cycle'], ['pace', 'steady pace (long loop)']] };
+const melodyModeParam = { ...modeParam, options: [['steps', 'all steps in a cycle'], ['pace', 'steady pace (long loop)'], ['turns', 'one step per cycle <>']] };
+
 export const EVERY_FNS = {
   rev: { code: 'rev', label: 'reverse', say: 'reverses the pattern' },
   fast2: { code: 'x=>x.fast(2)', label: 'fast ×2', say: 'plays it twice as fast' },
@@ -75,7 +79,7 @@ export const MODULES = {
     blurb: 'Writes a note pattern. Each step is a note or a rest.',
     inputs: [{ id: 'key', type: 'key', label: 'key', required: false }],
     params: [
-      stepsParam, { key: 'octave', label: 'view octave', kind: 'view', def: 3 }, modeParam,
+      stepsParam, { key: 'octave', label: 'view octave', kind: 'view', def: 3 }, melodyModeParam,
       { key: 'root', label: 'key', kind: 'select', def: 'C', options: ROOTS, fold: true },
       { key: 'scale', label: 'scale', kind: 'select', def: 'major', options: [['off', 'off: note names'], ...Object.keys(SCALES)], fold: true },
     ],
@@ -86,7 +90,7 @@ export const MODULES = {
     inputs: [{ id: 'key', type: 'key', label: 'key', required: false }],
     blurb: 'Writes a melody for you: every step is a random note of the scale, new every cycle. Range is how many scale steps up from the root the notes may reach. Turn freeze up to 1 or more to pick one variation and repeat it. Plug in a Key to change the scale for everything at once.',
     params: [
-      stepsParam,
+      stepsParam, paceModeParam,
       { key: 'range', label: 'range', kind: 'knob', min: 2, max: 14, step: 1, def: 7, always: true, tip: 'how many scale steps up from the root the notes can reach' },
       { key: 'octave', label: 'octave', kind: 'select', def: 3, options: [1, 2, 3, 4, 5], num: true },
       freezeParam,
@@ -98,7 +102,7 @@ export const MODULES = {
     title: 'Random Rhythm', cat: 'sequencer', out: 'trigger',
     blurb: 'Writes a rhythm for you: each step may or may not hit, at random, new every cycle. Density is how likely a step is to hit. It has no pitch and no sound, so plug it into a Sample. Turn freeze up to 1 or more to repeat one variation.',
     params: [
-      stepsParam,
+      stepsParam, paceModeParam,
       { key: 'density', label: 'density', kind: 'knob', min: 0.05, max: 1, step: 0.05, def: 0.6, always: true, tip: 'how likely each step is to hit (1 = every step)' },
       freezeParam,
     ],
@@ -134,7 +138,7 @@ export const MODULES = {
   rhythm: {
     title: 'Rhythm Sequencer', cat: 'sequencer', out: 'trigger',
     blurb: 'Writes a rhythm: when things happen. It has no pitch and no sound, so plug it into a Sample.',
-    params: [stepsParam, modeParam],
+    params: [stepsParam, melodyModeParam],
     data: { cells: true },
   },
 
@@ -142,7 +146,7 @@ export const MODULES = {
     title: 'Drum Machine', cat: 'source', out: 'sound',
     blurb: 'A grid with one row per drum sound. Click steps to place hits; each row becomes s("bd").struct("x ~ x ~"), stacked together.',
     params: [
-      stepsParam,
+      stepsParam, paceModeParam,
       { key: 'bank', label: 'bank', kind: 'select', def: '', options: BANKS, call: 'bank', str: true, fold: true },
       { key: 'gain', label: 'gain', kind: 'knob', min: 0, max: 1.5, step: 0.01, def: 1, call: 'gain', wire: true, tip: 'volume of the whole machine' },
       { key: 'pan', label: 'pan', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.5, call: 'pan', wire: true, tip: 'where the whole machine sits: left (0) to right (1)' },
@@ -620,9 +624,12 @@ export function makeCells(type, n) {
   return Array.from({ length: n }, () => (type === 'chords' ? { sym: null, d: null, len: 1 } : type === 'melody' ? { n: null, d: null, len: 1, vel: 1 } : { on: false, len: 1 }));
 }
 
+// Making a pattern longer repeats what is already there (8 steps become 16 by playing the same 8 twice), so it can be varied from a working loop.
+const copyOf = (c) => JSON.parse(JSON.stringify(c));
 export function resizeCells(type, cells, n) {
   const out = cells.slice(0, n);
-  while (out.length < n) out.push(makeCells(type, 1)[0]);
+  const have = out.length;
+  while (out.length < n) out.push(have ? copyOf(cells[out.length % have]) : makeCells(type, 1)[0]);
   return out;
 }
 
@@ -654,10 +661,50 @@ export function defaultTracks(steps) {
   const hits = { bd: [0, 4], sd: [2, 6], hh: [0, 2, 4, 6] };
   return Object.entries(hits).map(([name, at]) => ({ name, mute: false, cells: Array.from({ length: steps }, (_, i) => ({ on: at.includes(i * (8 / steps)) })) }));
 }
+// A drum row from text: 'x' hit, '~' rest, 'x*2' repeat, '[x x]' brackets.
+export const drumRow = (name, pattern) => ({
+  name, mute: false,
+  cells: pattern.match(/\[[^\]]*\]|\S+/g).map((tok) => {
+    if (tok.startsWith('[')) { const subs = tok.slice(1, -1).trim().split(/\s+/).map((t) => ({ on: t === 'x' })); return { on: false, x: 'sub' + subs.length, sub: subs }; }
+    const m = /^x\*(\d)$/.exec(tok);
+    return m ? { on: true, x: 'rep' + m[1] } : { on: tok === 'x' };
+  }),
+});
+// Ready-made drum kits for the Drum Machine: a drum bank plus a groove. Loading one replaces the bank, steps and rows (gain and pan stay).
+const kit = (id, label, tip, bank, rows) => ({ id, label, tip, params: { bank, steps: rows[0][1].match(/\[[^\]]*\]|\S+/g).length, tracks: rows.map(([n, p]) => drumRow(n, p)) } });
+export const DRUM_PRESETS = [
+  kit('rock', 'Rock beat', 'Kick on 1 and 3, snare on 2 and 4, steady hats (LinnDrum)', 'LinnDrum', [['bd', 'x ~ ~ ~ x ~ ~ ~'], ['sd', '~ ~ x ~ ~ ~ x ~'], ['hh', 'x x x x x x x x']]),
+  kit('house', 'House (four on the floor)', 'Kick on every beat, clap on 2 and 4, open hats between (TR-909)', 'RolandTR909', [['bd', 'x ~ x ~ x ~ x ~'], ['cp', '~ ~ x ~ ~ ~ x ~'], ['oh', '~ x ~ x ~ x ~ x'], ['hh', 'x x x x x x x x']]),
+  kit('techno', 'Techno', 'Driving kick, off-beat open hat, busy closed hats (TR-909)', 'RolandTR909', [['bd', 'x ~ x ~ x ~ x ~'], ['oh', '~ x ~ x ~ x ~ x'], ['hh', 'x*2 x x*2 x x*2 x x*2 x'], ['cp', '~ ~ ~ ~ x ~ ~ ~']]),
+  kit('hiphop', 'Boom bap (hip hop)', 'Swung-feel kick pattern with a snare on 2 and 4 (TR-808)', 'RolandTR808', [['bd', 'x ~ ~ x ~ ~ x ~ ~ ~ x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~'], ['hh', 'x x x x x x x x x x x x x x x x']]),
+  kit('trap', 'Trap', 'Sparse kick, snare on 3, rolling hats (TR-808)', 'RolandTR808', [['bd', 'x ~ ~ ~ ~ ~ x ~ ~ ~ x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~ ~ ~ ~ ~'], ['hh', 'x x x x x x x x x x x [x x] x x [x x x] x']]),
+  kit('disco', 'Disco', 'Four-on-the-floor kick, open hat on the off-beat, snare on 2 and 4 (LinnDrum)', 'LinnDrum', [['bd', 'x ~ x ~ x ~ x ~'], ['sd', '~ ~ x ~ ~ ~ x ~'], ['oh', '~ x ~ x ~ x ~ x'], ['hh', 'x x x x x x x x']]),
+  kit('breakbeat', 'Breakbeat', 'Syncopated kicks with a ghosted snare (TR-707)', 'RolandTR707', [['bd', 'x ~ ~ ~ ~ ~ x ~ ~ x x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ ~ ~ x ~ ~ x ~ ~ ~'], ['hh', 'x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~']]),
+  kit('dnb', 'Drum and bass', 'Fast two-step: kick, then snare on 2 and 4 (TR-909)', 'RolandTR909', [['bd', 'x ~ ~ ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~'], ['hh', 'x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~']]),
+  kit('reggae', 'Reggae one drop', 'Nothing on beat 1; kick and snare land together on 3 (TR-707)', 'RolandTR707', [['bd', '~ ~ ~ ~ x ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ ~'], ['hh', 'x x x x x x x x']]),
+  kit('electro', 'Electro', 'Booming kick, clap, crisp hats (TR-808)', 'RolandTR808', [['bd', 'x ~ ~ ~ ~ ~ x ~ x ~ ~ ~ ~ ~ ~ ~'], ['cp', '~ ~ ~ ~ x ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~'], ['hh', 'x ~ x x x ~ x x x ~ x x x ~ x x']]),
+];
+
+// Ready-made tunes for the Melody Sequencer, as scale degrees (0 is the key's root, null is a rest). Loading one sets the steps and notes;
+// the key and scale stay. More than 8 steps run as a longer loop at the same pace.
+const tune = (id, label, tip, degrees, { len = {}, octave } = {}) => ({ id, label, tip, octave, degrees, len });
+export const MELODY_TEMPLATES = [
+  tune('scale-up', 'Scale up', 'Eight steps climbing the scale', [0, 1, 2, 3, 4, 5, 6, 7]),
+  tune('scale-down', 'Scale down', 'Eight steps walking back down', [7, 6, 5, 4, 3, 2, 1, 0]),
+  tune('arp', 'Arpeggio', 'Root, third, fifth, octave and back: the notes of a chord one at a time', [0, 2, 4, 7, 4, 2, 0, null]),
+  tune('hook', 'Pop hook', 'A short, catchy phrase that repeats and resolves home', [4, 4, 5, 4, 2, 0, null, 2]),
+  tune('ostinato', 'Ostinato', 'A repeating figure that rocks between the root and a neighbour', [0, null, 0, 2, null, 0, null, 4]),
+  tune('bassline', 'Bass line', 'Root and fifth, low down (try a bass or sine Instrument)', [0, null, 0, null, 4, null, 3, null], { octave: 2 }),
+  tune('call', 'Call and answer', 'Sixteen steps: a question that rises, then an answer that settles', [0, 2, 4, 2, 0, 2, 4, null, 4, 5, 4, 2, 1, null, 0, null]),
+  tune('lullaby', 'Lullaby', 'Slow, rocking and gentle, with long notes (16 steps)', [4, null, 4, null, 2, null, 4, null, 5, null, 3, null, 2, null, 0, null], { len: { 0: 2, 4: 2, 8: 2, 12: 2 } }),
+  tune('riff', 'Minor riff', 'A gritty riff that leans on the low notes (works best in a minor key)', [0, 0, null, 2, 0, null, 3, null, 0, 0, null, 4, 3, null, 2, null]),
+  tune('syncopated', 'Syncopated', 'Off-beat hits that push against the pulse', [0, null, null, 2, null, 4, null, null, 3, null, 2, null, null, 0, null, null]),
+];
+
 export function resizeTracks(tracks, n) {
   return tracks.map((t) => {
-    const cells = t.cells.slice(0, n);
-    while (cells.length < n) cells.push({ on: false });
+    const cells = t.cells.slice(0, n), have = cells.length;
+    while (cells.length < n) cells.push(have ? copyOf(t.cells[cells.length % have]) : { on: false });
     return { ...t, cells };
   });
 }

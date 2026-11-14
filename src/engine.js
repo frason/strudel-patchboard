@@ -173,6 +173,8 @@ export function createEngine() {
       return p;
     },
     limiterOn: () => getPrefs().safeOutput !== false,
+    // how many times the speakers ran dry since the page loaded (the computer could not keep up). Chrome-based browsers only; null elsewhere.
+    underruns() { try { const n = getAudioContext().playbackStats?.underrunEvents; return Number.isFinite(n) ? n : null; } catch { return null; } },
     isReady: () => !!repl,
     async preview({ id, kind, bank, pitched }) {
       if (!repl) return false;

@@ -160,3 +160,35 @@ export function effectiveKey(g, n) {
 
 // Scope modules get analyser ids 1, 2, ... in board order, so the code and the drawing agree.
 export const scopeId = (g, n) => g.nodes.filter((x) => x.type === 'scope').findIndex((x) => x.id === n.id) + 1;
+
+// ---- helpers for the phone "flow" view (pure, so they can be tested) ----
+// The order modules are listed in: sources first, then each step downstream (longest path from a source), top to bottom within a step.
+export function flowOrder(g) {
+  const depth = new Map(g.nodes.map((n) => [n.id, 0]));
+  for (let pass = 0; pass < g.nodes.length; pass++) {
+    let changed = false;
+    for (const w of g.wires) {
+      if (w.from.node === w.to.node) continue;
+      const d = (depth.get(w.from.node) || 0) + 1;
+      if (d > (depth.get(w.to.node) || 0) && d <= g.nodes.length) { depth.set(w.to.node, d); changed = true; }
+    }
+    if (!changed) break;
+  }
+  return [...g.nodes].sort((a, b) => depth.get(a.id) - depth.get(b.id) || a.y - b.y || a.x - b.x).map((n) => n.id);
+}
+// Where a cable from this module's output could go: every input (and number knob) that accepts it, as {node, port, label}.
+export function legalTargets(g, fromNode) {
+  const out = [];
+  for (const n of g.nodes) {
+    if (n.id === fromNode) continue;
+    for (const p of portsOf(n)) {
+      if (p.dir !== 'in') continue;
+      if (!whyNot(g, fromNode, n.id, p.id)) out.push({ node: n.id, port: p.id, label: p.param ? `${p.label} knob` : p.label || 'in' });
+    }
+  }
+  return out;
+}
+// Which modules could feed this input: every output that is allowed to plug into it.
+export function legalSources(g, toNode, toPort) {
+  return g.nodes.filter((n) => n.id !== toNode && MODULES[n.type].out && !whyNot(g, n.id, toNode, toPort)).map((n) => n.id);
+}

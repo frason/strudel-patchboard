@@ -495,4 +495,95 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   check('FM presets lesson: four FM sounds in a cat()', (fmp.match(/\.fm\(/g) || []).length === 4 && fmp.includes('cat('));
   check('lessons are numbered 1..N in order', LESSONS.every((l, k) => l.title.startsWith(`${k + 1} · `)));
 }
+{
+  const { DRUM_PRESETS } = await import('../src/modules.js');
+  const { emptyGraph } = await import('../src/graph.js');
+  let ok = DRUM_PRESETS.length >= 8;
+  for (const pr of DRUM_PRESETS) {
+    const g = emptyGraph();
+    const d = makeNode('drums', 0, 0, JSON.parse(JSON.stringify(pr.params))), o = makeNode('output', 0, 0);
+    g.nodes.push(d, o); g.wires.push({ id: 'w1', from: { node: d.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+    try {
+      const ev = (await evaluate(compile(g).code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
+      if (!ev.length || pr.params.tracks.some((t) => t.cells.length !== pr.params.steps)) ok = false;
+    } catch { ok = false; }
+  }
+  check('every drum kit preset compiles, plays, and has rows as long as its steps', ok);
+}
+{
+  const { emptyGraph } = await import('../src/graph.js');
+  const fmIssues = (wave) => {
+    const g = emptyGraph(), N = (t, p = {}) => makeNode(t, 0, 0, p);
+    const m = N('melody'), sy = N('synth', { wave }), f = N('fm'), o = N('output');
+    g.nodes.push(m, sy, f, o);
+    g.wires.push({ id: 'a', from: { node: m.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: 'b', from: { node: sy.id, port: 'out' }, to: { node: f.id, port: 'in' } }, { id: 'c', from: { node: f.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+    return compile(g).issues.filter((i) => i.node === f.id && /FM has no effect/.test(i.msg)).length;
+  };
+  check('FM warns on a recorded instrument (gm_sitar, piano) but not on a synth wave', fmIssues('gm_sitar') === 1 && fmIssues('piano') === 1 && fmIssues('sine') === 0 && fmIssues('supersaw') === 0);
+  check('no lesson shows the FM warning', LESSONS.every((l) => !compile(l.graph()).issues.some((i) => /FM has no effect/.test(i.msg))));
+}
+{
+  const { MELODY_TEMPLATES, makeCells } = await import('../src/modules.js');
+  const { emptyGraph } = await import('../src/graph.js');
+  const mk = (n, mode, steps) => { const g = emptyGraph(); const m = makeNode('melody', 0, 0, { steps, mode, cells: makeCells('melody', steps).map((c, i) => ({ ...c, d: i % 3, n: null })) }), o = makeNode('output', 0, 0); g.nodes.push(m, o); g.wires.push({ id: 'w', from: { node: m.id, port: 'out' }, to: { node: o.id, port: 'in' } }); return g; };
+  const count = async (g, a, b) => (await evaluate(compile(g).code, false)).queryArc(a, b).filter((h) => h.hasOnset()).length;
+  check('melody: 16 steps squeezed play 16 notes in one cycle; at a steady pace they take two cycles (8 per cycle)', (await count(mk(0, 'steps', 16), 0, 1)) === 16 && (await count(mk(0, 'pace', 16), 0, 1)) === 8 && (await count(mk(0, 'pace', 16), 0, 2)) === 16);
+  let ok = MELODY_TEMPLATES.length >= 8;
+  for (const t of MELODY_TEMPLATES) {
+    const mode = t.degrees.length > 8 ? 'pace' : 'steps';
+    const g = mk(0, mode, t.degrees.length); g.nodes[0].params.cells = t.degrees.map((d, i) => ({ n: null, d, len: t.len[i] || 1, vel: 1 }));
+    try { if (!(await count(g, 0, 2))) ok = false; } catch { ok = false; }
+  }
+  check('every melody template compiles and plays', ok);
+}
+{
+  const { extractCode, stripCode, reviewPrompt, STARTER_SYSTEM } = await import('../src/ai.js');
+  const { importStrudel } = await import('../src/importer.js');
+  const reply = 'Here you go\n```js\nsetcpm(90/4)\n$: s("bd ~ sd ~").bank("RolandTR808")\n```\nenjoy';
+  check('AI helper: pulls the code block out of an answer, and the prose is what is left', extractCode(reply).startsWith('setcpm(90/4)') && !stripCode(reply).includes('setcpm') && extractCode('no code here') === '');
+  check('AI helper: the review prompt carries the code, warnings and measurements', /bd sd/.test(reviewPrompt({ code: 's("bd sd")', issues: ['x'], measured: ['clipped'] })) && /clipped/.test(reviewPrompt({ code: 'a', measured: ['clipped'] })));
+  check('AI helper: a reply in the allowed subset imports with nothing skipped', importStrudel(extractCode(reply)).report.skipped.length === 0 && /Strudel/.test(STARTER_SYSTEM));
+}
+{
+  const { makeCells } = await import('../src/modules.js');
+  const { emptyGraph } = await import('../src/graph.js');
+  const { importStrudel } = await import('../src/importer.js');
+  const wire = (g, a, b, port = 'in') => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+  const count = async (code, a, b) => (await evaluate(code, false)).queryArc(a, b).filter((h) => h.hasOnset()).length;
+  // rhythm: 16 steps all on, into a sample
+  const rg = (mode) => { const g = emptyGraph(); const r = makeNode('rhythm', 0, 0, { steps: 16, mode, cells: Array.from({ length: 16 }, () => ({ on: true, len: 1 })) }), sm = makeNode('sample', 0, 0, { name: 'hh' }), o = makeNode('output', 0, 0); g.nodes.push(r, sm, o); wire(g, r, sm); wire(g, sm, o); return g; };
+  check('rhythm: 16 steps at a steady pace play 8 hits a cycle (two cycles long); squeezed they play 16', (await count(compile(rg('pace')).code, 0, 1)) === 8 && (await count(compile(rg('steps')).code, 0, 1)) === 16);
+  // drums
+  const dg = (mode) => { const g = emptyGraph(); const d = makeNode('drums', 0, 0, { steps: 16, mode, tracks: [{ name: 'hh', mute: false, cells: Array.from({ length: 16 }, () => ({ on: true })) }] }), o = makeNode('output', 0, 0); g.nodes.push(d, o); wire(g, d, o); return g; };
+  check('drum machine: 16 steps at a steady pace play 8 hits a cycle', (await count(compile(dg('pace')).code, 0, 1)) === 8 && (await count(compile(dg('steps')).code, 0, 1)) === 16);
+  // the code reads back: a steady-pace melody and rhythm import as the same mode and steps
+  const mel = importStrudel('$: note("[c3 e3 g3 b3 c4 b3 g3 e3 c3 e3 g3 b3 c4 b3 g3 e3]/2").s("sawtooth")');
+  const m = mel.graph?.nodes.find((n) => n.type === 'melody');
+  check('importer: "[...16 steps]/2" comes back as a 16-step melody at a steady pace', !mel.error && m && m.params.steps === 16 && m.params.mode === 'pace' && mel.report.skipped.length === 0);
+  const bad = importStrudel('$: note("[c3 e3 g3 b3 c4 b3 g3 e3 c3 e3 g3 b3 c4 b3 g3 e3]/3").s("sawtooth")');
+  check('importer: a slowdown that is not steps over 8 is reported, not guessed', bad.report?.skipped.length > 0 || bad.error);
+  const back = importStrudel(compile(rg('pace')).code);
+  check('rhythm at a steady pace survives code -> modules -> code', !back.error && back.graph.nodes.some((n) => n.type === 'rhythm' && n.params.mode === 'pace' && n.params.steps === 16));
+}
+{
+  const { resizeCells, resizeTracks } = await import('../src/modules.js');
+  const c8 = Array.from({ length: 8 }, (_, i) => ({ n: null, d: i % 3 === 0 ? i : null, len: 1, vel: 1 }));
+  const c16 = resizeCells('melody', c8, 16);
+  const tr = resizeTracks([{ name: 'bd', mute: false, cells: [{ on: true }, { on: false }, { on: true, x: 'rep2' }, { on: false }] }], 8);
+  check('making a sequencer longer repeats the pattern it has (8 -> 16 plays it twice; also in drum rows); shrinking cuts it', c16.length === 16 && c16.every((c, i) => c.d === c8[i % 8].d) && c16[9] !== c16[1] && tr[0].cells[4].on === true && tr[0].cells[6].x === 'rep2' && resizeCells('melody', c16, 8).length === 8);
+}
+{
+  const { emptyGraph, flowOrder, legalTargets, legalSources } = await import('../src/graph.js');
+  const g = emptyGraph(), N = (t, x, y) => makeNode(t, x, y);
+  const out = N('output', 900, 0), syn = N('synth', 400, 0), mel = N('melody', 0, 300), fil = N('filter', 600, 0), key = N('key', 0, 0);
+  g.nodes.push(out, syn, mel, fil, key);
+  g.wires.push({ id: 'a', from: { node: mel.id, port: 'out' }, to: { node: syn.id, port: 'in' } }, { id: 'b', from: { node: syn.id, port: 'out' }, to: { node: fil.id, port: 'in' } }, { id: 'c', from: { node: fil.id, port: 'out' }, to: { node: out.id, port: 'in' } });
+  const ord = flowOrder(g);
+  check('flow view order: sources first, then downstream in order, output last; every module listed once', ord.length === 5 && ord.indexOf(mel.id) < ord.indexOf(syn.id) && ord.indexOf(syn.id) < ord.indexOf(fil.id) && ord.indexOf(fil.id) < ord.indexOf(out.id) && new Set(ord).size === 5);
+  const lt = legalTargets(g, mel.id);
+  check('tap-to-connect: a melody can plug into the instrument but not into Output; a key can plug into the melody key input', lt.some((t) => t.node === syn.id && t.port === 'in') && !lt.some((t) => t.node === out.id) && legalTargets(g, key.id).some((t) => t.node === mel.id && t.port === 'key'));
+  check('tap-to-connect: the sources that can feed the Instrument include the melody, not Output', legalSources(g, syn.id, 'in').includes(mel.id) && !legalSources(g, syn.id, 'in').includes(out.id));
+  const loop = emptyGraph(); const f1 = N('filter', 0, 0), f2 = N('filter', 0, 0); loop.nodes.push(f1, f2); loop.wires.push({ id: 'l1', from: { node: f1.id, port: 'out' }, to: { node: f2.id, port: 'in' } }, { id: 'l2', from: { node: f2.id, port: 'out' }, to: { node: f1.id, port: 'in' } });
+  check('flow view order does not hang on a feedback loop', flowOrder(loop).length === 2);
+}
 process.exit(failures ? 1 : 0);

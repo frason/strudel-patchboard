@@ -78,6 +78,7 @@ function leafOf(it, kind) {
 function cellsFromItems(items, kind, conv) {
   const cells = [];
   for (const it of expand(items)) {
+    if (it.slow) throw new Skip('a slowdown (/n) inside a sequence');
     const weight = it.len || 1;
     let cell;
     if (it.t === 'sub') {
@@ -111,13 +112,23 @@ function cellsFromItems(items, kind, conv) {
 function readSteps(text, kind, conv, opts = {}) {
   let items;
   try { items = parseMini(text, { euclid: opts.euclid }); } catch (e) { if (e instanceof Unsupported) throw new Skip(e.message); throw e; }
-  let mode = 'steps', fast = 1;
-  if (items.length === 1 && items[0].t === 'turns') {
+  let mode = 'steps', fast = 1, slow = 1;
+  if (items.length === 1 && items[0].t === 'sub' && items[0].slow) {   // "[ ...steps ]/2": a long loop at the pace of 8 steps a cycle
+    const it = items[0];
+    if (it.rep || it.len || it.copies) throw new Skip('a modifier on the whole [...]/n');
+    slow = it.slow; items = it.items; mode = 'pace';
+  } else if (items.length === 1 && items[0].t === 'turns') {
     mode = 'turns'; fast = items[0].rep || 1;
     if (items[0].len || items[0].copies) throw new Skip('a modifier on the whole <...>');
     items = items[0].items;
   } else if (items.some((i) => i.t === 'turns')) throw new Skip('<...> mixed with other steps');
-  return { items, mode, fast };
+  return { items, mode, fast, slow };
+}
+// a long loop's slowdown must be its step count over 8, or it is not the steady-pace mode
+function paceMode(slow, mode, steps) {
+  if (mode !== 'pace') return mode;
+  if (steps <= 8 || Math.abs(slow - steps / 8) > 1e-9) throw new Skip(`a slowdown of /${slow} that is not the number of steps over 8 (${steps} steps)`);
+  return 'pace';
 }
 
 // split a pattern string at commas that are not inside [] <> ()
@@ -288,7 +299,7 @@ export function importStrudel(code, { sounds = null } = {}) {
         S.octShift = (k.octave - 3) * 12;
         deg = true;
       }
-      const { items, mode, fast } = readSteps(text, 'melody', (leaf) => leaf);
+      const { items, mode: mode0, fast, slow } = readSteps(text, 'melody', (leaf) => leaf);
       const conv = (leaf) => {
         const ps = leaf.pitches.map((w) => (deg ? (/^-?\d+$/.test(w) ? Number(w) : (() => { throw new Skip(`"${w}" is not a scale step number`); })()) : noteName(w)));
         return deg ? { n: null, d: ps.length ? ps : null } : { n: ps.length ? ps : null, d: null };
@@ -296,6 +307,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       const cells = cellsFromItems(items, 'melody', conv);
       if (cells.length < 1 || cells.length > 16) throw new Skip(`${cells.length} steps (1 to 16 are supported)`);
       cells.forEach((c) => { c.vel = 1; });
+      const mode = paceMode(slow, mode0, cells.length);
       S.melody = add('melody', { steps: cells.length, mode, scale: 'off', cells, octave: 3 }, stmt);
       S.root = S.melody;
       S.kind = 'notes';
@@ -483,7 +495,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       }
       const t = str(a[0]);
       if (t === null) throw new Skip('struct() with something other than a pattern string');
-      const { items, mode, fast } = readSteps(t, 'rhythm', (l) => l, { euclid: true });
+      const { items, mode: mode0, fast, slow } = readSteps(t, 'rhythm', (l) => l, { euclid: true });
       if (items.length === 1 && items[0].euclid) {
         const e = items[0].euclid;
         const rh = add('rhythm', { steps: 1, mode, cells: [{ on: true, len: 1 }] }, S.stmt);
@@ -496,6 +508,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       }
       const cells = cellsFromItems(items, 'rhythm', (l) => l);
       if (cells.length < 1 || cells.length > 16) throw new Skip(`${cells.length} steps (1 to 16 are supported)`);
+      const mode = paceMode(slow, mode0, cells.length);
       const rh = add('rhythm', { steps: cells.length, mode, cells }, S.stmt);
       wire(rh, root, 'in');
       if (fast !== 1) S.pre.push({ type: 'fast', params: { n: fast } });

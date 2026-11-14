@@ -4,6 +4,7 @@
 import { MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas } from './modules.js';
 import { chordSymbol } from './chords.js';
 import { nodeById, wiresInto, outType, effectiveKey, scopeId } from './graph.js';
+const FM_WAVES = new Set(['sine', 'sawtooth', 'square', 'triangle', 'supersaw', 'pulse', 'sin', 'saw', 'sqr', 'tri', 'z_sine', 'z_sawtooth', 'z_square', 'z_triangle']);   // oscillators FM can modulate
 
 const S = (t, meta = {}) => ({ t, ...meta });
 const NL = (d) => ({ nl: d });
@@ -94,6 +95,10 @@ export function compile(g) {
     return calls;
   }
 
+  // "steady pace": more than 8 steps keep the pace of an 8-step cycle, so the loop spans several cycles: "[ ... ]/2"
+  const paceWrap = (p) => (p.mode === 'pace' && p.steps > 8 ? ['[', `]/${fmt(p.steps / 8)}`] : ['', '']);
+  const paceCall = (n, m) => (n.params.mode === 'pace' && n.params.steps > 8 ? [S(`.slow(${fmt(n.params.steps / 8)})`, { ...m, role: 'fn', note: `slow(${fmt(n.params.steps / 8)}): the steps keep the pace of an 8-step cycle, so ${n.params.steps} steps take ${fmt(n.params.steps / 8)} cycles.` })] : null);
+
   function stepTokens(n, deg = false) {
     const { steps, cells, mode } = n.params;
     const pitched = n.type === 'melody';
@@ -105,7 +110,7 @@ export function compile(g) {
       tokens.push({ step: i, rest, cell: c, len: rest ? 1 : len, vel: c.vel ?? 1 });
       i += (rest ? 1 : len) - 1;
     }
-    return { tokens, wrap: mode === 'turns' ? ['<', '>'] : ['', ''] };
+    return { tokens, wrap: mode === 'turns' ? ['<', '>'] : paceWrap(n.params) };
   }
 
   function seqString(n, tokens, wrap, text, extra) {
@@ -200,9 +205,10 @@ export function compile(g) {
         if (!live.length) return silent(n, 'grid (no hits placed)');
         const trackExpr = ({ t, ti }, d) => {
           const meta = { ...m, role: 'mini', track: ti };
-          const toks = [S('"', meta)];
+          const pw = paceWrap(p);
+          const toks = [S('"' + pw[0], meta)];
           t.cells.forEach((c, i) => { if (i) toks.push(S(' ', meta)); toks.push(S(stepText({ step: i, rest: !stepHas(c, false, false), cell: c, len: 1 }, (lf) => (lf.on ? 'x' : '~')), { ...meta, step: i })); });
-          toks.push(S('"', meta));
+          toks.push(S(pw[1] + '"', meta));
           const base = [S('s(', { ...m, role: 'fn', note: `s("${t.name}") is this drum row's sound.` }), S(q(t.name), meta), S(')', m)];
           const struct = [S('.struct(', { ...m, role: 'fn', note: 'struct("x ~ x") is the row of steps: x = hit, ~ = silence.' }), ...toks, S(')', m)];
           return chain(base, [struct], d, inline);
@@ -301,6 +307,7 @@ export function compile(g) {
           S(')', m)];
         const calls = [[S(`.scale(${q(sc)})`, { ...m, role: 'fn', note: `scale("${sc}") turns the numbers into notes of ${key.root} ${key.scale}, starting at octave ${p.octave}.${key.wired ? ' The key comes from the Key module plugged in.' : ''}` })]];
         if (p.loop > 0) calls.push([S(`.ribbon(${p.loop}, 1)`, { ...m, role: 'knob', key: 'loop', note: `ribbon(${p.loop}, 1) takes cycle ${p.loop} of the random melody and repeats it forever, so it stops changing.` })]);
+        { const pc = paceCall(n, m); if (pc) calls.push(pc); }
         return chain(base, calls, depth, inline);
       }
       case 'randrhythm': {
@@ -309,6 +316,7 @@ export function compile(g) {
         const txt = `x*${p.steps}${d < 1 ? '?' + fmt(+(1 - d).toFixed(4)) : ''}`;
         const toks = [S('"', mm), S(txt, { ...mm, note: `"${txt}" is ${p.steps} steps per cycle${d < 1 ? `; the ?${fmt(+(1 - d).toFixed(4))} drops each step at random ${Math.round((1 - d) * 100)}% of the time, differently on every cycle` : ''}.` }), S('"', mm)];
         if (p.loop > 0) toks.push(S(`.ribbon(${p.loop}, 1)`, { ...m, role: 'knob', key: 'loop', note: `ribbon(${p.loop}, 1) takes cycle ${p.loop} of the random rhythm and repeats it forever, so it stops changing.` }));
+        { const pc = paceCall(n, m); if (pc) toks.push(...pc); }
         return toks;
       }
       case 'shuffle': {
@@ -446,6 +454,22 @@ export function compile(g) {
       case 'delay': case 'reverb': case 'distortion': case 'chorus': case 'pan': case 'vibrato': case 'ring': case 'vowel': case 'djf': case 'leslie': case 'lofi': case 'pitchenv': case 'fm': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'sound');
+        if (n.type === 'fm') {   // FM shakes an oscillator, so it does nothing on a recorded sound (a sample, a drum, a gm_ instrument or the piano)
+          const seen = new Set(), todo = [n.id], bad = [];
+          while (todo.length) {
+            const id = todo.pop();
+            for (const w of g.wires) {
+              if (w.to.node !== id || w.to.port.startsWith('p:') || seen.has(w.from.node)) continue;
+              seen.add(w.from.node);
+              const u = nodeById(g, w.from.node);
+              if (!u) continue;
+              if (u.type === 'synth') { if (!FM_WAVES.has(String(u.params.wave))) bad.push(`the Instrument "${u.params.wave}"`); }
+              else if (u.type === 'sample' || u.type === 'drums') bad.push(u.type === 'drums' ? 'the Drum Machine' : 'a Sample');
+              else todo.push(u.id);
+            }
+          }
+          if (bad.length) issues.push({ node: n.id, msg: `FM has no effect on ${[...new Set(bad)].join(' and ')}: it is a recorded sound, and FM only shakes a synth wave. Set the Instrument's sound to sine, sawtooth, square, triangle or supersaw.` });
+        }
         return chain(up, paramCalls(n, depth), depth, inline);
       }
       case 'macro': {

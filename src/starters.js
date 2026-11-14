@@ -1,6 +1,7 @@
 // The learning path. Each starter is an ordinary graph built only from palette modules, so it can be rebuilt by hand.
 import { makeNode, normalize, emptyGraph } from './graph.js';
 import { makeCells, FM_PRESETS } from './modules.js';
+import { importStrudel } from './importer.js';
 
 const mel = (notes, { vel = [], len = {}, steps, octave = 3, mode = 'steps' } = {}) => {
   const n = steps || notes.length;
@@ -24,6 +25,17 @@ const rhy = (pattern, mode = 'steps') => {
   const toks = pattern.split(/\s+/);
   return { steps: toks.length, mode, cells: toks.map((t) => ({ on: t === 'x', len: 1 })) };
 };
+
+// the patch of lesson 30, as Strudel code; the importer turns it into modules
+const WHOLE_SONG = String.raw`setcpm(124/4)
+
+$: n("[0,2]@2 [2,4]@2 [4,6]@2 [0,2]@3 ~ 1@2 [16,19] ~ [4,7]@2").scale("G3:minor").euclid(5,8).every(5, x=>x.transpose(12)).s("gm_vibraphone").decay(1.29).sustain(0.79).release(3).ring(1).ringf(1376).room(0.6).roomsize(2)
+
+$: n(irand(4).segment(8)).scale("G3:minor").ribbon(4, 1).slow(4).sometimesBy(0.3, rev).s("gm_sitar").attack(0).decay(0.41).sustain(0.62).release(1.5).gain(1.1)
+
+$: chord("<Gm Dm D# A# Cm Gm Cm Dm>").mode("above:c3").voicing().transpose(-12).s("supersaw").attack(0.032).decay(0.74).sustain(0.65).release(0).vib(11.1).vibmod(0.55).lpf(800).lpq(0.9).lpenv(2).lpa(0.007).lpd(0.91).lps(0.62).gain(0.8)
+
+$: stack(s("bd").struct("x ~ ~ ~ x ~ ~ ~"), s("sd").struct("~ ~ x ~ ~ ~ x ~"), s("hh").struct("x*2 ~ x ~ x ~ x ~"))`;
 
 function build(nodes, wires) {
   const g = emptyGraph();
@@ -49,13 +61,13 @@ export const LESSONS = [
   },
   {
     id: 'sequence', title: '2 · Sequence: one pattern after another',
-    learned: 'Sequence plays its inputs one after another, one cycle each, then starts over: cat(a, b). Here the first cycle is the Sample\'s pattern bd*2 [bd sd], the second cycle is the Drum Machine\'s grid, and then it begins again. Stack plays things at the same time; Sequence plays them in turn. The "inputs" setting says how many it cycles through.',
+    learned: 'Sequence plays its inputs one after another, one cycle each, then starts over: cat(a, b). Here the first cycle is the top Sample (bd sd, a kick then a snare) and the second cycle is the lower Sample (four hi-hats). Then it begins again. Stack plays things at the same time; Sequence plays them in turn. The "inputs" setting says how many it cycles through. Lesson 3 then looks inside the quotes.',
     graph: () => build([
-      ['k', 'sample', 40, 40, { name: 'bd*2 [bd sd]' }],
-      ['d', 'drums', 40, 480, { steps: 8, tracks: [trk('bd', 'x ~ x ~ x ~ ~ ~'), trk('sd', '~ ~ ~ ~ ~ ~ x ~')] }],
-      ['sq', 'cat', 440, 300, { n: 2 }],
-      ['o', 'output', 740, 300, { bpm: 120 }],
-    ], [['k', 'sq', 'in1'], ['d', 'sq', 'in2'], ['sq', 'o']]),
+      ['k', 'sample', 40, 40, { name: 'bd sd' }],
+      ['h', 'sample', 40, 300, { name: 'hh hh hh hh' }],
+      ['sq', 'cat', 400, 170, { n: 2 }],
+      ['o', 'output', 700, 170, { bpm: 120 }],
+    ], [['k', 'sq', 'in1'], ['h', 'sq', 'in2'], ['sq', 'o']]),
   },
   {
     id: 'repeats', title: '3 · Repeats and brackets',
@@ -384,6 +396,31 @@ export const LESSONS = [
       ['sy', 'synth', 1000, 60, { wave: 'sawtooth', lpf: 1800, release: 0.2, gain: 0.55 }],
       ['o', 'output', 1360, 140, { bpm: 100 }],
     ], [['m', 'sh'], ['sh', 'so'], ['so', 'sy'], ['sy', 'o']]),
+  },
+  {
+    id: 'whole-song', section: 'A whole song', title: '30 · A whole song, with four new tricks',
+    learned: 'Four parts play together: a vibraphone melody, a sitar that writes a new tune every four cycles, supersaw chords and a drum kit on one Drum Machine. It brings in four things that have not come up yet. Euclid spreads 5 hits as evenly as it can over 8 steps, so the melody gets a lopsided groove without drawing it. Ring modulation multiplies a sound by a tone, here the vibraphone by 1376 Hz, which turns it metallic and bell-like. Vibrato wobbles the pitch of the chords, and the filter\'s env knob lets the filter open and close over each note, a quick wah on every chord. Try muting a part, or turn Euclid to 8 and hear the groove go square. It is a busy patch: if your computer struggles, shorten a release or turn Animations off in Settings.',
+    graph: () => {
+      const g = importStrudel(WHOLE_SONG).graph;
+      const saw = g.nodes.find((n) => n.type === 'synth' && n.params.wave === 'supersaw');
+      if (saw) { saw.params.lpf = 20000; saw.params.lpq = 1; saw.params.gain = 0.55; }   // the Filter module after it does the filtering
+      const vib = g.nodes.find((n) => n.type === 'synth' && n.params.wave === 'gm_vibraphone');
+      if (vib) vib.params.gain = 0.7;
+      // the three separate Sample + Rhythm pairs become one Drum Machine
+      const stack = g.nodes.find((n) => n.type === 'stack');
+      if (stack) {
+        const into = g.wires.filter((w) => w.to.node === stack.id), out = g.wires.find((w) => w.from.node === stack.id);
+        const drop = new Set([stack.id]);
+        const up = [...into.map((w) => w.from.node)];
+        while (up.length) { const id = up.pop(); drop.add(id); g.wires.filter((w) => w.to.node === id).forEach((w) => { if (!drop.has(w.from.node)) up.push(w.from.node); }); }
+        const pos = g.nodes.filter((n) => drop.has(n.id));
+        const dm = makeNode('drums', Math.min(...pos.map((n) => n.x)), Math.min(...pos.map((n) => n.y)), { steps: 8, gain: 0.8, tracks: [trk('bd', 'x ~ ~ ~ x ~ ~ ~'), trk('sd', '~ ~ x ~ ~ ~ x ~'), trk('hh', 'x*2 ~ x ~ x ~ x ~')] });
+        g.nodes = g.nodes.filter((n) => !drop.has(n.id)); g.nodes.push(dm);
+        g.wires = g.wires.filter((w) => !drop.has(w.from.node) && !drop.has(w.to.node));
+        if (out) g.wires.push({ id: 'wdm', from: { node: dm.id, port: 'out' }, to: out.to });
+      }
+      return g;
+    },
   },
 ];
 

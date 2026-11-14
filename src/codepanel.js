@@ -125,12 +125,18 @@ export function createCodePanel(parent, { onHover, onEdit, onNudge, choicesOf, o
       extensions: [
         javascript(), syntaxHighlighting(highlight), field,
         guard,
-        EditorView.contentAttributes.of({ 'aria-label': 'Strudel code. The numbers can be edited; the rest follows the modules.', spellcheck: 'false' }),
+        EditorView.contentAttributes.of({ 'aria-label': 'Strudel code. The numbers can be edited; the rest follows the modules.', spellcheck: 'false', inputmode: 'decimal', enterkeyhint: 'done' }),   // the only thing that can be typed is a number: phones show the number pad
         EditorView.updateListener.of((u) => {
           if (u.docChanged && pending && !u.transactions.some((t) => t.annotation(programmatic))) { clearTimeout(idle); idle = setTimeout(commit, 900); }
         }),
         EditorView.lineWrapping,
         EditorView.domEventHandlers({
+          pointerdown(e, v) {   // a number pad has no minus sign: a number that is already negative gets the full keyboard instead
+            const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+            const r = pos == null ? null : rangeAt(v.state, pos);
+            v.contentDOM.setAttribute('inputmode', r && /^-/.test(v.state.sliceDoc(r.from, r.to)) ? 'text' : 'decimal');
+            return false;
+          },
           mousemove(e, v) {
             const w = e.target.closest?.('.cm-note');
             if (w) return onHover?.(w.dataset.node ? { node: w.dataset.node, key: w.dataset.key || null } : null);

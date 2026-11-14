@@ -15,7 +15,8 @@ import { strudelFile, parseImport, b64 } from './io.js';
 import { importStrudel } from './importer.js';
 import { setHydraMode, prepareWindow, hydraNotes } from './hydra.js';
 import { LESSONS } from './starters.js';
-import { FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
+import { getAI, setAI, clearAI, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, STARTER_SYSTEM, REVIEW_SYSTEM } from './ai.js';
+import { MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
 import { effectiveKey, makeNode, nodeById, wiresFrom, uid, validateShape, normalize, whyNot, clone } from './graph.js';
 
 // Link to this app's source code (the AGPL asks public copies to offer it). Fill in once the repository exists.
@@ -45,12 +46,17 @@ function setPlayUI(on) { playBtn.replaceChildren(icon(on ? 'stop' : 'play', 20))
 setPlayUI(false);
 const statusEl = h('span', { class: 'status', id: 'status' }, 'ready');
 const overEl = h('span', { class: 'over', id: 'over', title: 'The sound went past full volume a moment ago: turn the Output volume or a loud part down', hidden: true }, 'over');
-let lastOver = 0;
+const busyEl = h('span', { class: 'over busy', id: 'busy', title: 'The computer could not keep up and the sound broke up a moment ago. Fewer voices will fix it: shorter release times, a smaller reverb room, fewer layers, or turn Animations off in Settings.', hidden: true }, 'overloaded');
+let lastOver = 0, lastBusy = 0, seenUnder = null;
 setInterval(() => {
   if (engine.playing && engine.peak() > 1.0) lastOver = Date.now();
   const show = Date.now() - lastOver < 2000;
   overEl.hidden = !show;
   if (show) overEl.textContent = engine.limiterOn() ? 'limiting' : 'clipping';
+  const u = engine.playing ? engine.underruns() : null;
+  if (u !== null && seenUnder !== null && u > seenUnder) lastBusy = Date.now();
+  seenUnder = u;
+  busyEl.hidden = Date.now() - lastBusy > 4000;
 }, 100);
 const undoBtn = h('button', { class: 'btn', id: 'undo', title: 'Undo (Ctrl/⌘ Z)', onclick: () => doUndo() }, '↶ Undo');
 const redoBtn = h('button', { class: 'btn', id: 'redo', title: 'Redo (Shift Ctrl/⌘ Z)', onclick: () => doRedo() }, '↷ Redo');
@@ -60,6 +66,7 @@ const savesBtn = h('button', { class: 'btn', id: 'saves-btn' }, 'Saves ▾');
 const exportBtn = h('button', { class: 'btn', id: 'export-btn' }, 'Export ▾');
 const fileInput = h('input', { type: 'file', accept: '.json,.strudel,.txt,.js', style: 'display:none', id: 'import-file' });
 const importBtn = h('button', { class: 'btn', id: 'import-btn', onclick: () => openImport() }, 'Import');
+const aiBtn = h('button', { class: 'btn', id: 'ai-btn', title: 'AI helper: make a starter patch, or get a review of yours (bring your own key)', onclick: () => openAI() }, 'AI');
 const popHost = h('div', { class: 'pop-host' });
 const bpmInput = h('input', { type: 'number', id: 'bpm', min: 40, max: 220, step: 1, title: 'Tempo: beats per minute (the Output module\'s tempo knob)', class: 'bpm-input' });
 bpmInput.addEventListener('keydown', (e) => e.stopPropagation());
@@ -79,12 +86,12 @@ const codeBtn = h('button', { class: 'btn', id: 'code-toggle', title: 'Show or h
 
 const iconify = (btn, name, label) => { btn.replaceChildren(icon(name)); btn.title = btn.title || label; btn.title = label + (btn.title && btn.title !== label ? '' : ''); btn.setAttribute('aria-label', label); btn.classList.add('icon-btn'); };
 iconify(newBtn, 'newfile', 'New empty patch'); iconify(undoBtn, 'undo', 'Undo (Ctrl/⌘ Z)'); iconify(redoBtn, 'redo', 'Redo (Shift Ctrl/⌘ Z)');
-iconify(learnBtn, 'book', 'Learning path'); iconify(savesBtn, 'folder', 'Saves and history'); iconify(exportBtn, 'download', 'Export'); iconify(importBtn, 'upload', 'Import a patch');
+iconify(learnBtn, 'book', 'Learning path'); iconify(savesBtn, 'folder', 'Saves and history'); iconify(exportBtn, 'download', 'Export'); iconify(importBtn, 'upload', 'Import a patch'); iconify(aiBtn, 'sparkle', 'AI helper');
 iconify(addBtn, 'plus', 'Add a module (Ctrl/⌘ K)'); iconify(codeBtn, 'code', 'Show or hide the Strudel code (Ctrl/⌘ \\)'); iconify(settingsBtn, 'sliders', 'Display settings');
 const top = h('header', { class: 'topbar' },
   h('div', { class: 'brand' }, h('b', {}, 'Strudel'), ' Patchboard'),
-  h('div', { class: 'transport' }, playBtn, bpmBox, beatsBox, statusEl, overEl),
-  h('div', { class: 'toolbar' }, addBtn, newBtn, undoBtn, redoBtn, learnBtn, savesBtn, exportBtn, importBtn, settingsBtn, codeBtn), fileInput);
+  h('div', { class: 'transport' }, playBtn, bpmBox, beatsBox, statusEl, overEl, busyEl),
+  h('div', { class: 'toolbar' }, addBtn, newBtn, undoBtn, redoBtn, learnBtn, savesBtn, exportBtn, importBtn, aiBtn, settingsBtn, codeBtn), fileInput);
 
 const paletteEl = h('aside', { class: 'palette' }, h('div', { class: 'pal-head' },
   h('button', { class: 'pal-burger', id: 'modules-toggle', title: 'Show or hide the module list', onclick: () => setPaletteShown(!paletteShown) }, '☰'),
@@ -103,7 +110,8 @@ const codeHost = h('div', { class: 'code-host', id: 'code-host' });
 const issuesEl = h('div', { class: 'issues', id: 'issues' });
 const learnEl = h('div', { class: 'learn-banner', id: 'learn-banner', hidden: true });
 const readOnlyNote = h('div', { class: 'ro-note' }, 'The numbers are editable: click one, type, press Enter (↑ ↓ nudge it, Esc cancels). The rest follows the modules; to bring in whole code use Import.');
-const codeCol = h('aside', { class: 'codecol' }, codeHead, codeHost, learnEl, issuesEl, readOnlyNote);
+const codeResizer = h('div', { class: 'code-resizer', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize the code panel', tabindex: 0, title: 'Drag to resize the code panel (double-click to reset)' });
+const codeCol = h('aside', { class: 'codecol' }, codeResizer, codeHead, codeHost, learnEl, issuesEl, readOnlyNote);
 const toastEl = h('div', { class: 'toasts', id: 'toasts' });
 app.append(top, h('div', { class: 'main' }, paletteEl, boardEl, codeCol), popHost, toastEl);
 
@@ -111,6 +119,33 @@ app.append(top, h('div', { class: 'main' }, paletteEl, boardEl, codeCol), popHos
 // On a narrow screen the board fills the screen, the code is a sheet that is closed to begin with (and not remembered), and a lesson's text moves over the board.
 const narrowQuery = window.matchMedia('(max-width: 900px)');
 const isNarrow = () => narrowQuery.matches;
+
+// ---------- resizable code panel (desktop) ----------
+{
+  const MIN = 300, maxW = () => Math.round(window.innerWidth * 0.7);
+  const setW = (w, save = true) => {
+    if (w === null) { app.style.removeProperty('--codew'); try { localStorage.removeItem('pb.codeW'); } catch { /* private mode */ } }
+    else { w = Math.min(maxW(), Math.max(MIN, Math.round(w))); app.style.setProperty('--codew', w + 'px'); if (save) { try { localStorage.setItem('pb.codeW', String(w)); } catch { /* private mode */ } } }
+    requestAnimationFrame(() => { panel?.view.requestMeasure(); board?.drawCables(); });
+  };
+  const saved = Number(localStorage.getItem('pb.codeW'));
+  if (saved >= MIN) setW(saved, false);
+  codeResizer.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { codeResizer.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    codeResizer.classList.add('drag'); document.body.style.userSelect = 'none';
+    const move = (ev) => setW(window.innerWidth - ev.clientX);
+    const up = () => { codeResizer.classList.remove('drag'); document.body.style.userSelect = ''; codeResizer.removeEventListener('pointermove', move); codeResizer.removeEventListener('pointerup', up); codeResizer.removeEventListener('pointercancel', up); };
+    codeResizer.addEventListener('pointermove', move); codeResizer.addEventListener('pointerup', up); codeResizer.addEventListener('pointercancel', up);
+  });
+  codeResizer.addEventListener('dblclick', () => setW(null));
+  codeResizer.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault(); e.stopPropagation();
+    setW(codeCol.getBoundingClientRect().width + (e.key === 'ArrowLeft' ? 1 : -1) * (e.shiftKey ? 96 : 24));
+  });
+  window.addEventListener('resize', () => { const cur = Number(localStorage.getItem('pb.codeW')); if (cur) setW(cur, false); });
+}
 
 // ---------- show / hide the code ----------
 let codeShown = isNarrow() ? false : localStorage.getItem('pb.codeShown') !== '0';
@@ -289,6 +324,7 @@ const hooks = {
     const node = makeNode(type, x, y);
     store.update((g) => g.nodes.push(node), { label: 'add ' + type });
     board.select(node.id);
+    board.reveal(node.id);   // in the phone flow view the new module opens and scrolls into view
   },
   dropFromPalette(type, cx, cy) {
     if (cx === undefined) hooks.addNode(type);
@@ -366,6 +402,10 @@ const hooks = {
       n.params[key] = value;
       if (key === 'steps' && n.params.tracks) n.params.tracks = resizeTracks(n.params.tracks, value);
       if (key === 'steps' && n.params.cells) n.params.cells = resizeCells(n.type, n.params.cells, value);
+      if (key === 'steps' && ['melody', 'rhythm', 'drums', 'randnotes', 'randrhythm'].includes(n.type)) {   // more than 8 steps: keep the same pace and make the loop longer instead of squeezing it
+        if (value > 8 && n.params.mode === 'steps') n.params.mode = 'pace';
+        else if (value <= 8 && n.params.mode === 'pace') n.params.mode = 'steps';
+      }
       if (n.type === 'slider' && key !== 'value') n.params.value = Math.min(Number(n.params.max), Math.max(Number(n.params.min), n.params.value));
     }, { coalesce: `p:${id}:${key}` });
   },
@@ -476,6 +516,24 @@ const hooks = {
     }, { label: 'FM preset ' + preset.label });
     toast(`FM preset: ${preset.label}`, [undoAction], 2500);
   },
+  applyMelodyTemplate(id, tplId) {
+    const tpl = MELODY_TEMPLATES.find((x) => x.id === tplId);
+    if (!tpl) return;
+    store.update((g) => {
+      const n = nodeById(g, id);
+      n.params.steps = tpl.degrees.length;
+      n.params.mode = tpl.degrees.length > 8 ? 'pace' : 'steps';
+      if (tpl.octave) n.params.octave = tpl.octave;
+      n.params.cells = tpl.degrees.map((d, i) => ({ n: null, d, len: tpl.len[i] || 1, vel: 1 }));
+    }, { label: 'melody ' + tpl.label });
+    toast(`Melody: ${tpl.label}`, [undoAction], 2500);
+  },
+  applyDrumPreset(id, presetId) {
+    const preset = DRUM_PRESETS.find((x) => x.id === presetId);
+    if (!preset) return;
+    store.update((g) => { const n = nodeById(g, id); n.params.bank = preset.params.bank; n.params.steps = preset.params.steps; n.params.tracks = JSON.parse(JSON.stringify(preset.params.tracks)); }, { label: 'drum kit ' + preset.label });
+    toast(`Drum kit: ${preset.label}`, [undoAction], 2500);
+  },
   showHelp,
   moveNode(id, x, y) {
     store.update((g) => { const n = nodeById(g, id); n.x = x; n.y = y; }, { coalesce: 'move:' + id });
@@ -565,6 +623,7 @@ function segmentsAt(loc) {
   return hit;
 }
 engine.onHap(({ locations, delayMs, durMs }) => {
+  if (getPrefs().animations === false) return;
   const nodes = new Set(), steps = [], ranges = [];
   for (const loc of locations) {
     for (const s of segmentsAt(loc)) {
@@ -648,6 +707,7 @@ function setBanner(lesson) {
 }
 function loadLesson(l) {
   store.replace(l.graph(), 'lesson ' + l.id);
+  if (isNarrow()) { closePop(); toast(l.title, [{ label: 'Read the notes', fn: () => setCodeShown(true) }], 7000); }   // on a phone the lesson text is in the code sheet
   setBanner(l);
   closePop();
   requestAnimationFrame(() => board.tidy({ merge: true }));
@@ -661,6 +721,9 @@ function openSettings() {
     seg('labels', 'Cable labels', [['hover', 'on hover'], ['always', 'always']]),
     seg('minimap', 'Board minimap', [[true, 'show'], [false, 'hide']]),
     seg('descriptions', 'Module descriptions', [['folded', 'fold away'], ['shown', 'always show']]),
+    seg('jackHelp', 'Socket help (?)', [[true, 'show'], [false, 'hide']]),
+    seg('animations', 'Animations', [[true, 'on'], [false, 'off']]),
+    h('div', { class: 'menu-empty' }, 'Off stops the flashing steps, cable pulses, playheads and the live drawing in Piano Roll and Scope, which saves memory and processor time on a big patch. The sound is not affected.'),
     h('div', { class: 'menu-h' }, 'Sound'),
     seg('safeOutput', 'Safe output', [[true, 'on'], [false, 'off']]),
     h('div', { class: 'menu-empty' }, 'Safe output softly rounds off peaks above about 0.8 so a loud patch does not crackle. It is part of this app, not of the code, so it is not in the code panel and is not there on strudel.cc: on, the board sounds a little different from the same code elsewhere only when a patch is very loud.'),
@@ -668,7 +731,7 @@ function openSettings() {
     h('div', { class: 'menu-empty about' }, 'An unofficial visual editor for ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ', not made or endorsed by the Strudel team. Built on Strudel (AGPL-3.0).', SOURCE_URL ? [' ', h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code')] : null)));
 }
 settingsBtn.addEventListener('click', openSettings);
-const applyPrefs = () => { app.classList.toggle('colourful', !!getPrefs().colourful); app.classList.toggle('desc-shown', getPrefs().descriptions === 'shown'); setTimeout(() => board.drawCables(), 0); };
+const applyPrefs = () => { app.classList.toggle('colourful', !!getPrefs().colourful); app.classList.toggle('desc-shown', getPrefs().descriptions === 'shown'); app.classList.toggle('no-anim', getPrefs().animations === false); app.classList.toggle('jack-help', getPrefs().jackHelp !== false); board.clearPulses?.(); views?.dirty?.(); setTimeout(() => board.drawCables(), 0); };
 onPrefs(applyPrefs);
 applyPrefs();
 
@@ -682,7 +745,7 @@ function openAddMenu() {
     shown = Object.entries(MODULES).filter(([t, d]) => !(d.single && store.graph.nodes.some((n) => n.type === t)) && (!q || d.title.toLowerCase().includes(q) || t.includes(q) || (catName[d.cat] || '').toLowerCase().includes(q) || d.blurb.toLowerCase().includes(q)))
       .sort(([, a], [, b]) => (a.title.toLowerCase().startsWith(q) ? 0 : 1) - (b.title.toLowerCase().startsWith(q) ? 0 : 1));
     hi = Math.min(hi, Math.max(shown.length - 1, 0));
-    list.replaceChildren(...(shown.length ? shown.map(([t, d], i) => h('div', { class: 'add-item' + (i === hi ? ' cur' : ''), onpointerdown: (e) => { e.preventDefault(); pick(t); } },
+    list.replaceChildren(...(shown.length ? shown.map(([t, d], i) => h('div', { class: 'add-item' + (i === hi ? ' cur' : ''), onpointerdown: (e) => { if (e.pointerType === 'mouse') { e.preventDefault(); pick(t); } }, onclick: () => pick(t) },
       h('span', { class: 'add-t' }, d.title), h('span', { class: 'add-c' }, catName[d.cat] || ''), h('span', { class: 'add-b' }, d.blurb.split('. ')[0].slice(0, 90)))) : [h('div', { class: 'menu-empty' }, 'No module matches.')]));
     list.querySelector('.cur')?.scrollIntoView({ block: 'nearest' });
   };
@@ -696,12 +759,13 @@ function openAddMenu() {
   });
   showPop(addBtn, h('div', { class: 'menu add-menu' }, search, list));
   render();
-  search.focus();
+  if (!isNarrow()) search.focus();   // on a phone the keyboard would cover the list: tap the search box when you want to type
 }
 addBtn.addEventListener('click', openAddMenu);
 
 learnBtn.addEventListener('click', () => {
   showPop(learnBtn, h('div', { class: 'menu' }, h('div', { class: 'menu-h' }, 'Learning path'),
+    h('button', { class: 'menu-item', onclick: () => { closePop(); showIntro(); } }, 'About this site'),
     LESSONS.flatMap((l, i) => [
       ...(l.section && l.section !== LESSONS[i - 1]?.section ? [h('div', { class: 'menu-h' }, l.section)] : []),
       h('button', { class: 'menu-item', dataset: { lesson: l.id }, onclick: () => loadLesson(l) }, l.title),
@@ -838,6 +902,86 @@ fileInput.addEventListener('change', async () => {
   catch (e) { toast('Could not read that file: ' + e.message, [], 8000); }
 });
 
+// ---------- AI helper (bring your own key) ----------
+const noKeys = (el) => { el.addEventListener('keydown', (e) => e.stopPropagation()); return el; };
+function openAI(view) {
+  const ai = getAI();
+  if (!ai.key || view === 'key') return aiKeyDialog();
+  const desc = noKeys(h('textarea', { class: 'imp-area ai-desc', id: 'ai-desc', rows: 3, spellcheck: 'false', placeholder: 'Describe a song, e.g. "a slow lo-fi hip hop loop with soft piano chords and a dusty beat"' }));
+  const status = h('div', { class: 'ai-status', id: 'ai-status', 'aria-live': 'polite' });
+  const buttons = [];
+  const busy = (on, text = '') => { buttons.forEach((b) => { b.disabled = on; }); status.textContent = text; };
+  const make = h('button', { class: 'btn', id: 'ai-make', onclick: async () => {
+    const q = desc.value.trim();
+    if (!q) return toast('Describe the song first.', [], 3000);
+    busy(true, 'Writing a patch…');
+    try { await aiStarter(q, (t) => busy(true, t)); } catch (e) { busy(false, e.message); }
+  } }, 'Make a starter patch');
+  const review = h('button', { class: 'btn', id: 'ai-review', onclick: async () => {
+    if (!store.graph.nodes.length) return toast('The board is empty: add something or make a starter first.', [], 4000);
+    busy(true, 'Listening to your patch…');
+    try { await aiReview(); } catch (e) { busy(false, e.message); }
+  } }, 'Review my patch');
+  buttons.push(make, review);
+  showModal('AI helper', h('div', { class: 'ai-box' },
+    h('p', { class: 'imp-hint' }, 'Make a starter from a description, or get plain-language feedback on the patch on the board. The AI writes Strudel code and it comes in through Import, so you see what was understood before anything changes (Undo brings your board back).'),
+    desc, h('div', { class: 'modal-btns' }, make),
+    h('hr', { class: 'ai-hr' }),
+    h('p', { class: 'imp-hint' }, 'Review sends the code of your patch, any warnings, and whether it clipped or overloaded.'),
+    h('div', { class: 'modal-btns' }, review, h('button', { class: 'btn ghost', onclick: () => openAI('key') }, 'Key and model'), h('button', { class: 'btn ghost', onclick: closeModal }, 'Close')),
+    status));
+  setTimeout(() => desc.focus(), 0);
+}
+function aiKeyDialog() {
+  const ai = getAI();
+  const key = noKeys(h('input', { class: 'txt', id: 'ai-key', type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'sk-ant-…', value: ai.key }));
+  const model = h('select', { class: 'sel', id: 'ai-model' }, AI_MODELS.map(([v, t]) => h('option', { value: v, selected: v === ai.model }, t)));
+  showModal('AI helper: your key', h('div', { class: 'ai-box' },
+    h('p', { class: 'imp-hint' }, 'This uses your own Anthropic API key (create one at console.anthropic.com). Usage is billed to your account, so set a spending limit there.'),
+    h('ul', { class: 'ai-notes' },
+      h('li', {}, 'The key is kept only in this browser, on this device. It is never sent to this site or anywhere except api.anthropic.com. Anyone who can use this browser profile, or a browser extension that reads page data, could see it.'),
+      h('li', {}, 'What you type, and for a review the code of your patch, is sent to Anthropic. Nothing else is.'),
+      h('li', {}, 'Use a key you can delete or limit, not your main one.')),
+    h('label', { class: 'set-l' }, 'API key'), key,
+    h('label', { class: 'set-l' }, 'Model'), model,
+    h('div', { class: 'modal-btns' },
+      h('button', { class: 'btn', id: 'ai-save', onclick: () => { const k = key.value.trim(); if (!k) return toast('Paste your API key first.', [], 3000); setAI({ key: k, model: model.value }); toast('Key saved in this browser.', [], 2500); openAI(); } }, 'Save'),
+      ai.key ? h('button', { class: 'btn ghost', onclick: () => { clearAI(); toast('Key removed from this browser.', [], 3000); closeModal(); } }, 'Remove key') : null,
+      h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'))));
+  setTimeout(() => key.focus(), 0);
+}
+async function aiStarter(desc, say) {
+  const sounds = new Set(soundsFor(''));
+  let code = extractCode(await askAI({ system: STARTER_SYSTEM, user: desc }));
+  if (!code) throw new Error('The answer had no code in it. Try again, or describe it differently.');
+  let r = importStrudel(code, { sounds });
+  if (r.error || r.report.skipped.length) {   // one retry, telling it exactly what could not be read
+    say('Fixing parts the editor could not read…');
+    const why = r.error ? r.error : r.report.skipped.map((s) => `line ${s.line}: ${s.reason || s.text}`).join('\n');
+    try {
+      const again = extractCode(await askAI({ system: STARTER_SYSTEM, user: `${desc}\n\nYour earlier attempt:\n${code}\n\nThe editor could not read these parts:\n${why}\nRewrite the whole patch using only what is allowed.` }));
+      const r2 = again && importStrudel(again, { sounds });
+      if (r2 && !r2.error && (r.error || r2.report.skipped.length < r.report.skipped.length)) code = again;
+    } catch { /* keep the first attempt: the import dialog lists what was left out */ }
+  }
+  importText(code, 'AI starter', () => openAI());
+}
+async function aiReview() {
+  const measured = [];
+  if (Date.now() - lastOver < 8000) measured.push(engine.limiterOn() ? 'the sound reached full volume and the limiter had to work' : 'the sound clipped');
+  if (Date.now() - lastBusy < 20000) measured.push('the computer could not keep up and the audio broke up (too many voices, long releases or big reverbs)');
+  if (!engine.playing) measured.push('the patch was not playing while this was measured');
+  const text = await askAI({ system: REVIEW_SYSTEM, user: reviewPrompt({ code: current.code, issues: current.issues.map((i) => i.msg), measured }) });
+  const code = extractCode(text), say = stripCode(text);
+  showModal('AI review', h('div', { class: 'ai-box' },
+    h('div', { class: 'ai-answer', id: 'ai-answer' }, say || 'No comments.'),
+    h('p', { class: 'imp-hint' }, 'This is an AI\'s opinion and it can be wrong. It has not heard the sound either; it read the code and what the editor measured.'),
+    h('div', { class: 'modal-btns' },
+      code ? h('button', { class: 'btn', id: 'ai-try', onclick: () => importText(code, 'AI suggestion', () => openAI()) }, 'Try the suggested version') : null,
+      h('button', { class: 'btn ghost', onclick: () => openAI() }, 'Back'),
+      h('button', { class: 'btn ghost', onclick: closeModal }, 'Close'))));
+}
+
 // ---------- keyboard ----------
 window.addEventListener('keydown', (e) => {
   const typing = e.target.closest?.('input, textarea, select, [contenteditable]');
@@ -856,7 +1000,7 @@ window.addEventListener('keydown', (e) => {
   if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); if (board.selection.length > 1) hooks.groupNodes(board.selection); return; }
   if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); board.selectAll(); return; }
   if (e.key === ' ') { e.preventDefault(); playBtn.click(); }
-  if (e.key === 'Escape') { closePop(); closeModal(); closeHelp(); board.select(null); }
+  if (e.key === 'Escape') { closePop(); closeModal(); closeHelp(); closeIntro(); board.select(null); }
 });
 window.addEventListener('beforeunload', () => store.flush());
 
@@ -866,13 +1010,52 @@ setPaletteShown(paletteShown);
 afterChange();
 if (firstLesson) setBanner(firstLesson);
 requestAnimationFrame(() => (firstLesson ? board.tidy({ merge: true }) : board.fit()));
-window.addEventListener('resize', () => board.drawCables());
-// the lesson text sits in the code column on a wide screen and over the board on a phone (tap it to fold it)
-function placeLearn() {
-  if (isNarrow()) { boardEl.append(learnEl); learnEl.classList.add('mobile-learn'); }
-  else { codeCol.insertBefore(learnEl, issuesEl); learnEl.classList.remove('mobile-learn', 'collapsed'); }
+// ---------- intro page ----------
+// Shown on a first visit and from the brand name or the Learn menu: what this is, and which button opens the learning path.
+const TOOL_TOUR = [['plus', 'Add', false], ['newfile', 'New', false], ['undo', 'Undo', false], ['redo', 'Redo', false], ['book', 'Learn', true], ['folder', 'Saves', false], ['download', 'Export', false], ['upload', 'Import', false], ['sliders', 'Settings', false], ['code', 'Code', false]];
+// where the toolbar really is right now: along the bottom of the screen on a narrow window (a phone, or a small desktop window), top right otherwise
+const toolbarWhere = () => {
+  const r = document.querySelector('.toolbar')?.getBoundingClientRect();
+  return r && r.top > window.innerHeight / 2 ? 'The toolbar, along the bottom of the screen' : 'The toolbar, top right';
+};
+const refreshIntroWhere = () => { const el = document.getElementById('intro-where'); if (el) el.textContent = toolbarWhere(); };
+window.addEventListener('resize', refreshIntroWhere);
+let introEl = null;
+function closeIntro() { introEl?.remove(); introEl = null; try { localStorage.setItem('pb.introSeen', '1'); } catch { /* private mode */ } }
+function showIntro() {
+  closeIntro();
+  const step = (n, title, text) => h('li', {}, h('b', {}, n + '  ' + title), h('span', {}, text));
+  introEl = h('div', { class: 'intro-back', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'About Strudel Patchboard', onpointerdown: (e) => { if (e.target === introEl) closeIntro(); } },
+    h('div', { class: 'intro' },
+      h('h2', {}, h('b', {}, 'Strudel'), ' Patchboard'),
+      h('p', { class: 'intro-lead' }, 'Learn ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ', the live-coding music language, by seeing what the code means. Every module you build is shown as the Strudel code it writes, line by line, and the code can be changed and played right here.'),
+      h('ol', { class: 'intro-steps' },
+        step('1', 'Build it with modules', 'Add a melody, a drum machine or an instrument and drag cables between them. Turn knobs and draw notes, and it plays as you go.'),
+        step('2', 'Read the code it writes', 'The panel shows the Strudel code for your patch, with a plain-English note on each line. Each piece of code lines up with the module that made it, so you can see what every word does.'),
+        step('3', 'Change the code, see it update', 'Click a number in the code and type a new one, or pick another sound or option from its dropdown. The module and the sound change straight away. You can also paste in Strudel code you already have, and it turns into modules.')),
+      h('div', { class: 'intro-tools', role: 'group', 'aria-label': 'The toolbar' },
+        h('div', { class: 'intro-tools-h', id: 'intro-where' }, toolbarWhere()),
+        h('div', { class: 'intro-icons' }, TOOL_TOUR.map(([name, label, on]) => h('div', { class: 'intro-ic' + (on ? ' on' : '') }, h('span', { class: 'intro-ic-box' }, icon(name, on ? 26 : 20)), h('small', {}, label)))),
+        h('p', { class: 'intro-tools-note' }, h('b', {}, 'Learning path: '), `${LESSONS.length} short lessons teach Strudel one idea at a time, from a single drum sound to layering, harmony, FM synthesis and effects. Each lesson is a patch you can open, change and rebuild by hand.`)),
+      h('div', { class: 'intro-btns' },
+        h('button', { class: 'btn primary', id: 'intro-start', type: 'button', onclick: () => { closeIntro(); loadLesson(LESSONS[0]); requestAnimationFrame(() => board.tidy({ merge: true })); } }, 'Start the first lesson'),
+        h('button', { class: 'btn', type: 'button', onclick: closeIntro }, 'Look around')),
+      h('p', { class: 'intro-foot' }, 'An unofficial tool, not made or endorsed by the Strudel team. Free and open source (AGPL-3.0). Sound plays in your browser; nothing is uploaded.')));
+  document.body.append(introEl);
+  introEl.querySelector('#intro-start')?.focus();
 }
-learnEl.addEventListener('click', () => { if (isNarrow()) learnEl.classList.toggle('collapsed'); });
+document.querySelector('.brand')?.addEventListener('click', showIntro);
+document.querySelector('.brand')?.setAttribute('title', 'About this site');
+let introSeen = false;
+try { introSeen = localStorage.getItem('pb.introSeen') === '1'; } catch { /* private mode */ }
+if (!introSeen) showIntro();
+
+window.addEventListener('resize', () => board.drawCables());
+// the lesson text sits in the code column: under the code on a wide screen, at the top of the code sheet on a phone (so it is gone when the sheet is closed)
+function placeLearn() {
+  if (isNarrow()) codeCol.insertBefore(learnEl, codeHost);
+  else codeCol.insertBefore(learnEl, issuesEl);
+}
 narrowQuery.addEventListener('change', () => {
   placeLearn();
   setCodeShown(isNarrow() ? false : localStorage.getItem('pb.codeShown') !== '0');   // a phone starts with the code closed; a wide screen goes back to what was chosen

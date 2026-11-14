@@ -1,8 +1,8 @@
 // The patchboard: pannable/zoomable page, module panels with real controls, typed jacks, cables.
-import { MUTE_KIND, cellNotes, noteRank as pitchRank, pitchModel, SCALES, parseX, leafAt, stepHas, slotWidth, xLabel, MODULES, PORT_TYPES, NOTE_NAMES, fmt, portsOf, CATEGORIES } from './modules.js';
+import { MUTE_KIND, cellNotes, noteRank as pitchRank, pitchModel, SCALES, parseX, leafAt, stepHas, slotWidth, xLabel, MODULES, PORT_TYPES, NOTE_NAMES, fmt, portsOf, CATEGORIES, DRUM_PRESETS, MELODY_TEMPLATES } from './modules.js';
 import { soundsFor, isValidSound, describe, sampleItems, sampleCategoryOf, SAMPLE_CATS } from './catalog.js';
 import { isFav, toggleFav, favCount } from './favorites.js';
-import { getPrefs, onPrefs } from './prefs.js';
+import { getPrefs, onPrefs, setPref } from './prefs.js';
 import { drawPreview } from './previews.js';
 import { ROOT_NAMES, CHORD_QUALITIES, EXTENSIONS, chordSymbol, romanName, degreeCount, chordHas, chordSemis, chordNoteNames, PRESETS, presetRoman } from './chords.js';
 import { INSTRUMENTS, CATEGORIES as INST_CATS, instrumentOf } from './instruments.js';
@@ -10,7 +10,7 @@ import { buildFmDiagram } from './fmdiagram.js';
 import { soundIconSvg, hasSoundIcon, soundGlyph } from './soundicons.js';
 import { buildFxRack } from './fxrack.js';
 import { buildMixer } from './mixer.js';
-import { effectiveKey, makeNode, nodeById, outType, whyNot, wiresInto, uid } from './graph.js';
+import { effectiveKey, makeNode, nodeById, outType, whyNot, wiresInto, uid, flowOrder, legalTargets, legalSources } from './graph.js';
 
 const SNAP = 24;
 const NS = 'http://www.w3.org/2000/svg';
@@ -323,6 +323,44 @@ function openPresets(anchor, nodeId) {
   document.addEventListener('pointerdown', away, true);
 }
 
+// "What plugs in here?": the kinds of cable an input takes, and the modules that make them
+let jackTip = null;
+function openJackHelp(anchor, node, port) {
+  jackTip?.remove();
+  const types = port.accept === 'same' ? PATTERN_TYPES_LIST : port.accept;
+  const mods = Object.values(MODULES).filter((d) => d.out && types.includes(d.out)).map((d) => d.title);
+  const through = Object.values(MODULES).some((d) => d.out === 'through');
+  const r = anchor.getBoundingClientRect();
+  const pop = h('div', { class: 'jack-tip', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - 300))}px;top:${Math.min(r.bottom + 6, window.innerHeight - 200)}px` },
+    h('div', { class: 'jt-h' }, `${port.label || 'in'} input${port.required ? ' (needed)' : ''}`),
+    h('div', {}, 'Takes: ', ...types.flatMap((t, i) => [i ? ', ' : '', h('b', { style: `color:${PORT_TYPES[t]?.color || 'inherit'}` }, PORT_TYPES[t]?.label || t)]), '. ', types.map((t) => PORT_TYPES[t]?.hint).filter(Boolean).join('; ') + '.'),
+    mods.length ? h('div', { class: 'jt-l' }, 'From: ', mods.slice(0, 9).join(', '), mods.length > 9 ? `, and ${mods.length - 9} more` : '', through ? ', or a transform or effect that passes one along' : '', '.') : null,
+    h('div', { class: 'jt-f' }, 'Drag from a round jack on the other module to this one. Matching jacks light up while you drag.'));
+  const close = () => { pop.remove(); document.removeEventListener('pointerdown', away, true); if (jackTip === pop) jackTip = null; };
+  const away = (e) => { if (!pop.contains(e.target)) close(); };
+  jackTip = pop;
+  document.body.append(pop);
+  setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+}
+const PATTERN_TYPES_LIST = ['notes', 'trigger', 'sound'];
+
+// Melody templates: a card per tune, drawn as the shape of its notes
+function openMelodyTemplates(anchor, nodeId) {
+  const r = anchor.getBoundingClientRect();
+  const pop = h('div', { class: 'cpick presets', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - 340))}px;top:${Math.min(r.bottom + 6, window.innerHeight - 300)}px` },
+    h('div', { class: 'cp-h' }, 'Melody templates (they follow the key and scale)'),
+    h('div', { class: 'preset-grid' }, MELODY_TEMPLATES.map((p) => {
+      const w = 70, hh = 22, ds = p.degrees.filter((d) => d !== null), hi = Math.max(7, ...ds);
+      const sv = svg('svg', { viewBox: `0 0 ${w} ${hh}`, width: w, height: hh });
+      p.degrees.forEach((d, i) => { if (d !== null) sv.append(svg('circle', { cx: 4 + (i * (w - 8)) / Math.max(p.degrees.length - 1, 1), cy: hh - 3 - (d / hi) * (hh - 6), r: 2, fill: 'currentColor' })); });
+      return h('button', { class: 'preset-card', title: p.tip, onclick: () => { close(); soundHooks.applyMelodyTemplate(nodeId, p.id); } }, sv, h('b', {}, p.label), h('small', {}, `${p.degrees.length} steps`));
+    })));
+  const close = () => { pop.remove(); document.removeEventListener('pointerdown', away, true); };
+  const away = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
+  document.body.append(pop);
+  document.addEventListener('pointerdown', away, true);
+}
+
 // Chord picker: chord names (root + quality), or numbers in the key when a Key is plugged in.
 let chordPop = null;
 let boardStore = null;
@@ -462,7 +500,7 @@ function openNodeMenu(anchor, id) {
 
 const REG_NAME = { 'above:c3': 'low', 'above:c4': 'middle', 'above:c5': 'high' };
 function foldSummary(node, g) {
-  const p = node.params, cyc = p.mode === 'turns' ? 'one per cycle' : 'all in a cycle';
+  const p = node.params, cyc = p.mode === 'turns' ? 'one per cycle' : p.mode === 'pace' && p.steps > 8 ? `${fmt(p.steps / 8)} cycles` : 'all in a cycle';
   const key = effectiveKey(g, node);
   switch (node.type) {
     case 'melody': return `${p.steps} steps · ${cyc} · ${key ? key.root + ' ' + key.scale : 'note names'}`;
@@ -522,6 +560,8 @@ function makeHSlider(spec, onChange) {
 }
 
 // ---------- the board ----------
+const CAT_COLOR = { sequencer: '#f2b134', source: '#78d68b', transform: '#b48cf2', combine: '#8fa0b3', effect: '#ef8f5b', number: '#4cc3f0', output: '#e6ebf0', view: '#7aa2ff' };
+
 export function createBoard(root, store, hooks) {
   soundHooks = hooks;
   boardStore = store;
@@ -634,6 +674,99 @@ export function createBoard(root, store, hooks) {
   };
   const narrow = () => root.clientWidth < 600;   // a phone-sized board
   const minZoom = () => (narrow() ? 0.15 : 0.3);
+
+  // ---------- phone "flow" view: one column in signal-flow order, every module folded until you open it ----------
+  const flowOpen = new Set();   // modules opened in the flow view (this is not saved with the patch)
+  const phoneQuery = window.matchMedia('(max-width: 900px)');   // the same width the phone layout (bottom bar, sheets) starts at
+  // The layout is the person's choice (Flow | Board); until they choose, a phone gets Flow and a bigger screen gets the Board
+  const flowMode = () => (getPrefs().layout ?? (phoneQuery.matches ? 'flow' : 'board')) === 'flow';
+  const isCol = (n) => (flowMode() ? !flowOpen.has(n.id) : !!n.collapsed);
+  // a module's name for chips and sheets: its title, plus what makes two of the same kind different (the sound, the wave, the filter type)
+  const titleOf = (n) => {
+    const p = n.params || {}, d = [p.name, p.wave, p.ftype && p.type, p.type].find((x) => typeof x === 'string' && x && x.length < 22);
+    return MODULES[n.type].title + (d && !['sequencer'].includes(MODULES[n.type].cat) ? ' · ' + d : '');
+  };
+  const flowGroupOpen = new Set();   // groups opened in the flow view; all start folded into one card
+  const flowGroupEls = new Map();
+  const groupOfNode = (id) => (store.graph.groups || []).find((gr) => gr.nodes.includes(id));
+  function flowGroupCard(gr) {
+    let e = flowGroupEls.get(gr.id);
+    if (e) return e;
+    const led = h('span', { class: 'fg-led', title: 'Lights up when this group is playing' });
+    const name = h('span', { class: 'fg-name' });
+    const count = h('span', { class: 'fg-count' });
+    const tog = h('span', { class: 'fg-tog', 'aria-hidden': 'true' });
+    const ung = h('button', { class: 'n-btn', type: 'button', title: 'Ungroup (keeps all the modules)', 'aria-label': 'Ungroup', onclick: (ev) => { ev.stopPropagation(); flowGroupOpen.delete(gr.id); hooks.ungroup(gr.id); } }, '×');
+    const head = h('div', { class: 'fg-head', role: 'button', tabindex: 0, 'aria-label': `Group ${gr.name || ''}: tap to open or fold` }, led, name, count, tog, ung);
+    const toggle = () => { if (flowGroupOpen.has(gr.id)) flowGroupOpen.delete(gr.id); else flowGroupOpen.add(gr.id); sync(); };
+    head.addEventListener('click', (ev) => { if (!ev.target.closest('button')) toggle(); });
+    head.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); toggle(); } });
+    const chips = h('div', { class: 'fg-chips' });
+    const el = h('div', { class: 'fgroup', dataset: { gid: gr.id } }, head, chips);
+    world.append(el);
+    e = { el, led, name, count, tog, chips };
+    flowGroupEls.set(gr.id, e);
+    return e;
+  }
+  function toggleOpen(id) { if (flowOpen.has(id)) flowOpen.delete(id); else flowOpen.add(id); sync(); }
+  function scrollToNode(id) {
+    const el = views.get(id)?.el;
+    if (!el) return;
+    el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    el.classList.add('hl'); setTimeout(() => el.classList.remove('hl'), 1000);
+  }
+  // A sheet that lists every legal place to connect to (or from), so no cable has to be dragged
+  let connectSheet = null;
+  function openConnectSheet({ fromNode, toNode, toPort }) {
+    connectSheet?.remove();
+    const g = store.graph;
+    const has = (a, bn, bp) => g.wires.some((w) => w.from.node === a && w.to.node === bn && w.to.port === bp);
+    let head, rows;
+    if (fromNode) {
+      head = `Send ${titleOf(nodeById(g, fromNode))} to…`;
+      rows = legalTargets(g, fromNode).filter((t) => !has(fromNode, t.node, t.port)).map((t) => ({ label: `${titleOf(nodeById(g, t.node))} · ${t.label}`, go: () => hooks.connect({ node: fromNode, port: 'out' }, { node: t.node, port: t.port }) }));
+    } else {
+      const port = portsOf(nodeById(g, toNode)).find((p) => p.id === toPort);
+      head = `Plug into ${titleOf(nodeById(g, toNode))} · ${port?.label || 'in'}, from…`;
+      rows = legalSources(g, toNode, toPort).filter((id) => !has(id, toNode, toPort)).map((id) => ({ label: titleOf(nodeById(g, id)), go: () => hooks.connect({ node: id, port: 'out' }, { node: toNode, port: toPort }) }));
+    }
+    const close = () => { connectSheet?.remove(); connectSheet = null; document.removeEventListener('pointerdown', away, true); };
+    const away = (e) => { if (connectSheet && !connectSheet.contains(e.target)) close(); };
+    connectSheet = h('div', { class: 'cpick connect-sheet', role: 'dialog', 'aria-label': head },
+      h('div', { class: 'cp-h' }, head),
+      rows.length ? h('div', { class: 'cs-list' }, rows.map((r) => h('button', { class: 'cs-row', onclick: () => { close(); r.go(); } }, r.label)))
+        : h('div', { class: 'menu-empty' }, 'Nothing else on the board fits here yet. Add a module first (the + button).'),
+      h('button', { class: 'btn ghost', onclick: close }, 'Cancel'));
+    document.body.append(connectSheet);
+    setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+  }
+  // Tap-to-connect on the board: tap a jack, the jacks it can plug into light up, tap one. (Dragging a cable still works.)
+  let tapMode = null;
+  const tapBanner = h('div', { class: 'tap-banner' }, h('span', {}, 'Tap a glowing jack to connect'), h('button', { class: 'btn sm', onclick: () => endTap() }, 'Cancel'));
+  function endTap() {
+    if (!tapMode) return;
+    tapMode = null; tapBanner.remove();
+    root.classList.remove('wiring');
+    root.querySelectorAll('.jack').forEach((j) => j.classList.remove('ok', 'no', 'hot'));
+  }
+  function startTap(fixed, test) { tapMode = { fixed, test, at: Date.now() }; root.append(tapBanner); }
+  root.addEventListener('click', (e) => { if (tapMode && Date.now() - tapMode.at > 200 && !e.target.closest('.jack, .tap-banner')) endTap(); }, true);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') endTap(); });
+  // flow view: a tap (not a scroll) on a module's header opens or folds it
+  root.addEventListener('click', (e) => {
+    if (!flowMode()) return;
+    const head = e.target.closest('.n-head');
+    if (head && !e.target.closest('.jack, button, input, select, textarea')) toggleOpen(head.closest('.node').dataset.id);
+  });
+  const viewUI = h('div', { class: 'view-toggle', role: 'group', 'aria-label': 'How the modules are laid out' },
+    h('button', { type: 'button', class: 'vt-flow', onclick: () => setPref('layout', 'flow') }, 'Flow'),
+    h('button', { type: 'button', class: 'vt-board', onclick: () => setPref('layout', 'board') }, 'Board'));
+  const paintViewUI = () => { const f = flowMode(); viewUI.querySelector('.vt-flow').classList.toggle('on', f); viewUI.querySelector('.vt-board').classList.toggle('on', !f); };
+  root.append(viewUI); paintViewUI();
+  let wasFlow = false;
+  const relayout = () => { const f = flowMode(); if (f !== wasFlow) { wasFlow = f; paintViewUI(); sync(); if (!f) setTimeout(() => fit(), 0); } };
+  window.addEventListener('resize', relayout);
+  onPrefs((p, k) => { if (k === 'layout') relayout(); });
   function zoomAt(f, cx, cy) {
     const z = Math.min(2, Math.max(minZoom(), view.z * f));
     const r = root.getBoundingClientRect();
@@ -673,6 +806,7 @@ export function createBoard(root, store, hooks) {
   }
 
   root.addEventListener('wheel', (e) => {
+    if (flowMode()) return;   // the flow view scrolls like a page
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
     else { view.x -= e.deltaX; view.y -= e.deltaY; applyView(); }
@@ -712,6 +846,7 @@ export function createBoard(root, store, hooks) {
   // a press anywhere except on the selected cable (or its delete button) deselects the cable, which hides its delete button
   root.addEventListener('pointerdown', (e) => { if (selectedWire && !e.target.closest('.cable-hit, .wdel')) { selectedWire = null; drawCables(); } }, true);
   root.addEventListener('pointerdown', (e) => {
+    if (flowMode()) return;
     if (e.pointerType === 'touch') { touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (touches.size === 2) beginPinch(); }
   }, true);
   root.addEventListener('pointermove', (e) => {
@@ -729,6 +864,7 @@ export function createBoard(root, store, hooks) {
   root.addEventListener('pointercancel', endPointer);
   // pan by dragging empty board
   root.addEventListener('pointerdown', (e) => {
+    if (flowMode()) return;   // the flow view scrolls; there is no panning or box selecting
     if (e.target.closest('.node, .zoom, .cable-hit, .minimap, .selbar')) return;   // the selection bar is on the board, so a click on it must not count as a click on empty board (that would clear the selection first)
     if (e.shiftKey || e.metaKey || e.ctrlKey) return startMarquee(e);
     startPan(e);
@@ -833,6 +969,15 @@ export function createBoard(root, store, hooks) {
   function beginCable(jack, e) {
     e.preventDefault(); e.stopPropagation();
     const g = store.graph;
+    if (tapMode) {   // second tap of a tap-to-connect
+      const t = tapMode; endTap();
+      if (jack.dataset.dir !== t.fixed.dir && t.test(jack)) {
+        const from = t.fixed.dir === 'out' ? { node: t.fixed.node, port: 'out' } : { node: jack.dataset.node, port: 'out' };
+        const to = t.fixed.dir === 'out' ? { node: jack.dataset.node, port: jack.dataset.port } : { node: t.fixed.node, port: t.fixed.port };
+        hooks.connect(from, to);
+      }
+      return;
+    }
     const nodeId = jack.dataset.node, portId = jack.dataset.port, dir = jack.dataset.dir;
     let fixed; // the end that stays: {node, port, dir}
     if (dir === 'in') {
@@ -884,6 +1029,10 @@ export function createBoard(root, store, hooks) {
     const up = (ev) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      if (!fixed.pickedUp && !targetJack(ev) && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 8) {   // a tap, not a drag: wait for a second tap on a glowing jack
+        ghost.setAttribute('d', '');
+        return startTap(fixed, test);
+      }
       const noJack = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.jack.no');
       root.classList.remove('wiring');
       jacks.forEach((j) => j.classList.remove('ok', 'no', 'hot'));
@@ -950,11 +1099,18 @@ export function createBoard(root, store, hooks) {
       jack.addEventListener('pointerdown', (e) => beginCable(jack, e));
       return jack;
     };
+    // a "?" beside an empty input of the selected module: what plugs in here (Settings → Socket help)
+    const makeQ = (p) => {
+      const q = h('button', { class: 'jack-q', type: 'button', title: 'What plugs in here?', 'aria-label': `What plugs into the ${p.label} input`, dataset: { node: node.id, port: p.id } }, '?');
+      q.addEventListener('pointerdown', (e) => e.stopPropagation());
+      q.addEventListener('click', (e) => { e.stopPropagation(); openJackHelp(q, node, p); });
+      return q;
+    };
     const ins = portsOf(node).filter((p) => p.dir === 'in' && !p.param);
     const inHeader = ins.length <= 1; // one input and one output sit in the title bar; modules with several inputs keep a rail
-    const headKids = [h('span', { class: 'n-title' }, def.title), muteBtn, h('button', { class: 'n-btn', title: 'Collapse / expand', onclick: (e) => { e.stopPropagation(); hooks.collapse(node.id); } }, node.collapsed ? '▸' : '▾'), menuBtn];
+    const headKids = [h('span', { class: 'n-title' }, def.title), muteBtn, h('button', { class: 'n-btn', title: 'Collapse / expand', onclick: (e) => { e.stopPropagation(); if (flowMode()) toggleOpen(node.id); else hooks.collapse(node.id); } }, isCol(node) ? '▸' : '▾'), menuBtn];
     if (inHeader) {
-      if (ins[0]) { const j = makeJack(ins[0]); j.classList.add('hj-l'); headKids.unshift(j); }
+      if (ins[0]) { const j = makeJack(ins[0]); j.classList.add('hj-l'); const q = makeQ(ins[0]); q.classList.add('hq'); headKids.unshift(j, q); }
       if (def.out) { const j = makeJack('out'); j.classList.add('hj-r'); headKids.push(j); }
     }
     const head = h('div', { class: 'n-head' }, headKids);
@@ -962,13 +1118,13 @@ export function createBoard(root, store, hooks) {
     el.classList.toggle('muted', !!node.muted);
     if (!inHeader) {
       const inRail = h('div', { class: 'rail rail-in' });
-      ins.forEach((p, i) => inRail.append(h('div', { class: 'rail-row' + (node.type === 'arrange' || node.type === 'mixer' ? ' arr-in' : ''), style: node.type === 'arrange' || node.type === 'mixer' ? `--hue: ${(i * 57 + 200) % 360}` : '' }, makeJack(p), h('span', { class: 'rail-label' }, p.label))));
+      ins.forEach((p, i) => inRail.append(h('div', { class: 'rail-row' + (node.type === 'arrange' || node.type === 'mixer' ? ' arr-in' : ''), style: node.type === 'arrange' || node.type === 'mixer' ? `--hue: ${(i * 57 + 200) % 360}` : '' }, makeJack(p), makeQ(p), h('span', { class: 'rail-label' }, p.label))));
       const outRail = def.out ? h('div', { class: 'rail rail-out' }, h('div', { class: 'rail-row' }, h('span', { class: 'rail-label' }, 'out'), makeJack('out'))) : null;
       el.append(h('div', { class: 'ports' }, inRail, h('span', { class: 'sp' }), outRail));
     }
 
     const body = h('div', { class: 'n-body' });
-    if (!node.collapsed) el.append(body);
+    if (!isCol(node)) el.append(body);
     const ctl = { knobs: {}, inputs: {}, node };
     const row = h('div', { class: 'controls' });
     for (const spec of def.params) {
@@ -1080,22 +1236,22 @@ export function createBoard(root, store, hooks) {
       }
     }
     if (row.children.length) body.append(row);
-    if (def.preview && !node.collapsed) { ctl.preview = h('canvas', { class: 'previewcanvas', width: 240, height: 72 }); body.prepend(ctl.preview); }
-    if (def.canvas && !node.collapsed) { ctl.canvas = h('canvas', { class: 'viewcanvas', width: 260, height: 110 }); body.prepend(ctl.canvas); }
-    if (def.data?.arrange && !node.collapsed) body.prepend(buildArrange(node, ctl));
-    if (def.data?.mixer && !node.collapsed) body.prepend(buildMixer(node, ctl, { store, hooks, h }));
-    if (def.data?.fxrack && !node.collapsed) body.prepend(buildFxRack(node, ctl, { store, hooks, h }));
-    if (def.data?.envelope && !node.collapsed) { ctl.envEl = buildEnvelope(node, ctl, def); body.prepend(ctl.envEl); }
-    if (def.data?.fmdiagram && !node.collapsed) body.prepend(buildFmDiagram(node, ctl, { store, hooks, h, relayout: () => setTimeout(drawCables, 0) }));
-    if (def.data?.chords && !node.collapsed) body.prepend(buildChords(node, ctl));
-    else if (def.data?.cells && !node.collapsed) body.prepend(buildSequencer(node, ctl));
-    if (def.data?.tracks && !node.collapsed) body.prepend(buildDrums(node, ctl));
+    if (def.preview && !isCol(node)) { ctl.preview = h('canvas', { class: 'previewcanvas', width: 240, height: 72 }); body.prepend(ctl.preview); }
+    if (def.canvas && !isCol(node)) { ctl.canvas = h('canvas', { class: 'viewcanvas', width: 260, height: 110 }); body.prepend(ctl.canvas); }
+    if (def.data?.arrange && !isCol(node)) body.prepend(buildArrange(node, ctl));
+    if (def.data?.mixer && !isCol(node)) body.prepend(buildMixer(node, ctl, { store, hooks, h }));
+    if (def.data?.fxrack && !isCol(node)) body.prepend(buildFxRack(node, ctl, { store, hooks, h }));
+    if (def.data?.envelope && !isCol(node)) { ctl.envEl = buildEnvelope(node, ctl, def); body.prepend(ctl.envEl); }
+    if (def.data?.fmdiagram && !isCol(node)) body.prepend(buildFmDiagram(node, ctl, { store, hooks, h, relayout: () => setTimeout(drawCables, 0) }));
+    if (def.data?.chords && !isCol(node)) body.prepend(buildChords(node, ctl));
+    else if (def.data?.cells && !isCol(node)) body.prepend(buildSequencer(node, ctl));
+    if (def.data?.tracks && !isCol(node)) body.prepend(buildDrums(node, ctl));
     if (node.type === 'sample' && ctl.soundField && ctl.inputs.bank) ctl.soundField.prepend(ctl.inputs.bank.closest('.field'));   // the bank decides which sounds exist, so it comes first, above the sound
     // order for a sound maker: the sound first, then the envelope, then (for a synth wave only) the wave buttons, then the knobs
     if (ctl.wavesEl) { if (ctl.envEl) ctl.envEl.after(ctl.wavesEl); else body.prepend(ctl.wavesEl); }
     if (ctl.soundField) body.prepend(ctl.soundField);
     const foldSpecs = def.params.filter((sp) => sp.fold && (ctl.inputs[sp.key] || ctl.knobs[sp.key]));
-    if (foldSpecs.length && !node.collapsed) {
+    if (foldSpecs.length && !isCol(node)) {
       const foldBody = h('div', { class: 'fold-body' });
       foldSpecs.filter((sp) => ctl.inputs[sp.key]).forEach((sp) => foldBody.append(ctl.inputs[sp.key].closest('.field')));
       const foldKnobs = foldSpecs.filter((sp) => ctl.knobs[sp.key]);
@@ -1109,7 +1265,7 @@ export function createBoard(root, store, hooks) {
       ctl.foldSum = sum;
       body.append(fold);
     }
-    if (!node.collapsed) {
+    if (!isCol(node)) {
       // the description folds away like the settings do; Settings → Module descriptions can keep them all open
       const head = h('button', { class: 'fold-head', title: 'What this module does' }, h('span', { class: 'fold-sum' }, 'about this module'), h('span', { class: 'fold-chev' }, '▾'));
       const about = h('div', { class: 'fold about' + (aboutOpen.has(node.id) ? ' open' : '') }, head, h('div', { class: 'fold-body' }, h('div', { class: 'blurb' }, def.blurb), def.more ? h('button', { class: 'btn sm blurb-readmore', type: 'button', onclick: (e) => { e.stopPropagation(); hooks.showHelp(node.type); } }, `Read more about ${def.title} ▸`) : null));
@@ -1233,6 +1389,12 @@ export function createBoard(root, store, hooks) {
     }
     const ph = dotsRow(L0, steps);
     wrap.append(h('div', { class: 'row-line ph-line' }, h('span', { class: 'row-label' }), ph.row), repLine, main, extras);
+    if (pitched) {
+      const tb = h('button', { class: 'cpre-btn', title: 'Pick a ready-made tune: it sets the steps and the notes' }, '♪ templates');
+      tb.addEventListener('pointerdown', (e) => e.stopPropagation());
+      tb.addEventListener('click', () => openMelodyTemplates(tb, node.id));
+      wrap.prepend(tb);
+    }
     ctl.seq = { cells, velBars, lenBtns, xBtns, steps, rows, pitched, mm, octLabel, labels, dots: ph.dots };
     return wrap;
   }
@@ -1434,6 +1596,9 @@ export function createBoard(root, store, hooks) {
     const L0 = layoutCols(slotN.map((n) => slotWidth(n) + 'px'), null, BD);
     const template = L0.template;
     const wrap = h('div', { class: 'drums', style: `--steps:${steps}` });
+    const kitPick = h('select', { class: 'sel drum-kits', 'aria-label': 'Drum kit preset', title: 'Load a ready-made drum kit: a drum bank and a groove. It replaces the rows and the bank; gain and pan stay.' },
+      h('option', { value: '' }, 'Kits: pick a groove…'), ...DRUM_PRESETS.map((pr) => h('option', { value: pr.id, title: pr.tip }, pr.label)));
+    kitPick.addEventListener('change', () => { if (kitPick.value) hooks.applyDrumPreset(node.id, kitPick.value); kitPick.value = ''; });
     const rows = [];
     const sel = { i: Math.min(selTrack.get(node.id) ?? 0, tracks.length - 1) };
     const select = (ti) => { sel.i = ti; selTrack.set(node.id, ti); const gg = store.graph.nodes.find((x) => x.id === node.id); if (gg) syncNode(views.get(node.id), gg); };
@@ -1475,7 +1640,7 @@ export function createBoard(root, store, hooks) {
     const ph = dotsRow(L0, steps);
     ph.row.classList.add('trk-div');
     wrap.prepend(ph.row);
-    wrap.append(h('div', { class: 'trk-foot' }, h('button', { class: 'btn sm trk-add', disabled: node.params.tracks.length >= 8, onclick: () => hooks.setTrack(node.id, 0, { add: true }) }, '+ row'), h('span', { class: 'hintline' }, 'top bar: repeat / split the selected row')));
+    wrap.append(h('div', { class: 'trk-foot' }, h('button', { class: 'btn sm trk-add', disabled: node.params.tracks.length >= 8, onclick: () => hooks.setTrack(node.id, 0, { add: true }) }, '+ row'), h('span', { class: 'hintline' }, 'top bar: repeat / split the selected row')), kitPick);
     ctl.drums = { rows, steps, xBtns, sel, dots: ph.dots };
     return wrap;
   }
@@ -1483,14 +1648,14 @@ export function createBoard(root, store, hooks) {
   const sigOf = (n) => {
     const k = effectiveKey(store.graph, n);
     const xs = n.params.cells ? n.params.cells.map((c) => c.x || '').join(',') : n.params.tracks ? n.params.tracks.map((t) => t.cells.map((c) => c.x || '').join(',')).join(';') : '';
-    return [n.type, n.params.steps, n.params.n, n.params.tracks?.length, k ? (SCALES[k.scale] || []).length : 0, xs, n.collapsed ? 1 : 0, n.params.cells || n.params.tracks ? beatsNow() : ''].join('|');   // a sequencer is redrawn when the beats per cycle change
+    return [n.type, n.params.steps, n.params.n, n.params.tracks?.length, k ? (SCALES[k.scale] || []).length : 0, xs, isCol(n) ? 1 : 0, n.params.cells || n.params.tracks ? beatsNow() : ''].join('|');   // a sequencer is redrawn when the beats per cycle change
   };
 
   function syncNode(v, node) {
     v.ctl.node = node;
     const def = MODULES[node.type];
     v.el.style.transform = `translate(${node.x}px,${node.y}px)`;
-    v.el.classList.toggle('collapsed', !!node.collapsed);
+    v.el.classList.toggle('collapsed', isCol(node));
     v.el.classList.toggle('muted', !!node.muted);
     v.el.style.width = node.w ? node.w + 'px' : '';
     const mb = v.el.querySelector('.n-mute');
@@ -1668,6 +1833,10 @@ export function createBoard(root, store, hooks) {
   }
 
   function onNodePointerDown(e, id, el) {
+    if (flowMode()) {   // flow view: tapping a header opens or folds the module; modules are not dragged
+      if (!e.target.closest('.jack, .knob, input, textarea, select, button, .cell, .vel, .len')) selectNode(id);
+      return;
+    }
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     if (e.target.closest('.jack, .knob, input, textarea, select, button, .cell, .vel, .len, .n-resize')) {
       if (!selection.has(id)) selectNode(id);
@@ -1761,6 +1930,62 @@ export function createBoard(root, store, hooks) {
     }
   }
 
+  // flow view: the column order, and under each header the cables as chips (tap to jump there, x to unplug) with buttons to make new ones
+  function paintFlow() {
+    const on = flowMode(), g = store.graph;
+    root.classList.toggle('flow', on);
+    if (!on) { world.scrollTop = 0; world.scrollLeft = 0; root.scrollTop = 0; root.scrollLeft = 0; }   // the flow view scrolls the world; leaving it must not leave the board scrolled away
+    // groups in the flow view: a card the size of one folded module, followed (when open) by its members
+    const groups = on ? (g.groups || []).map((gr) => ({ gr, mem: gr.nodes.filter((id) => views.has(id)) })).filter((x) => x.mem.length) : [];
+    const groupOf = new Map(); groups.forEach(({ gr, mem }) => mem.forEach((id) => groupOf.set(id, gr.id)));
+    const ord = flowOrder(g), seq = [], emitted = new Set();
+    for (const id of ord) {
+      const gid = groupOf.get(id);
+      if (!gid) { seq.push({ node: id }); continue; }
+      if (emitted.has(gid)) continue;
+      emitted.add(gid); seq.push({ group: gid });
+      ord.filter((x) => groupOf.get(x) === gid).forEach((x) => seq.push({ node: x, gid }));
+    }
+    for (const [gid, e] of flowGroupEls) if (!groups.some((x) => x.gr.id === gid)) { e.el.remove(); flowGroupEls.delete(gid); }
+    seq.forEach((item, i) => {
+      if (item.group) {
+        const { gr, mem } = groups.find((x) => x.gr.id === item.group);
+        const e = flowGroupCard(gr);
+        e.el.style.order = i;
+        const open = flowGroupOpen.has(gr.id);
+        e.el.classList.toggle('open', open);
+        e.name.textContent = gr.name || 'Group';
+        e.count.textContent = mem.length + (mem.length === 1 ? ' module' : ' modules');
+        e.tog.textContent = open ? '▾' : '▸';
+        const sorted = ord.filter((x) => groupOf.get(x) === gr.id);
+        e.chips.replaceChildren(...sorted.map((id) => { const n = nodeById(g, id); return h('button', { class: 'fg-chip', type: 'button', style: `border-left-color:${CAT_COLOR[MODULES[n.type].cat] || '#6b7886'}`, onclick: () => { flowGroupOpen.add(gr.id); sync(); requestAnimationFrame(() => scrollToNode(id)); } }, titleOf(n)); }));
+        return;
+      }
+      const v = views.get(item.node);
+      if (!v) return;
+      v.el.style.order = i;
+      v.el.classList.toggle('fg-member', !!item.gid);
+      v.el.classList.toggle('fg-hidden', !!item.gid && !flowGroupOpen.has(item.gid));
+    });
+    if (!on) for (const [, v] of views) { v.el.style.order = ''; v.el.classList.remove('fg-member', 'fg-hidden'); }
+    for (const [id, v] of views) {
+      v.el.querySelector(':scope > .flow-links')?.remove();
+      if (!on) continue;
+      const n = nodeById(g, id), def = MODULES[n.type], kids = [];
+      const chip = (arrow, text, go, del) => h('span', { class: 'fl-chip' }, h('button', { class: 'fl-go', type: 'button', onclick: go }, `${arrow} ${text}`), del ? h('button', { class: 'fl-x', type: 'button', title: 'Unplug this cable', 'aria-label': 'Unplug this cable', onclick: del }, '×') : null);
+      for (const w of g.wires.filter((x) => x.to.node === id)) {
+        const src = nodeById(g, w.from.node);
+        if (src) kids.push(chip('←', titleOf(src) + (w.to.port.startsWith('p:') ? ` (${w.to.port.slice(2)})` : ''), () => scrollToNode(src.id), () => hooks.removeWire(w.id)));
+      }
+      for (const w of g.wires.filter((x) => x.from.node === id)) {
+        const dst = nodeById(g, w.to.node);
+        if (dst) kids.push(chip('→', titleOf(dst) + (w.to.port.startsWith('p:') ? ` (${w.to.port.slice(2)})` : ''), () => scrollToNode(dst.id), null));
+      }
+      for (const p of portsOf(n)) if (p.dir === 'in' && !p.param && !wiresInto(g, id, p.id).length) kids.push(h('button', { class: 'fl-add', type: 'button', onclick: () => openConnectSheet({ toNode: id, toPort: p.id }) }, `＋ ${p.label || 'in'} from…`));
+      if (def.out) kids.push(h('button', { class: 'fl-add', type: 'button', onclick: () => openConnectSheet({ fromNode: id }) }, '＋ send to…'));
+      if (kids.length) v.el.querySelector('.n-head')?.after(h('div', { class: 'flow-links' }, kids));
+    }
+  }
   function sync() {
     const g = store.graph;
     const ids = new Set(g.nodes.map((n) => n.id));
@@ -1778,6 +2003,8 @@ export function createBoard(root, store, hooks) {
       syncNode(v, n);
     }
     hint.style.display = g.nodes.length ? 'none' : '';
+    paintFlow();
+    wasFlow = flowMode(); paintViewUI();
     // jack plugged state
     root.querySelectorAll('.jack').forEach((j) => j.classList.remove('plugged'));
     for (const w of g.wires) {
@@ -1833,6 +2060,7 @@ export function createBoard(root, store, hooks) {
       });
     },
     flashNode(id, ms = 180) {
+      if (flowMode()) { const gr = groupOfNode(id); const fe = gr && flowGroupEls.get(gr.id); if (fe) { fe.el.classList.add('live'); clearTimeout(fe.liveT); fe.liveT = setTimeout(() => fe.el.classList.remove('live'), Math.max(ms, 260)); } }
       const hg = hiddenGroup(id);
       if (hg) { const ge = groupEls.get(hg.id)?.el; ge?.classList.add('live'); setTimeout(() => ge?.classList.remove('live'), ms); return; }
       const v = views.get(id);
@@ -1857,6 +2085,7 @@ export function createBoard(root, store, hooks) {
       s.lenBtns[step]?.classList.add('now');
       setTimeout(() => { els.forEach((c) => c.classList.remove('now')); s.lenBtns[step]?.classList.remove('now'); }, ms);
     },
+    reveal(id) { if (flowMode()) { flowOpen.add(id); sync(); requestAnimationFrame(() => scrollToNode(id)); } },
     pulse(wireId, delayMs = 0, dur = 220) {
       const e = wireEls.get(wireId);
       if (!e) return;

@@ -1,6 +1,6 @@
 # Strudel Patchboard
 
-**An unofficial visual editor for [Strudel](https://strudel.cc)** (not made or endorsed by the Strudel team). Wire modules together on a page; a live panel shows the Strudel code the patch compiles to, and that code is what plays.
+**Learn [Strudel](https://strudel.cc) by seeing what the code means** (an unofficial tool, not made or endorsed by the Strudel team). Wire modules together on a page; a live panel shows the Strudel code the patch compiles to, and that code is what plays. Numbers and choices in the code can be edited and the patch updates.
 
 ```
 npm install

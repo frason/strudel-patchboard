@@ -1,6 +1,7 @@
 // Display-only modules: Piano Roll and Scope. They read what Strudel is really playing (the live pattern's events and
 // the audio analysers) and draw it. They never change the sound or the code, except Scope's .analyze(n) tag.
 import { scopeId, nodeById } from './graph.js';
+import { getPrefs } from './prefs.js';
 
 const accent = () => (getComputedStyle(document.getElementById('app') || document.body).getPropertyValue('--accent') || '#f3c9a0').trim();
 const NOTE_NAMES = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
@@ -217,13 +218,20 @@ export function createViews({ board, store, engine, getEvaluated }) {
       const info = n.muted ? null : timeInfo(g, n.id);
       if (!info) { board.setPlayhead(n.id, null); continue; }
       const steps = n.params.steps, t = now * info.scale;
-      let idx = n.params.mode === 'turns' ? ((Math.floor(t) % steps) + steps) % steps : Math.floor((t - Math.floor(t)) * steps);
+      const pace = n.params.mode === 'pace' && steps > 8;
+      let idx = n.params.mode === 'turns' ? ((Math.floor(t) % steps) + steps) % steps : pace ? Math.floor(t * 8) % steps : Math.floor((t - Math.floor(t)) * steps);
       if (info.rev && n.params.mode !== 'turns') idx = steps - 1 - idx;
       board.setPlayhead(n.id, idx);
     }
   }
   function frame() {
     raf = requestAnimationFrame(frame);
+    if (getPrefs().animations === false) {   // animations off: nothing moves; show a still note instead of drawing every frame
+      board.clearPlayheads();
+      const cv0 = board.canvases();
+      if (!idleDrawn && cv0.length) { cv0.forEach((c) => idle(c.canvas, 'animations are off (Settings)')); idleDrawn = true; }
+      return;
+    }
     if (engine.playing) {
       const now = engine.nowCycle(), g = store.graph;
       playheads(g, now);
