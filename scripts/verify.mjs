@@ -186,7 +186,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const pat = await evaluate(r.code, false);
   const notes = pat.queryArc(0, 1).filter((h) => h.hasOnset()).map((h) => h.value.note);
   console.log('notes', JSON.stringify(notes));
-  check('lesson 11 plays degrees of A minor (lead A3 C4 E4 A4 E4 C4 + bass A2 D3)', notes.includes('A3') && notes.includes('C4') && notes.includes('E4') && notes.includes('A4') && notes.includes('A2') && notes.includes('D3'));
+  check('lesson 12 plays degrees of A minor (lead A3 C4 E4 A4 E4 C4 + bass A2 D3)', notes.includes('A3') && notes.includes('C4') && notes.includes('E4') && notes.includes('A4') && notes.includes('A2') && notes.includes('D3'));
   check('both melodies use the same wired Key module', (r.code.match(/\.scale\("A3:minor"\)/g) || []).length === 2);
   const key = g.nodes.find((n) => n.type === 'key');
   key.params.root = 'D'; key.params.scale = 'minor:pentatonic'.replace(':', ' ');
@@ -308,9 +308,9 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const g = LESSONS.find((l) => l.id === 'instruments').graph();
   const r = compile(g);
   console.log(r.code);
-  check('lesson 16 uses three General MIDI sounds through s()', ['gm_string_ensemble_1', 'gm_flute', 'gm_acoustic_guitar_nylon'].every((n) => r.code.includes('.s("' + n + '")')));
+  check('lesson 17 uses three General MIDI sounds through s()', ['gm_string_ensemble_1', 'gm_flute', 'gm_acoustic_guitar_nylon'].every((n) => r.code.includes('.s("' + n + '")')));
   const ev = (await evaluate(r.code, false)).queryArc(0, 2).filter((h) => h.hasOnset());
-  check('lesson 16 plays chords (3 string notes) and a melody', ev.filter((h) => h.value.s === 'gm_string_ensemble_1').length >= 3 && ev.some((h) => h.value.s === 'gm_flute'));
+  check('lesson 17 plays chords (3 string notes) and a melody', ev.filter((h) => h.value.s === 'gm_string_ensemble_1').length >= 3 && ev.some((h) => h.value.s === 'gm_flute'));
 }
 
 {
@@ -407,9 +407,9 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const g = LESSONS.find((l) => l.id === 'chords').graph();
   const r = compile(g);
   console.log(r.code);
-  check('lesson 17 writes the progression from the key (Am F C G)', r.code.includes('chord("<Am F C G>")'));
+  check('lesson 18 writes the progression from the key (Am F C G)', r.code.includes('chord("<Am F C G>")'));
   const ev = (await evaluate(r.code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
-  check('lesson 17 plays the chord on the piano and arpeggiates it on the guitar', ev.some((h) => h.value.s === 'gm_epiano1') && ev.filter((h) => h.value.s === 'gm_acoustic_guitar_nylon').length >= 4);
+  check('lesson 18 plays the chord on the piano and arpeggiates it on the guitar', ev.some((h) => h.value.s === 'gm_epiano1') && ev.filter((h) => h.value.s === 'gm_acoustic_guitar_nylon').length >= 4);
 }
 
 {
@@ -735,5 +735,19 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
 {
   const { withOrderLen, parseArrangeOrder } = await import('../src/modules.js');
   check('Arrange order: changing one step\'s length rewrites only that token and keeps repeats ("1@4 2@8 3!2" -> token 1 to 5 is "1@4 2@5 3!2"; a bare "1" gets "@n")', withOrderLen('1@4 2@8 3!2', 1, 5) === '1@4 2@5 3!2' && withOrderLen('1 2', 0, 6) === '1@6 2' && withOrderLen('1@4 3!2@2', 1, 7) === '1@4 3@7!2' && parseArrangeOrder('1@4 3!2', 3, []).items.map((x) => x.tok).join() === '0,1,1');
+}
+{
+  const { patternToDrums } = await import('../src/todrums.js');
+  const { emptyGraph } = await import('../src/graph.js');
+  const text = '[bd]*4, [cp east], 808lt 808lc';
+  const r = patternToDrums(text);
+  check('Sample to Drum Machine: "[bd]*4, [cp east], 808lt 808lc" becomes 4 steps and five rows with the hits in the right places', !r.error && r.steps === 4 && r.tracks.map((t) => t.name).join() === 'bd,cp,east,808lt,808lc' && r.tracks[0].cells.every((c) => c.on) && r.tracks[1].cells.map((c) => +c.on).join('') === '1000' && r.tracks[2].cells.map((c) => +c.on).join('') === '0010');
+  const g = emptyGraph(), N = (t, q = {}) => makeNode(t, 0, 0, q);
+  const d = N('drums', { steps: r.steps, tracks: r.tracks }), o = N('output'); g.nodes.push(d, o); g.wires.push({ id: 'w', from: { node: d.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+  const ons = async (code) => (await evaluate(code, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()} ${String(h.value.s)}`).sort();
+  const a = await ons(`s("${text}")`), b = await ons(compile(g).code);
+  check('Sample to Drum Machine: the Drum Machine plays exactly the same hits at the same times as the original pattern', a.length === 16 && JSON.stringify(a) === JSON.stringify(b));
+  const e1 = patternToDrums('bd sd hh oh cp rim cb lt mt'), e2 = patternToDrums('bd(3,8)');
+  check('Sample to Drum Machine: more than 8 sounds is refused; a euclid pattern fits an 8-step grid', e1.error && /holds 8/.test(e1.error) && !e2.error && e2.steps === 8 && e2.tracks[0].cells.filter((c) => c.on).length === 3);
 }
 process.exit(failures ? 1 : 0);

@@ -905,3 +905,12 @@ html, body { overscroll-behavior: none; }
 
 .arr-strip[hidden] { display: none; }
 .arr-sec { position: absolute; left: 6px; top: 3px; font-size: 10px; opacity: .75; pointer-events: none; }
+
+/* a Sample's pattern box: the word that is playing lights up */
+.field .hlwrap { position: relative; display: block; flex: 1 1 0; min-width: 0; width: auto; }
+.hlwrap .txt { width: 100%; box-sizing: border-box; }
+.txt-hl { position: absolute; inset: 0; overflow: hidden; white-space: pre; pointer-events: none; color: transparent; border-style: solid; border-color: transparent; box-sizing: border-box; }
+.txt-hl mark { background: rgba(243, 201, 160, .42); box-shadow: 0 0 0 1px rgba(243, 201, 160, .7); border-radius: 3px; color: transparent; }
+
+.to-drums { margin-top: 6px; align-self: flex-start; }
+.to-drums[hidden] { display: none; }

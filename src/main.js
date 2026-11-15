@@ -15,9 +15,10 @@ import { strudelFile, parseImport, b64 } from './io.js';
 import { importStrudel } from './importer.js';
 import { setHydraMode, prepareWindow, hydraNotes } from './hydra.js';
 import { LESSONS } from './starters.js';
+import { patternToDrums } from './todrums.js';
 import { getAI, setAI, clearAI, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
-import { FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
-import { effectiveKey, makeNode, nodeById, wiresFrom, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
+import { defaultParams, FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
+import { effectiveKey, makeNode, nodeById, wiresFrom, wiresInto, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
 
 // Link to this app's source code (the AGPL asks public copies to offer it). Fill in once the repository exists.
 const SOURCE_URL = 'https://github.com/frason/strudel-patchboard';
@@ -570,6 +571,23 @@ const hooks = {
     }, { label: 'FM preset ' + preset.label });
     toast(`FM preset: ${preset.label}`, [undoAction], 2500);
   },
+  // A Sample whose pattern names several sounds becomes a Drum Machine: one row per sound, the steps worked out from the pattern. The module keeps its place, cables and group.
+  convertToDrums(id) {
+    const n = nodeById(store.graph, id);
+    if (!n || n.type !== 'sample') return;
+    if (wiresInto(store.graph, id, 'in').length) return toast('This Sample is timed by a rhythm cable, which a Drum Machine does not take. Unplug the cable first.', [], 6000);
+    const r = patternToDrums(n.params.name);
+    if (r.error) return toast(r.error, [], 7000);
+    const sdef = MODULES.sample.params;
+    const lost = ['speed', 'attack', 'decay', 'release', 'lpf'].filter((k) => n.params[k] !== sdef.find((p) => p.key === k).def).concat(n.params.fit === 'on' ? ['fit'] : []);
+    store.update((g) => {
+      const s = nodeById(g, id);
+      s.type = 'drums';
+      s.params = { ...defaultParams('drums'), steps: r.steps, mode: r.steps > 8 ? 'pace' : 'steps', bank: n.params.bank, gain: n.params.gain, pan: n.params.pan, tracks: JSON.parse(JSON.stringify(r.tracks)) };
+      g.wires = g.wires.filter((w) => !(w.to.node === id && w.to.port.startsWith('p:') && !['p:gain', 'p:pan'].includes(w.to.port)));   // cables into settings the Drum Machine does not have
+    }, { label: 'convert to Drum Machine' });
+    toast(`Now a Drum Machine: ${r.tracks.length} rows, ${r.steps} steps.${r.alternates ? ' The first cycle of the pattern was used.' : ''}${lost.length ? ` The Sample's ${lost.join(', ')} setting${lost.length > 1 ? 's' : ''} had no place on a Drum Machine.` : ''}`, [undoAction], 9000);
+  },
   applyFmAlgorithm(id, algoId) {
     const al = FM_ALGORITHMS.find((x) => x.id === algoId);
     if (!al) return;
@@ -692,10 +710,11 @@ function segmentsAt(loc) {
 }
 engine.onHap(({ locations, delayMs, durMs }) => {
   if (getPrefs().animations === false) return;
-  const nodes = new Set(), steps = [], ranges = [];
+  const nodes = new Set(), steps = [], ranges = [], textHits = [];
   for (const loc of locations) {
     for (const s of segmentsAt(loc)) {
       nodes.add(s.node);
+      if (s.role === 'mini' && s.key === undefined && store.graph.nodes.find((x) => x.id === s.node)?.type === 'sample') textHits.push([s.node, loc.start - s.from - 1, loc.end - s.from - 1]);
       if (s.step !== undefined) steps.push([s.node, s.step, s.track]);
       if (s.role === 'mini') ranges.push(loc);
     }
@@ -718,6 +737,7 @@ engine.onHap(({ locations, delayMs, durMs }) => {
     nodes.forEach((n) => board.flashNode(n, Math.min(durMs, 260)));
     steps.forEach(([n, s, tr]) => board.flashStep(n, s, Math.min(Math.max(durMs, 120), 600), tr));
     if (ranges.length) panel.flash(ranges, Math.min(Math.max(durMs, 140), 700));
+    textHits.forEach(([nid, a, b]) => board.flashText(nid, a, b, Math.min(Math.max(durMs, 120), 600)));
     for (const [w, d] of edges) {
       board.pulse(w.id, d * 170, 200);
       setTimeout(() => board.flashNode(w.to.node, 160), d * 170 + 200);

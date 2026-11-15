@@ -1258,7 +1258,30 @@ export function createBoard(root, store, hooks) {
       } else if (spec.kind === 'text') {
         const inp = h('input', { class: 'txt', type: 'text', spellcheck: 'false', oninput: (e) => hooks.setParam(node.id, spec.key, e.target.value) });
         inp.addEventListener('keydown', (e) => e.stopPropagation());
-        const wrap = h('label', { class: 'field' }, h('span', {}, spec.label), inp);
+        // A Sample's pattern box lights up the word that is playing: a see-through layer over the text, with a mark where each sound sounds now
+        let hlWrap = null;
+        if (node.type === 'sample' && spec.key === 'name') {
+          const hl = h('div', { class: 'txt-hl', 'aria-hidden': 'true' });
+          hlWrap = h('span', { class: 'hlwrap' }, inp, hl);
+          const active = new Set();
+          const paint = () => {
+            const cs = getComputedStyle(inp);
+            Object.assign(hl.style, { fontFamily: cs.fontFamily, fontSize: cs.fontSize, fontWeight: cs.fontWeight, letterSpacing: cs.letterSpacing, paddingLeft: cs.paddingLeft, paddingRight: cs.paddingRight, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, borderWidth: cs.borderWidth, lineHeight: cs.lineHeight });
+            const t = inp.value, cuts = [...new Set([0, t.length, ...[...active].flatMap((r) => [Math.max(0, Math.min(t.length, r.from)), Math.max(0, Math.min(t.length, r.to))])])].sort((a, b) => a - b);
+            const out = [];
+            for (let i = 0; i < cuts.length - 1; i++) {
+              const seg = t.slice(cuts[i], cuts[i + 1]); if (!seg) continue;
+              const on = [...active].some((r) => r.from <= cuts[i] && r.to >= cuts[i + 1]);
+              out.push(on ? h('mark', {}, seg) : document.createTextNode(seg));
+            }
+            hl.replaceChildren(...out); hl.scrollLeft = inp.scrollLeft;
+          };
+          inp.addEventListener('scroll', () => { hl.scrollLeft = inp.scrollLeft; });
+          ctl.hlText = {
+            flash(from, to, ms) { const r = { from, to }; active.add(r); paint(); setTimeout(() => { active.delete(r); paint(); }, ms); },
+          };
+        }
+        const wrap = h('label', { class: 'field' }, h('span', {}, spec.label), hlWrap || inp);
         wrap.addEventListener('mouseenter', () => hooks.hover?.({ node: node.id, key: spec.key }));
         wrap.addEventListener('mouseleave', () => hooks.hover?.({ node: node.id }));
         ctl.inputs[spec.key] = inp;
@@ -1273,7 +1296,10 @@ export function createBoard(root, store, hooks) {
               onPick: (id) => { const t = String(cur?.name || '').trim(); hooks.setParam(node.id, 'name', !t || /^[\w:]+$/.test(t) ? id : t + ' ' + id); } });
           });
           ctl.sampleCard = card;
-          ctl.soundField = h('div', { class: 'soundfield sample-group' }, card, wrap);
+          ctl.toDrums = h('button', { class: 'btn sm to-drums', type: 'button', hidden: true, title: 'This pattern uses several different sounds: turn the module into a Drum Machine with one row per sound' }, '→ Drum Machine');
+          ctl.toDrums.addEventListener('pointerdown', (e) => e.stopPropagation());
+          ctl.toDrums.addEventListener('click', () => hooks.convertToDrums(node.id));
+          ctl.soundField = h('div', { class: 'soundfield sample-group' }, card, wrap, ctl.toDrums);
         } else body.append(wrap);
       } else if (spec.kind === 'num') {
         const inp = h('input', { class: 'txt num', type: 'number', oninput: (e) => e.target.value !== '' && hooks.setParam(node.id, spec.key, Number(e.target.value)) });
@@ -1812,6 +1838,7 @@ export function createBoard(root, store, hooks) {
       if (v.ctl.inst.waves) { v.ctl.inst.waves.classList.toggle('dim', !wave); v.ctl.inst.waves.title = wave ? '' : 'The sound is not a synth wave: click one to switch to it'; v.ctl.inst.waves.querySelectorAll('.wave-btn').forEach((b) => b.classList.toggle('on', b.dataset.wave === id)); }
       v.ctl.inst.btn.title = it ? it.cat + ' · ' + (it.kind === 'soundfont' ? 'General MIDI instrument' : it.kind === 'sample' ? 'recorded sample' : 'synth wave') : id + ' is not a known instrument';
     }
+    if (v.ctl.toDrums) v.ctl.toDrums.hidden = !(soundNames(node.params.name).length >= 2 && !wiresInto(g, node.id, 'in').length);   // several different sounds typed in, and no rhythm cable: offer the Drum Machine
     if (v.ctl.sampleCard) {
       const names = soundNames(node.params.name), first = names[0] || '', bank = node.params.bank || '';
       const known = !!first && soundsFor(bank).includes(first);
@@ -2195,6 +2222,8 @@ export function createBoard(root, store, hooks) {
       clearTimeout(v.liveT);
       v.liveT = setTimeout(() => v.el.classList.remove('live'), ms);
     },
+    // light up the part of a Sample's pattern text (characters from..to) that is sounding now
+    flashText(id, from, to, ms = 200) { views.get(id)?.ctl.hlText?.flash(from, to, ms); },
     flashStep(id, step, ms = 160, track) {
       const v = views.get(id);
       if (v?.ctl.chords) { const b = v.ctl.chords.btns[step]; b?.classList.add('now'); setTimeout(() => b?.classList.remove('now'), Math.max(ms, 250)); return; }

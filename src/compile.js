@@ -117,11 +117,11 @@ export function compile(g) {
     }
     if (n.type === 'fm') {
       // Each operator's brightness envelope: Strudel only applies one once a fm envelope call is present, and gives the missing stages odd defaults,
-      // so all three are written together. Operator 1 always has one; operators 2 to 4 only once one of their three values has been changed.
+      // so all three are written together, and only when the brightness is not steady (sustain below 1, or an attack).
       const pick = (key) => def.params.find((x) => x.key === key);
       for (const k of [1, 2, 3, 4]) {
         const sfx = k === 1 ? '' : String(k), A = pick('attack' + sfx), D = pick('decay' + sfx), Sx = pick('sustain' + sfx);
-        const on = k === 1 || n.params[A.key] !== A.def || n.params[D.key] !== D.def || n.params[Sx.key] !== Sx.def;
+        const on = n.params[Sx.key] !== 1 || n.params[A.key] > 0;   // sustain 1 with no attack is a steady brightness: the same as no envelope, so nothing is written
         if (!on) continue;
         const say = (what) => `${what} — the brightness of operator ${k}'s modulation over the note (${k === 1 ? 'the one you hear moving' : 'drawn in the FM module'}).`;
         if (n.params[A.key] > 0) { const c = knobCall(n, { ...A, always: true }, A.call, depth, { say: say(`${A.call}(${fmt(n.params[A.key])}) is the time to reach full strength`) }); if (c) calls.push(c); }
