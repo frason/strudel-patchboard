@@ -296,7 +296,7 @@ export const MODULES = {
 
   arrange: {
     title: 'Arrange', cat: 'combine', out: 'through', data: { arrange: true },
-    inputs: 'multi', blurb: 'Lays out a song: each input plays for its own number of cycles, one after another, then it starts over: arrange([4, a], [8, b]).',
+    inputs: 'multi', orderInput: true, blurb: 'Lays out a song: each input plays for its own number of cycles, one after another, then it starts over: arrange([4, a], [8, b]). Plug a Number Pattern into "order" to say which section plays when and for how long, like 1@4 2@8 1@4 (section 1 for 4 cycles, section 2 for 8, section 1 again for 4).',
     params: [{ key: 'n', label: 'sections', kind: 'select', def: 3, options: [2, 3, 4, 5, 6], num: true, fold: true }],
   },
 
@@ -598,6 +598,19 @@ export const MODULES = {
       { key: 'slow', label: 'cycles', kind: 'knob', min: 0.25, max: 16, step: 0.25, def: 4, unit: 'cyc', tip: 'cycles for one sweep' },
     ],
   },
+  random: {
+    title: 'Random', cat: 'number', out: 'number',
+    blurb: 'A random number for any dial. It picks a new number every step by default; switch it to a new number every cycle, or to glide smoothly from one random value to the next. Plugged into a dial it takes that dial\'s range, and it can never go outside it.',
+    params: [
+      { key: 'rate', label: 'changes', kind: 'select', def: 'step', options: [['step', 'every step'], ['cycle', 'every cycle'], ['glide', 'glide smoothly']] },
+      { key: 'steps', label: 'steps', kind: 'knob', min: 1, max: 16, step: 1, def: 4, onlyIf: { key: 'rate', is: 'step' }, tip: 'how many random numbers per cycle (every step)' },
+      { key: 'slow', label: 'glide', kind: 'knob', min: 0.25, max: 16, step: 0.25, def: 2, unit: 'cyc', onlyIf: { key: 'rate', is: 'glide' }, tip: 'cycles for the value to wander (glide smoothly)' },
+      { key: 'min', label: 'low', kind: 'num', def: 200 },
+      { key: 'max', label: 'high', kind: 'num', def: 2000 },
+      { key: 'whole', label: 'numbers', kind: 'select', def: 'any', options: [['any', 'any number'], ['whole', 'whole numbers only']] },
+      { ...freezeParam, onlyIf: { key: 'rate', not: 'glide' } },
+    ],
+  },
   numpat: {
     title: 'Number Pattern', cat: 'number', out: 'number',
     blurb: 'A pattern of numbers in mini-notation, like <200 800> (one per cycle).',
@@ -655,12 +668,37 @@ export function resizeCells(type, cells, n) {
   return out;
 }
 
+// The Arrange order, written as numbers: "1@4 2@8 1" = section 1 for 4 cycles, section 2 for 8 cycles, section 1 for its own length.
+// 1!2 repeats a token. Returns the plan and what could not be read.
+export function parseArrangeOrder(text, n, lens = []) {
+  const items = [], problems = [];
+  for (const [ti, tok] of String(text || '').trim().split(/\s+/).filter(Boolean).entries()) {
+    const m = /^(\d+)(?:@(\d+))?(?:!(\d+))?(?:@(\d+))?$/.exec(tok);   // 1@4, 1!2, 1@4!2 or 1!2@4
+    if (!m) { problems.push(`"${tok}" is not understood: write a section number, then @ and the cycles (1@4)`); continue; }
+    const sec = Number(m[1]), reps = m[3] ? Number(m[3]) : 1, lenTok = m[2] ?? m[4];
+    if (sec < 1 || sec > n) { problems.push(`"${tok}": there is no section ${sec} (this Arrange has ${n})`); continue; }
+    const len = lenTok ? Math.max(1, Number(lenTok)) : Math.max(1, Math.round(Number(lens[sec - 1]) || 4));
+    for (let k = 0; k < Math.min(reps, 64); k++) items.push({ sec, len, tok: ti });
+  }
+  return { items, problems };
+}
+
+// The same order text with token number `tok` given a new length: "1@4 2@8" with token 1 -> 5 is "1@4 2@5" (a !repeat is kept)
+export function withOrderLen(text, tok, len) {
+  const toks = String(text || '').trim().split(/\s+/).filter(Boolean);
+  const m = /^(\d+)(?:@(\d+))?(?:!(\d+))?(?:@(\d+))?$/.exec(toks[tok] || '');
+  if (!m) return String(text || '');
+  toks[tok] = `${m[1]}@${Math.max(1, Math.round(len))}${m[3] ? '!' + m[3] : ''}`;
+  return toks.join(' ');
+}
+
 // Port list for one node: [{id, dir:'in'|'out', type|accept, label, required, multi, param?}]
 export function portsOf(node) {
   const def = MODULES[node.type];
   const ports = [];
   if (def.inputs === 'multi') {
     for (let i = 1; i <= node.params.n; i++) ports.push({ id: 'in' + i, dir: 'in', accept: 'same', label: 'in ' + i, required: false });
+    if (def.orderInput) ports.push({ id: 'order', dir: 'in', accept: ['number'], label: 'order', required: false, order: true });   // a Number Pattern: which section plays when
   } else if (def.inputs) {
     for (const p of def.inputs) ports.push({ id: p.id, dir: 'in', accept: Array.isArray(p.type) ? p.type : [p.type], label: p.label, required: !!p.required, multi: !!p.multi });
   }
@@ -704,6 +742,14 @@ export const DRUM_PRESETS = [
   kit('breakbeat', 'Breakbeat', 'Syncopated kicks with a ghosted snare (TR-707)', 'RolandTR707', [['bd', 'x ~ ~ ~ ~ ~ x ~ ~ x x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ ~ ~ x ~ ~ x ~ ~ ~'], ['hh', 'x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~']]),
   kit('dnb', 'Drum and bass', 'Fast two-step: kick, then snare on 2 and 4 (TR-909)', 'RolandTR909', [['bd', 'x ~ ~ ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~'], ['hh', 'x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~']]),
   kit('reggae', 'Reggae one drop', 'Nothing on beat 1; kick and snare land together on 3 (TR-707)', 'RolandTR707', [['bd', '~ ~ ~ ~ x ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ ~'], ['hh', 'x x x x x x x x']]),
+  kit('simple', 'Simple (kick and snare)', 'Just a kick on 1 and 3 and a snare on 2 and 4: the place to start', '', [['bd', 'x ~ ~ ~ x ~ ~ ~'], ['sd', '~ ~ x ~ ~ ~ x ~']]),
+  kit('halftime', 'Half-time', 'Kick on 1, snare on 3 only, so everything feels half as fast (TR-808)', 'RolandTR808', [['bd', 'x ~ ~ ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~ ~ ~ ~ ~'], ['hh', 'x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~']]),
+  kit('funk', 'Funk', 'Syncopated kick, snare with ghost hits, busy hats (LinnDrum)', 'LinnDrum', [['bd', 'x ~ ~ ~ ~ ~ x ~ ~ x x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ x ~ ~ ~ ~ x ~ ~ ~'], ['hh', 'x x x x x x x x x x x x x x x x'], ['oh', '~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~ ~']]),
+  kit('dembow', 'Dembow (reggaeton)', 'Steady kick on every beat with the 3+3+2 snare pattern (TR-909)', 'RolandTR909', [['bd', 'x ~ ~ ~ x ~ ~ ~ x ~ ~ ~ x ~ ~ ~'], ['sd', '~ ~ ~ x ~ ~ x ~ ~ ~ ~ x ~ ~ x ~'], ['hh', 'x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~']]),
+  kit('clave', 'Son clave groove', 'The 3-2 son clave on a rim sound over a steady kick and cowbell (TR-808)', 'RolandTR808', [['rim', 'x ~ ~ x ~ ~ x ~ ~ ~ x ~ x ~ ~ ~'], ['bd', 'x ~ ~ ~ x ~ ~ ~ x ~ ~ ~ x ~ ~ ~'], ['cb', '~ ~ x ~ ~ ~ x ~ ~ ~ x ~ ~ ~ x ~']]),
+  kit('lofi', 'Lo-fi', 'A lazy, loose beat: late snare, wandering hats (TR-707)', 'RolandTR707', [['bd', 'x ~ ~ ~ ~ ~ x ~ ~ ~ x ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ ~ ~ ~ ~ ~ x ~ ~ x'], ['hh', 'x ~ x ~ x ~ x x x ~ x ~ x ~ x ~']]),
+  kit('chopped', 'Chopped break', 'A broken-up break with a snare that lands off the beat (TR-909)', 'RolandTR909', [['bd', 'x ~ x ~ ~ ~ ~ ~ ~ ~ x x ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ x ~ ~ x ~ x ~ ~ x ~ ~ x'], ['hh', 'x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~']]),
+  kit('blank', 'Blank (keep the rows)', 'Clears every step so you can draw your own, keeping a kick, snare and hat row', '', [['bd', '~ ~ ~ ~ ~ ~ ~ ~'], ['sd', '~ ~ ~ ~ ~ ~ ~ ~'], ['hh', '~ ~ ~ ~ ~ ~ ~ ~']]),
   kit('electro', 'Electro', 'Booming kick, clap, crisp hats (TR-808)', 'RolandTR808', [['bd', 'x ~ ~ ~ ~ ~ x ~ x ~ ~ ~ ~ ~ ~ ~'], ['cp', '~ ~ ~ ~ x ~ ~ ~ ~ ~ ~ ~ x ~ ~ ~'], ['hh', 'x ~ x x x ~ x x x ~ x x x ~ x x']]),
 ];
 
@@ -725,8 +771,8 @@ export const MELODY_TEMPLATES = [
 
 export function resizeTracks(tracks, n) {
   return tracks.map((t) => {
-    const cells = t.cells.slice(0, n), have = cells.length;
-    while (cells.length < n) cells.push(have ? copyOf(t.cells[cells.length % have]) : { on: false });
+    const cells = t.cells.slice(0, n).map((c) => (c && typeof c === 'object' ? c : { on: !!c })), have = cells.length;   // a cell is an object; rows added by an older version held plain booleans, which cannot be clicked
+    while (cells.length < n) cells.push(have ? copyOf(cells[cells.length % have]) : { on: false });
     return { ...t, cells };
   });
 }

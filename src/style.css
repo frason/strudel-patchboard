@@ -892,3 +892,16 @@ html, body { overscroll-behavior: none; }
 .fm-waverow { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
 .fm-wv { width: 36px; height: 24px; border: 1px solid var(--line); background: var(--panel2); color: var(--dim); border-radius: 6px; cursor: pointer; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .fm-wv.on { border-color: #f3c9a0; color: #f3c9a0; }
+
+.cpick.presets { max-height: min(70vh, 520px); overflow-y: auto; }
+
+/* Instrument and Sample keep one size whatever sound is picked: a long sound description is cut short (…) instead of making the module wider and taller */
+.node[data-type="synth"], .node[data-type="sample"] { width: 264px; }
+.node .wave-row.dim { opacity: .4; }
+.node .wave-row.dim .wave-btn:hover { opacity: 1; }
+
+.arr-order { margin-top: 6px; font-size: 11px; line-height: 1.4; color: #f3c9a0; }
+.arr-order.bad { color: #f0a0a0; }
+
+.arr-strip[hidden] { display: none; }
+.arr-sec { position: absolute; left: 6px; top: 3px; font-size: 10px; opacity: .75; pointer-events: none; }

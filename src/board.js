@@ -1,5 +1,5 @@
 // The patchboard: pannable/zoomable page, module panels with real controls, typed jacks, cables.
-import { MUTE_KIND, cellNotes, noteRank as pitchRank, pitchModel, SCALES, parseX, leafAt, stepHas, slotWidth, xLabel, MODULES, PORT_TYPES, NOTE_NAMES, fmt, portsOf, CATEGORIES, DRUM_PRESETS, MELODY_TEMPLATES, FM_WAVE_NAMES, OWAVE, fmWaveFn } from './modules.js';
+import { MUTE_KIND, cellNotes, noteRank as pitchRank, pitchModel, SCALES, parseX, leafAt, stepHas, slotWidth, xLabel, MODULES, PORT_TYPES, NOTE_NAMES, fmt, portsOf, CATEGORIES, DRUM_PRESETS, MELODY_TEMPLATES, parseArrangeOrder, withOrderLen, FM_WAVE_NAMES, OWAVE, fmWaveFn } from './modules.js';
 import { soundsFor, isValidSound, describe, sampleItems, sampleCategoryOf, SAMPLE_CATS } from './catalog.js';
 import { isFav, toggleFav, favCount } from './favorites.js';
 import { getPrefs, onPrefs, setPref } from './prefs.js';
@@ -355,6 +355,23 @@ function openMelodyTemplates(anchor, nodeId) {
       const sv = svg('svg', { viewBox: `0 0 ${w} ${hh}`, width: w, height: hh });
       p.degrees.forEach((d, i) => { if (d !== null) sv.append(svg('circle', { cx: 4 + (i * (w - 8)) / Math.max(p.degrees.length - 1, 1), cy: hh - 3 - (d / hi) * (hh - 6), r: 2, fill: 'currentColor' })); });
       return h('button', { class: 'preset-card', title: p.tip, onclick: () => { close(); soundHooks.applyMelodyTemplate(nodeId, p.id); } }, sv, h('b', {}, p.label), h('small', {}, `${p.degrees.length} steps`));
+    })));
+  const close = () => { pop.remove(); document.removeEventListener('pointerdown', away, true); };
+  const away = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
+  document.body.append(pop);
+  document.addEventListener('pointerdown', away, true);
+}
+
+// Drum templates: a card per pattern, drawn as its rows of hits
+function openDrumTemplates(anchor, nodeId) {
+  const r = anchor.getBoundingClientRect();
+  const pop = h('div', { class: 'cpick presets', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - 340))}px;top:${Math.min(r.bottom + 6, window.innerHeight - 340)}px` },
+    h('div', { class: 'cp-h' }, 'Drum templates (they set the bank, the rows and the steps)'),
+    h('div', { class: 'preset-grid' }, DRUM_PRESETS.map((p) => {
+      const w = 70, rows = p.params.tracks, steps = p.params.steps, rh = Math.min(7, 22 / rows.length), hh = 22;
+      const sv = svg('svg', { viewBox: `0 0 ${w} ${hh}`, width: w, height: hh });
+      rows.forEach((t, ti) => t.cells.forEach((c, i) => { if (c.on || c.sub?.some((x) => x.on)) sv.append(svg('rect', { x: 3 + (i * (w - 6)) / steps, y: 1 + ti * rh, width: Math.max(1.6, (w - 6) / steps - 1), height: Math.max(1.6, rh - 1.5), rx: 0.6, fill: 'currentColor' })); }));
+      return h('button', { class: 'preset-card', title: p.tip, onclick: () => { close(); soundHooks.applyDrumPreset(nodeId, p.id); } }, sv, h('b', {}, p.label), h('small', {}, `${steps} steps · ${rows.length} rows`));
     })));
   const close = () => { pop.remove(); document.removeEventListener('pointerdown', away, true); };
   const away = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
@@ -1601,9 +1618,58 @@ export function createBoard(root, store, hooks) {
     totalInp.addEventListener('keydown', (k) => { k.stopPropagation(); if (k.key === 'Enter') totalInp.blur(); });
     totalInp.addEventListener('change', () => { if (totalInp.value !== '') setTotal(Number(totalInp.value)); });
     const field = h('label', { class: 'field', title: 'how long the whole song is before it starts over; typing a new total stretches every section in proportion' }, h('span', {}, 'cycles'), totalInp);
+    const orderNote = h('div', { class: 'arr-order', hidden: true });
+    // With a Number Pattern on "order" the order decides everything: this strip shows each step of it (a section for some cycles), and dragging an edge rewrites the pattern
+    const orderStrip = h('div', { class: 'arr-strip arr-ordered', hidden: true, title: 'the order from the Number Pattern, as wide as its cycles; drag a right edge to change a length (it rewrites the pattern), double-click to type one' });
+    const paintOrder = (os, plan) => {
+      const items = plan.items, total = items.reduce((a, x) => a + x.len, 0);
+      const setTokLen = (tok, v) => { const cur = nodeById(store.graph, os.id)?.params.text; const t = withOrderLen(cur, tok, Math.min(ARR_MAX, Math.max(1, v))); if (t !== cur) hooks.setParam(os.id, 'text', t); };
+      orderStrip.replaceChildren(...items.map((it, i) => {
+        const lab = h('span', { class: 'arr-lab' }, String(it.len));
+        const grip = h('span', { class: 'arr-grip', tabindex: '0', role: 'slider', 'aria-label': `cycles in step ${i + 1} (section ${String.fromCharCode(64 + it.sec)})`, 'aria-valuenow': it.len, title: 'drag to change how many cycles this step lasts (or focus it and use the arrow keys)' });
+        grip.addEventListener('keydown', (k) => { k.stopPropagation(); if (k.key === 'ArrowRight' || k.key === 'ArrowUp') { k.preventDefault(); setTokLen(it.tok, it.len + (k.shiftKey ? 10 : 1)); } else if (k.key === 'ArrowLeft' || k.key === 'ArrowDown') { k.preventDefault(); setTokLen(it.tok, it.len - (k.shiftKey ? 10 : 1)); } });
+        const blk = h('div', { class: 'arr-block' }, h('span', { class: 'arr-sec' }, String.fromCharCode(64 + it.sec)), lab, grip);
+        const col = h('div', { class: 'arr-col', style: `--hue: ${((it.sec - 1) * 57 + 200) % 360}`, title: `section ${String.fromCharCode(64 + it.sec)}, ${it.len} cycles` }, blk);
+        grip.addEventListener('pointerdown', (e) => {
+          e.stopPropagation(); e.preventDefault();
+          const before = items.slice(0, i).reduce((a, x) => a + x.len, 0), others = total - it.len, box = orderStrip.getBoundingClientRect();
+          grip.setPointerCapture(e.pointerId);
+          const move = (ev) => { const f = Math.min(0.9995, Math.max(0, (ev.clientX - box.left) / box.width)); setTokLen(it.tok, Math.round((f * others - before) / (1 - f))); };
+          const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up); };
+          grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up); grip.addEventListener('pointercancel', up);
+        });
+        blk.addEventListener('pointerdown', (e) => e.stopPropagation());
+        blk.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          const inp = h('input', { class: 'arr-num', type: 'number', min: 1, max: ARR_MAX, value: it.len });
+          inp.addEventListener('keydown', (k) => { k.stopPropagation(); if (k.key === 'Enter') inp.blur(); if (k.key === 'Escape') { inp.value = it.len; inp.blur(); } });
+          inp.addEventListener('blur', () => { if (inp.value !== '') setTokLen(it.tok, Number(inp.value)); inp.remove(); lab.style.display = ''; });
+          lab.style.display = 'none'; blk.prepend(inp); inp.focus(); inp.select();
+        });
+        col.style.flexGrow = it.len;
+        return col;
+      }));
+    };
     ctl.arrange = {
       field,
       draw(params) {
+        {   // an Arrange with a Number Pattern on "order" plays that order: show it in words
+          const g = store.graph, ow = wiresInto(g, node.id, 'order')[0], os = ow && nodeById(g, ow.from.node);
+          const ordered = !!(os && os.type === 'numpat');
+          strip.hidden = ordered; orderStrip.hidden = !ordered;
+          totalInp.disabled = ordered; totalInp.title = ordered ? 'set by the order from the Number Pattern' : '';
+          field.parentElement?.querySelectorAll('select').forEach((s) => { s.disabled = ordered; s.title = ordered ? 'the order from the Number Pattern decides which sections are used' : ''; });
+          if (ordered) {
+            const plan = parseArrangeOrder(os.params.text, params.n, params.lens);
+            paintOrder(os, plan);
+            if (document.activeElement !== totalInp) totalInp.value = plan.items.reduce((a, x) => a + x.len, 0);
+            const L = (s) => String.fromCharCode(64 + s);
+            orderNote.hidden = false;
+            orderNote.textContent = (plan.items.length ? 'Order: ' + plan.items.map((x) => `${L(x.sec)} ${x.len}`).join(' → ') + ` (${plan.items.reduce((a, x) => a + x.len, 0)} cycles)` : 'Order: nothing readable yet') + (plan.problems.length ? ' · ' + plan.problems[0] : '');
+            orderNote.classList.toggle('bad', plan.problems.length > 0);
+            return;
+          } else orderNote.hidden = true;
+        }
         let sum = 0;
         blocks.forEach(({ col, lab }, i) => {
           const len = params.lens?.[i] ?? 4;
@@ -1616,7 +1682,7 @@ export function createBoard(root, store, hooks) {
       },
     };
     ctl.arrange.draw(node.params);
-    return h('div', { class: 'arrange' }, strip);
+    return h('div', { class: 'arrange' }, strip, orderStrip, orderNote);
   }
 
   function buildChords(node, ctl) {
@@ -1651,9 +1717,6 @@ export function createBoard(root, store, hooks) {
     const L0 = layoutCols(slotN.map((n) => slotWidth(n) + 'px'), null, BD);
     const template = L0.template;
     const wrap = h('div', { class: 'drums', style: `--steps:${steps}` });
-    const kitPick = h('select', { class: 'sel drum-kits', 'aria-label': 'Drum kit preset', title: 'Load a ready-made drum kit: a drum bank and a groove. It replaces the rows and the bank; gain and pan stay.' },
-      h('option', { value: '' }, 'Kits: pick a groove…'), ...DRUM_PRESETS.map((pr) => h('option', { value: pr.id, title: pr.tip }, pr.label)));
-    kitPick.addEventListener('change', () => { if (kitPick.value) hooks.applyDrumPreset(node.id, kitPick.value); kitPick.value = ''; });
     const rows = [];
     const sel = { i: Math.min(selTrack.get(node.id) ?? 0, tracks.length - 1) };
     const select = (ti) => { sel.i = ti; selTrack.set(node.id, ti); const gg = store.graph.nodes.find((x) => x.id === node.id); if (gg) syncNode(views.get(node.id), gg); };
@@ -1695,7 +1758,8 @@ export function createBoard(root, store, hooks) {
     const ph = dotsRow(L0, steps);
     ph.row.classList.add('trk-div');
     wrap.prepend(ph.row);
-    wrap.append(h('div', { class: 'trk-foot' }, h('button', { class: 'btn sm trk-add', disabled: node.params.tracks.length >= 8, onclick: () => hooks.setTrack(node.id, 0, { add: true }) }, '+ row'), h('span', { class: 'hintline' }, 'top bar: repeat / split the selected row')), kitPick);
+    { const tb = h('button', { class: 'cpre-btn', title: 'Pick a ready-made drum pattern: it sets the bank, the rows and the steps' }, '♪ templates'); tb.addEventListener('pointerdown', (e) => e.stopPropagation()); tb.addEventListener('click', () => openDrumTemplates(tb, node.id)); wrap.prepend(tb); }
+    wrap.append(h('div', { class: 'trk-foot' }, h('button', { class: 'btn sm trk-add', disabled: node.params.tracks.length >= 8, onclick: () => hooks.setTrack(node.id, 0, { add: true }) }, '+ row'), h('span', { class: 'hintline' }, 'top bar: repeat / split the selected row')));
     ctl.drums = { rows, steps, xBtns, sel, dots: ph.dots };
     return wrap;
   }
@@ -1733,6 +1797,7 @@ export function createBoard(root, store, hooks) {
       const jack = k.cell.querySelector('.jack');
       if (jack) jack.classList.toggle('plugged', wired);
       if (spec.onlyWave) k.cell.classList.toggle('inactive', node.params.wave !== spec.onlyWave);
+      if (spec.onlyIf) k.cell.classList.toggle('inactive', spec.onlyIf.is !== undefined ? node.params[spec.onlyIf.key] !== spec.onlyIf.is : node.params[spec.onlyIf.key] === spec.onlyIf.not);
     }
     if (v.ctl.iconRows) for (const [k, row] of Object.entries(v.ctl.iconRows)) row.querySelectorAll('.wave-btn').forEach((b) => b.classList.toggle('on', b.dataset.opt === String(node.params[k])));
     if (v.ctl.preview) drawPreview(MODULES[node.type].preview, v.ctl.preview, node.params, { accent: accent(), phase: v.phase ?? null, driven: wiresInto(g, node.id, 'p:cutoff').length > 0 });
@@ -1744,7 +1809,7 @@ export function createBoard(root, store, hooks) {
       const [title, ...rest] = String(it ? it.label : id).split(':');
       v.ctl.inst.btn.replaceChildren(pic, h('span', { class: 'ib-text' }, h('span', { class: 'ib-name' }, title.trim()), h('span', { class: 'ib-sub' }, it ? `${id} · ${it.kind === 'soundfont' ? 'General MIDI' : it.kind === 'sample' ? 'recorded' : 'synth'}${rest.length ? ' · ' + rest.join(':').trim() : ''}` : 'not a known instrument')), h('i', { class: 'ti ti-chevron-down' }));
       v.ctl.inst.btn.classList.toggle('bad', !it);
-      if (v.ctl.inst.waves) { v.ctl.inst.waves.hidden = !wave; v.ctl.inst.waves.querySelectorAll('.wave-btn').forEach((b) => b.classList.toggle('on', b.dataset.wave === id)); }
+      if (v.ctl.inst.waves) { v.ctl.inst.waves.classList.toggle('dim', !wave); v.ctl.inst.waves.title = wave ? '' : 'The sound is not a synth wave: click one to switch to it'; v.ctl.inst.waves.querySelectorAll('.wave-btn').forEach((b) => b.classList.toggle('on', b.dataset.wave === id)); }
       v.ctl.inst.btn.title = it ? it.cat + ' · ' + (it.kind === 'soundfont' ? 'General MIDI instrument' : it.kind === 'sample' ? 'recorded sample' : 'synth wave') : id + ' is not a known instrument';
     }
     if (v.ctl.sampleCard) {

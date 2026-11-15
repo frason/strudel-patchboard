@@ -31,7 +31,7 @@ export function outType(g, nodeId, seen = new Set()) {
   if (def.out === 'through') {
     seen.add(nodeId);
     for (const p of portsOf(n)) {
-      if (p.dir !== 'in' || p.param) continue;
+      if (p.dir !== 'in' || p.param || p.order) continue;
       for (const w of wiresInto(g, nodeId, p.id)) {
         const t = outType(g, w.from.node, seen);
         if (t) return t;
@@ -65,7 +65,7 @@ export function whyNot(g, fromNode, toNode, toPort, ignoreWire) {
     if (t === 'number' || t === 'key') return `${t} cables plug into knobs and key inputs, not patterns`;
     // all inputs of a stack/sequence share one type
     for (const p of portsOf(to)) {
-      if (p.id === toPort || p.dir !== 'in') continue;
+      if (p.id === toPort || p.dir !== 'in' || p.accept !== 'same') continue;
       for (const w of wiresInto(test, toNode, p.id)) {
         const o = outType(test, w.from.node);
         if (o && t && o !== t) return `this module already holds ${o} cables, not ${t}`;

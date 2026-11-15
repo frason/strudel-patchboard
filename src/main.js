@@ -400,10 +400,15 @@ const hooks = {
       // A new slider (or wave) plugged into a knob starts from that knob's own setting and range, so the sound does not jump.
       const src = nodeById(g, from.node), dst = nodeById(g, to.node);
       const spec = to.port.startsWith('p:') ? MODULES[dst.type].params.find((s) => s.key === to.port.slice(2)) : null;
-      if (fresh && spec && !spec.dyn && Number.isFinite(spec.min) && Number.isFinite(spec.max) && (src.type === 'slider' || src.type === 'wave')) {
+      if (fresh && spec && !spec.dyn && Number.isFinite(spec.min) && Number.isFinite(spec.max) && (src.type === 'slider' || src.type === 'wave' || src.type === 'random')) {
         src.params.min = spec.min; src.params.max = spec.max;
+        if (src.type === 'random' && spec.step >= 1 && spec.max - spec.min <= 100) src.params.whole = 'whole';   // a small dial that counts in whole steps (semitones, repeats) gets whole numbers; a wide one (Hz) stays smooth
         if (src.type === 'slider') src.params.step = spec.step || 0;
         if (src.type === 'slider') src.params.value = Math.min(spec.max, Math.max(spec.min, Number(dst.params[spec.key] ?? spec.def)));
+      }
+      // A Number Pattern plugged into an Arrange's order starts as the Arrange's own order and lengths: 1@4 2@4 3@4
+      if (src.type === 'numpat' && dst.type === 'arrange' && to.port === 'order' && src.params.text === MODULES.numpat.params[0].def) {
+        src.params.text = Array.from({ length: dst.params.n }, (_, i) => `${i + 1}@${Math.max(1, Math.round(Number(dst.params.lens?.[i]) || 4))}`).join(' ');
       }
       // A Number Pattern still on its starting numbers (made for a cutoff) takes the dial's setting; any other pattern is checked against the dial's range.
       if (src.type === 'numpat' && spec && !spec.dyn && Number.isFinite(spec.min) && Number.isFinite(spec.max)) {
@@ -448,6 +453,7 @@ const hooks = {
       const n = nodeById(g, id);
       if (!n) return; // the module was removed while a control was still being dragged
       n.params[key] = value;
+      if (n.type === 'numpat' && key === 'text') growArrangeFor(g, n);
       if (key === 'steps' && n.params.tracks) n.params.tracks = resizeTracks(n.params.tracks, value);
       if (key === 'steps' && n.params.cells) n.params.cells = resizeCells(n.type, n.params.cells, value);
       if (key === 'steps' && ['melody', 'rhythm', 'drums', 'randnotes', 'randrhythm'].includes(n.type)) {   // more than 8 steps: keep the same pace and make the loop longer instead of squeezing it
@@ -497,7 +503,7 @@ const hooks = {
     store.update((g) => {
       const n = nodeById(g, id);
       const ts = n.params.tracks;
-      if (op.add) { if (ts.length < MAX_TRACKS) ts.push({ name: 'cp', mute: false, cells: Array(n.params.steps).fill(false) }); return; }
+      if (op.add) { if (ts.length < MAX_TRACKS) ts.push({ name: 'cp', mute: false, cells: Array.from({ length: n.params.steps }, () => ({ on: false })) }); return; }
       const t = ts[ti];
       if (!t) return;
       if (op.remove) ts.splice(ti, 1);
@@ -972,6 +978,17 @@ fileInput.addEventListener('change', async () => {
   try { importText(await f.text(), f.name, openImport); }
   catch (e) { toast('Could not read that file: ' + e.message, [], 8000); }
 });
+
+// A Number Pattern on an Arrange's "order" can name a section the Arrange does not have yet: give it that many sections (never fewer)
+function growArrangeFor(g, np) {
+  for (const w of g.wires) {
+    if (w.from.node !== np.id || w.to.port !== 'order') continue;
+    const ar = nodeById(g, w.to.node);
+    if (!ar || ar.type !== 'arrange') continue;
+    const top = Math.max(0, ...String(np.params.text || '').split(/\s+/).map((t) => Number(/^(\d+)/.exec(t)?.[1] || 0)));
+    if (top > ar.params.n) ar.params.n = Math.min(6, top);
+  }
+}
 
 // ---------- AI helper (bring your own key) ----------
 const noKeys = (el) => { el.addEventListener('keydown', (e) => e.stopPropagation()); return el; };

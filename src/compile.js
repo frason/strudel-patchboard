@@ -1,7 +1,7 @@
 // Graph -> idiomatic Strudel code. Pure. The returned `code` string is exactly what gets evaluated.
 // Alongside the code we return `segments`: which character ranges belong to which module (and which knob / step),
 // which is how highlighting, hover and "who made this event" work without any second representation of the sound.
-import { MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas } from './modules.js';
+import { parseArrangeOrder, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas } from './modules.js';
 import { chordSymbol } from './chords.js';
 import { nodeById, wiresInto, outType, effectiveKey, scopeId } from './graph.js';
 const FM_WAVES = new Set(['sine', 'sawtooth', 'square', 'triangle', 'supersaw', 'pulse', 'sin', 'saw', 'sqr', 'tri', 'z_sine', 'z_sawtooth', 'z_square', 'z_triangle']);   // oscillators FM can modulate
@@ -47,6 +47,29 @@ export function compile(g) {
 
   // The number plugged into a knob's cable jack. A Macro is mapped to the knob it drives: "sweep" stretches it across the knob's whole
   // range (.range(lo, hi), with a curve for knobs that are logarithmic), "multiply" scales the knob's own setting (.mul(setting)).
+  // A Random: rand (a new number each step or cycle) or perlin (a smooth wander), bent to the dial's own curve and always inside the dial's range.
+  function randomTokens(src, spec) {
+    const p = src.params, m = { node: src.id, role: 'fn' };
+    let lo = Number(p.min), hi = Number(p.max);
+    if (lo > hi) [lo, hi] = [hi, lo];
+    const bounded = spec && !spec.dyn && Number.isFinite(spec.min) && Number.isFinite(spec.max);
+    if (bounded) {
+      if (lo < spec.min || hi > spec.max) issues.push({ node: src.id, msg: `Random goes from ${fmt(lo)} to ${fmt(hi)}, but "${spec.label}" only goes from ${fmt(spec.min)} to ${fmt(spec.max)}: it is kept inside that range.` });
+      const a = Math.max(lo, spec.min), b = Math.min(hi, spec.max);
+      if (a <= b) { lo = a; hi = b; } else { lo = spec.min; hi = spec.max; }
+    }
+    const glide = p.rate === 'glide', log = !!(bounded && spec.log);
+    const base = glide ? 'perlin' : 'rand';
+    const toks = [S(base, { ...m, note: glide ? 'perlin is smooth random noise: it drifts between 0 and 1 instead of jumping.' : 'rand is a random number between 0 and 1, different every time it is asked.' })];
+    if (log) toks.push(S('.pow(3)', { ...m, note: '.pow(3) bends the random numbers to favour the low end, like this dial\'s own scale does.' }));
+    toks.push(S(`.range(${fmt(lo)}, ${fmt(hi)})`, { ...m, note: `.range(${fmt(lo)}, ${fmt(hi)}) stretches 0 to 1 across the range${bounded ? ' of this dial' : ''}.` }));
+    if (glide) { if (Number(p.slow) !== 1) toks.push(S(`.slow(${fmt(Number(p.slow))})`, { ...m, note: `.slow(${fmt(Number(p.slow))}) makes the wandering take ${fmt(Number(p.slow))} cycles.` })); }
+    else { const n = p.rate === 'cycle' ? 1 : Math.max(1, Math.round(Number(p.steps))); toks.push(S(`.segment(${n})`, { ...m, note: `.segment(${n}) takes ${n} random number${n > 1 ? 's' : ''} per cycle and holds each one until the next.` })); }
+    if (p.whole === 'whole') toks.push(S('.round()', { ...m, note: '.round() makes every number a whole number.' }));
+    if (!glide && Number(p.loop) > 0) toks.push(S(`.ribbon(${Number(p.loop)}, 1)`, { ...m, role: 'knob', key: 'loop', note: `ribbon(${Number(p.loop)}, 1) takes cycle ${Number(p.loop)} of the randomness and repeats it forever, so it stops changing.` }));
+    return toks;
+  }
+
   function numInput(n, spec, value, depth) {
     const ws = wiresInto(g, n.id, 'p:' + spec.key);
     if (!ws.length) return null;
@@ -58,6 +81,7 @@ export function compile(g) {
       if (src.params.mode === 'multiply') return [...base, S(`.mul(${fmt(value)})`, { ...mm, note: `.mul(${fmt(value)}) multiplies the macro by this knob's own setting (${fmt(value)}), so the knob keeps its balance and the macro scales it.` })];
       return [...base, S(`${spec.log ? '.pow(3)' : ''}.range(${fmt(spec.min)}, ${fmt(spec.max)})`, { ...mm, note: `.range(${fmt(spec.min)}, ${fmt(spec.max)}) stretches the macro (0 to 1) across this knob's whole range${spec.log ? '; .pow(3) bends it so the low end gets more room, like the knob does' : ''}.` })];
     }
+    if (src && src.type === 'random') return randomTokens(src, spec);
     if (src && src.type === 'numpat' && Number.isFinite(spec.min) && Number.isFinite(spec.max) && !spec.dyn) {   // a pattern whose numbers do not fit the dial it drives
       const bad = [...new Set(String(src.params.text || '').split(/[\s\[\]<>,|()]+/).map((t) => /^-?\d*\.?\d+/.exec(t)?.[0]).filter((x) => x !== undefined).map(Number).filter((v) => v < spec.min || v > spec.max))];
       if (bad.length) issues.push({ node: src.id, msg: `Number Pattern has ${bad.join(', ')}, but "${spec.label}" only goes from ${fmt(spec.min)} to ${fmt(spec.max)}` });
@@ -397,9 +421,22 @@ export function compile(g) {
       }
       case 'arrange': {
         const args = [];
-        for (let i = 1; i <= p.n; i++) {
-          const a = input(n, 'in' + i, depth + 1, false);
-          if (a) args.push({ a, len: Math.max(1, Math.round(Number(p.lens?.[i - 1]) || 4)) });
+        const ow = wiresInto(g, n.id, 'order')[0], osrc = ow && nodeById(g, ow.from.node);
+        if (osrc && osrc.type === 'numpat') {   // a Number Pattern decides which section plays when, and for how many cycles
+          const plan = parseArrangeOrder(osrc.params.text, p.n, p.lens);
+          plan.problems.forEach((msg) => issues.push({ node: osrc.id, msg: 'Arrange order: ' + msg }));
+          const empty = new Set();
+          for (const { sec, len } of plan.items) {
+            const a = input(n, 'in' + sec, depth + 1, false);   // written out again for each time the section plays
+            if (a) args.push({ a, len });
+            else if (!empty.has(sec)) { empty.add(sec); issues.push({ node: n.id, msg: `Arrange order: section ${sec} has nothing plugged into it, so it is left out` }); }
+          }
+        } else {
+          if (osrc) issues.push({ node: osrc.id, msg: 'Arrange order needs a Number Pattern (for example 1@4 2@8 1@4); other number sources are not used here' });
+          for (let i = 1; i <= p.n; i++) {
+            const a = input(n, 'in' + i, depth + 1, false);
+            if (a) args.push({ a, len: Math.max(1, Math.round(Number(p.lens?.[i - 1]) || 4)) });
+          }
         }
         if (!args.length) return silent(n, 'inputs');
         const parts = [S('arrange(', { ...m, role: 'fn', note: 'arrange([4, a], [8, b]) plays a for 4 cycles, then b for 8, then starts over: the sections of a song.' })];
@@ -494,6 +531,7 @@ export function compile(g) {
         const val = Math.min(Math.max(p.value, lo), hi);
         return [S(`slider(${fmt(val)}, ${fmt(lo)}, ${fmt(hi)})`, { ...m, role: 'knob', key: 'value', note: `slider(${fmt(val)}, ${fmt(lo)}, ${fmt(hi)}) is a number you can move; in strudel.cc it becomes a real slider.` })];
       }
+      case 'random': return randomTokens(n, null);
       case 'wave': {
         const slow = p.slow !== 1 ? `.slow(${fmt(p.slow)})` : '';
         return [S(`${p.shape}.range(${fmt(Number(p.min))}, ${fmt(Number(p.max))})${slow}`, { ...m, role: 'fn', note: `${p.shape}.range(low, high) is a number that moves by itself between low and high${slow ? '; slow() sets how many cycles one sweep takes' : ''}.` })];

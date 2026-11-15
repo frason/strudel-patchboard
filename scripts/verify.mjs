@@ -505,7 +505,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
     g.nodes.push(d, o); g.wires.push({ id: 'w1', from: { node: d.id, port: 'out' }, to: { node: o.id, port: 'in' } });
     try {
       const ev = (await evaluate(compile(g).code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
-      if (!ev.length || pr.params.tracks.some((t) => t.cells.length !== pr.params.steps)) ok = false;
+      if ((!ev.length && pr.id !== 'blank') || pr.params.tracks.some((t) => t.cells.length !== pr.params.steps)) ok = false;   // the blank template is meant to be silent
     } catch { ok = false; }
   }
   check('every drum kit preset compiles, plays, and has rows as long as its steps', ok);
@@ -675,5 +675,65 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   check('FM operator waves: a non-sine wave is written as fmwave / fmwave2 and reaches Strudel; sine writes nothing', /\.fmwave\("triangle"\)/.test(code) && /\.fmwave2\("triangle"\)/.test(code) && ev.fmwave === 'triangle' && ev.fmwave2 === 'triangle' && !/fmwave/.test(wv('sine')));
   const back = importStrudel(code).graph?.nodes.find((n) => n.type === 'fm');
   check('FM operator waves: the code reads back into the same dials, and an unknown wave is reported', back && back.params.owave === 'triangle' && back.params.owave2 === 'triangle' && importStrudel('$: note("c3").s("sine").fm(2).fmwave("pink")').report.skipped.length === 1);
+}
+{
+  const { resizeTracks } = await import('../src/modules.js');
+  const fixed = resizeTracks([{ name: 'cp', mute: false, cells: [false, true, false, false] }], 8);
+  check('drum machine: a row saved with plain true/false steps is repaired into real cells (so its steps can be clicked)', fixed[0].cells.length === 8 && fixed[0].cells.every((c) => c && typeof c === 'object') && fixed[0].cells[1].on === true && fixed[0].cells[0].on === false);
+}
+{
+  const { emptyGraph } = await import('../src/graph.js');
+  const { MODULES } = await import('../src/modules.js');
+  const cut = MODULES.filter.params.find((q) => q.key === 'cutoff');
+  const withRandom = (rp, target = 'cutoff') => {
+    const g = emptyGraph(), N = (t, q = {}) => makeNode(t, 0, 0, q);
+    const m = N('melody'), sy = N('synth', { wave: 'sawtooth' }), f = N('filter'), o = N('output'), r = N('random', rp);
+    g.nodes.push(m, sy, f, o, r);
+    g.wires.push({ id: 'a', from: { node: m.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: 'b', from: { node: sy.id, port: 'out' }, to: { node: f.id, port: 'in' } }, { id: 'c', from: { node: f.id, port: 'out' }, to: { node: o.id, port: 'in' } }, { id: 'd', from: { node: r.id, port: 'out' }, to: { node: f.id, port: 'p:' + target } });
+    return compile(g);
+  };
+  const vals = async (res, a = 0, b = 8) => (await evaluate(res.code, false)).queryArc(a, b).filter((h) => h.hasOnset()).map((h) => h.value.cutoff ?? h.value.lpf).filter((v) => v !== undefined);
+  const stepRes = withRandom({ rate: 'step', steps: 4, min: cut.min, max: cut.max });
+  const sv = await vals(stepRes);
+  check('Random: by default it writes rand.range(...).segment(4), and the dial really gets different numbers inside its range', /rand\.pow\(3\)\.range\(50, 20000\)\.segment\(4\)/.test(stepRes.code) && sv.length > 0 && new Set(sv.map((v) => Math.round(v))).size > 2 && sv.every((v) => v >= cut.min && v <= cut.max));
+  const wild = withRandom({ rate: 'step', steps: 4, min: -500, max: 99999 });
+  const wv = await vals(wild);
+  check('Random: a range wider than the dial is kept inside the dial, and the module says so', wv.length > 0 && wv.every((v) => v >= cut.min && v <= cut.max) && wild.issues.some((i) => /kept inside/.test(i.msg)));
+  const disjoint = withRandom({ rate: 'step', steps: 4, min: 30000, max: 40000 });
+  check('Random: a range that misses the dial entirely falls back to the dial\'s own range', (await vals(disjoint)).every((v) => v >= cut.min && v <= cut.max));
+  const cyc = withRandom({ rate: 'cycle', min: cut.min, max: cut.max }), cv = await vals(cyc, 0, 4);
+  check('Random: "every cycle" writes segment(1)', /segment\(1\)/.test(cyc.code) && cv.length > 0);
+  const gl = withRandom({ rate: 'glide', slow: 4, min: cut.min, max: cut.max }), gv = await vals(gl, 0, 8);
+  check('Random: "glide smoothly" uses perlin, slowed, and stays in range', /perlin\.pow\(3\)\.range\(50, 20000\)\.slow\(4\)/.test(gl.code) && gv.length > 0 && gv.every((v) => v >= cut.min && v <= cut.max));
+  // a whole-number dial (transpose, -24 to 24 semitones) driven by a Random asked for 0 to 40
+  const tg = emptyGraph(), TN = (t, q = {}) => makeNode(t, 0, 0, q);
+  const tm = TN('melody'), tt = TN('transpose'), ts = TN('synth', { wave: 'sawtooth' }), to = TN('output'), tr = TN('random', { rate: 'step', steps: 4, whole: 'whole', min: 0, max: 40 });
+  tg.nodes.push(tm, tt, ts, to, tr);
+  tg.wires.push({ id: 'a', from: { node: tm.id, port: 'out' }, to: { node: tt.id, port: 'in' } }, { id: 'b', from: { node: tt.id, port: 'out' }, to: { node: ts.id, port: 'in' } }, { id: 'c', from: { node: ts.id, port: 'out' }, to: { node: to.id, port: 'in' } }, { id: 'd', from: { node: tr.id, port: 'out' }, to: { node: tt.id, port: 'p:n' } });
+  const tc = compile(tg);
+  let played = false; try { played = (await evaluate(tc.code, false)).queryArc(0, 4).filter((h) => h.hasOnset()).length > 0; } catch { /* reported below */ }
+  check('Random: "whole numbers only" rounds, a smaller dial range still limits it (0 to 40 becomes 0 to 24 on transpose), and it plays', /rand\.range\(0, 24\)\.segment\(4\)\.round\(\)/.test(tc.code) && played);
+}
+{
+  const { parseArrangeOrder, MODULES } = await import('../src/modules.js');
+  const { emptyGraph } = await import('../src/graph.js');
+  const pl = parseArrangeOrder('1@4 2@8 1 3!2@2 9 x', 3, [5, 6, 7]);
+  check('Arrange order: 1@4 2@8 1 3!2@2 reads as A 4, B 8, A (its own 5), C 2, C 2; a section that does not exist and a stray word are reported', JSON.stringify(pl.items.map((x) => [x.sec, x.len])) === JSON.stringify([[1, 4], [2, 8], [1, 5], [3, 2], [3, 2]]) && pl.problems.length === 2);
+  const g = emptyGraph(), N = (t, q = {}) => makeNode(t, 0, 0, q);
+  const a = N('sample', { name: 'bd' }), b = N('sample', { name: 'sd' }), ar = N('arrange', { n: 2, lens: [4, 4, 4, 4, 4, 4] }), np = N('numpat', { text: '1@2 2@3 1@2' }), o = N('output');
+  g.nodes.push(a, b, ar, np, o);
+  g.wires.push({ id: 'a', from: { node: a.id, port: 'out' }, to: { node: ar.id, port: 'in1' } }, { id: 'b', from: { node: b.id, port: 'out' }, to: { node: ar.id, port: 'in2' } }, { id: 'o', from: { node: np.id, port: 'out' }, to: { node: ar.id, port: 'order' } }, { id: 'c', from: { node: ar.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+  const c = compile(g);
+  check('Arrange order: a Number Pattern on "order" writes arrange with the repeated sections written out', /arrange\(\s*\[2, s\("bd"\)\],\s*\[3, s\("sd"\)\],\s*\[2, s\("bd"\)\]\s*\)/.test(c.code.replace(/\s+/g, ' ').replace(/\( /g, '(').replace(/ \)/g, ')')) || (c.code.match(/\[2, /g) || []).length === 2 && /\[3, /.test(c.code));
+  const pat = await evaluate(c.code, false);
+  const whenBd = (cyc) => pat.queryArc(cyc, cyc + 1).filter((h) => h.hasOnset()).map((h) => h.value.s)[0];
+  check('Arrange order: it plays bd for 2 cycles, sd for 3, bd for 2, then starts over', [0, 1].every((k) => whenBd(k) === 'bd') && [2, 3, 4].every((k) => whenBd(k) === 'sd') && [5, 6].every((k) => whenBd(k) === 'bd') && whenBd(7) === 'bd');
+  const { whyNot } = await import('../src/graph.js');
+  const extra = N('sample', { name: 'hh' }); g.nodes.push(extra);
+  check('Arrange order: the order jack takes number cables only, and an order cable does not stop sounds being plugged into the sections', !!whyNot(g, a.id, ar.id, 'order') && !whyNot(g, extra.id, ar.id, 'in2') && !whyNot(g, np.id, ar.id, 'order'));
+}
+{
+  const { withOrderLen, parseArrangeOrder } = await import('../src/modules.js');
+  check('Arrange order: changing one step\'s length rewrites only that token and keeps repeats ("1@4 2@8 3!2" -> token 1 to 5 is "1@4 2@5 3!2"; a bare "1" gets "@n")', withOrderLen('1@4 2@8 3!2', 1, 5) === '1@4 2@5 3!2' && withOrderLen('1 2', 0, 6) === '1@6 2' && withOrderLen('1@4 3!2@2', 1, 7) === '1@4 3@7!2' && parseArrangeOrder('1@4 3!2', 3, []).items.map((x) => x.tok).join() === '0,1,1');
 }
 process.exit(failures ? 1 : 0);
