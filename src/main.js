@@ -670,7 +670,7 @@ let evalTimer = null;
 let textBase = current.code, applying = false, syncState = { state: 'ok' };
 const TEXT_KEY = 'pb.codeText';
 const saveText = () => { try { if (panel.diverged) localStorage.setItem(TEXT_KEY, JSON.stringify({ text: panel.code, base: current.code })); else localStorage.removeItem(TEXT_KEY); } catch { /* private mode */ } };
-const knownSounds = () => new Set(soundsFor(''));
+const knownSounds = () => (name, bank) => soundsFor(bank || '').includes(name);   // a sound name is checked against the bank on its own Sample
 function renderSync() {
   const s = syncState, kids = [];
   const btn = (label, fn) => h('button', { class: 'btn sm', onclick: fn }, label);
@@ -1043,7 +1043,7 @@ function importText(text, label, back) {
     if (m.graph && !m.error) { closeModal(); return loadGraph(m.graph, label); }
     // exported by this app but edited, or code from anywhere else: read the code itself
     const code = t.replace(/\/\*\s*patchboard-patch v1[\s\S]*?\*\/\s*$/, '').replace(/^\/\/ Strudel Patchboard export.*\n/, '');
-    const r = importStrudel(code, { sounds: new Set(soundsFor('')) });
+    const r = importStrudel(code, { sounds: (name, bank) => soundsFor(bank || '').includes(name) });
     if (r.error) return toast(r.error, [], 9000);
     reportDialog(r, label, back);
   } catch (e) { toast('Could not read that: ' + e.message, [], 8000); }
@@ -1147,7 +1147,7 @@ function aiKeyDialog() {
 function judgeAttempt(reply, desc) {
   const p = parseReply(reply);
   if (!p.code) return { ...p, problems: ['The reply had no code block.'], r: null };
-  const r = importStrudel(p.code, { sounds: new Set(soundsFor('')) });
+  const r = importStrudel(p.code, { sounds: (name, bank) => soundsFor(bank || '').includes(name) });
   const problems = lintStarter(p.code, desc);
   if (r.error) problems.push(r.error);
   else {

@@ -176,6 +176,7 @@ function splitTop(t) {
 }
 
 // ---------- the importer ----------
+// sounds: a Set of the plain sound names, or a function (name, bank) => boolean that knows each drum machine's own list
 export function importStrudel(code, { sounds = null } = {}) {
   const report = { done: [], skipped: [], notes: [] };
   if (typeof code !== 'string') return { error: 'There is no code to read.' };
@@ -776,7 +777,7 @@ export function importStrudel(code, { sounds = null } = {}) {
   // sounds the app does not have
   if (sounds) {
     const missing = new Set();
-    for (const nd of g.nodes) if (nd.type === 'sample') String(nd.params.name).split(/[\s\[\]<>~*!@,]+/).map((w) => w.split(':')[0]).filter((w) => w && !/^\d/.test(w) && !sounds.has(w)).forEach((w) => missing.add(w));
+    for (const nd of g.nodes) if (nd.type === 'sample') String(nd.params.name).split(/[\s\[\]<>~*!@,]+/).map((w) => w.split(':')[0]).filter((w) => w && !/^\d/.test(w) && !(typeof sounds === 'function' ? sounds(w, nd.params.bank || '') : sounds.has(w))).forEach((w) => missing.add(w));
     if (missing.size) report.notes.push(`these sound names are not in the built-in libraries and will be silent: ${[...missing].join(', ')}`);
   }
   report.done = finalHeads.map((h) => ({ line: h.line, text: h.text }));

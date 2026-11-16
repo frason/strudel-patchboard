@@ -979,4 +979,16 @@ $: s("[hh ~@4 hh ~@14]*2")
   const same = importStrudel('$: note("c3 ~ ~ ~ e3 ~ ~ ~").s("sine")');
   check('Long spellings: patterns that already fit are left exactly as they were (no Note length, no coarser grid)', same.graph.nodes.find((n) => n.type === 'melody').params.steps === 8 && !same.graph.nodes.some((n) => n.type === 'clip') && !same.report.notes.length);
 }
+
+// Sound names are checked against the bank on their own Sample, not just the plain set
+{
+  const { importStrudel } = await import('../src/importer.js');
+  const lists = { '': ['bd', 'hh', 'cp'], RolandTR909: ['bd', 'rim', 'hh'] };
+  const known = (name, bank) => (lists[bank || ''] || []).includes(name);
+  const plain = importStrudel('$: s("~ rim ~ rim")', { sounds: known });
+  const banked = importStrudel('$: s("~ rim ~ rim").bank("RolandTR909")', { sounds: known });
+  const wrongBank = importStrudel('$: s("east").bank("RolandTR909")', { sounds: known });
+  check('Sound check: rim with no bank is reported as silent, rim on a bank that has it is not, and a name the chosen bank lacks is reported', plain.report.notes.some((n) => /rim/.test(n)) && !banked.report.notes.length && wrongBank.report.notes.some((n) => /east/.test(n)));
+  check('Sound check: a plain Set of names still works as before', importStrudel('$: s("rim")', { sounds: new Set(['bd']) }).report.notes.some((n) => /rim/.test(n)));
+}
 process.exit(failures ? 1 : 0);
