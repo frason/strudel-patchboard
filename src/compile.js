@@ -30,6 +30,8 @@ function stepText(t, leaf) {
   return out;
 }
 
+// what an empty patch shows in the code panel: the board's own hint, not the person's text
+export const EMPTY_NOTE = '// Add an Output module and wire a sound into it';
 export function compile(g) {
   const issues = [];
   let acidNode = null;
@@ -581,7 +583,7 @@ export function compile(g) {
     if (masterCalls.length) parts.push(NL(0), NL(0), S('all(x => x', { node: o.id, role: 'fn', note: 'all(x => x.effect()) applies an effect to every pattern at once: a global effect.' }), ...masterCalls, S(')', { node: o.id }));
     for (const b of blocks) parts.push(NL(0), NL(0), ...b);
   }
-  if (!outputs.length) parts.push(S('// Add an Output module and wire a sound into it'));
+  if (!outputs.length) parts.push(S(EMPTY_NOTE));
   else if (!played) parts.push(NL(0), NL(0), S('// nothing to play yet: wire a sound into Output'));
 
   return flatten(parts, issues, played);

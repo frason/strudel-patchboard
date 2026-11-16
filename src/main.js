@@ -10,7 +10,7 @@ import { presetCells } from './chords.js';
 import { getPrefs, setPref, onPrefs } from './prefs.js';
 import { loadCatalog, onCatalog, soundsFor, sampleItems, SAMPLE_CATS } from './catalog.js';
 import { INSTRUMENTS, CATEGORIES as INST_CATS } from './instruments.js';
-import { compile } from './compile.js';
+import { compile, EMPTY_NOTE } from './compile.js';
 import { strudelFile, parseImport, b64 } from './io.js';
 import { importStrudel } from './importer.js';
 import { numberTarget } from './codenums.js';
@@ -695,6 +695,8 @@ function setSync(s) { syncState = s; renderSync(); }
 // the person typed: apply their text to the board as the smallest change, then read the board back to check the text still says what the board says
 function codeTyped(text, { full = false } = {}) {
   if (getPrefs().codeEdit === 'numbers') return;
+  // an empty patch shows the board's own hint as a comment; once real code is typed beside it, the hint goes away (it was never the person's text)
+  if (text.includes(EMPTY_NOTE) && text.replace(EMPTY_NOTE, '').trim() && !store.graph.nodes.some((n) => n.type === 'output')) { text = text.replace(EMPTY_NOTE, '').replace(/[ \t]+$/gm, ''); panel.patch(text); }
   const sounds = knownSounds();
   const res = applyCodeEdit(store.graph, text, { sounds, baseCode: full ? null : textBase });
   if (res.error) { setSync({ state: 'error', message: res.error }); return; }

@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite --port 5174",
     "build": "vite build",
-    "test": "node --import ./scripts/stub-loader.mjs scripts/verify.mjs && npm run test:reconcile",
+    "test": "node --import ./scripts/stub-loader.mjs scripts/verify.mjs && npm run test:reconcile && npm run test:guard",
     "preview": "vite preview --port 4173",
     "test:import": "node --import ./scripts/stub-loader.mjs scripts/import-test.mjs",
-    "test:reconcile": "node --import ./scripts/stub-loader.mjs scripts/reconcile-test.mjs"
+    "test:reconcile": "node --import ./scripts/stub-loader.mjs scripts/reconcile-test.mjs",
+    "test:guard": "node --import ./scripts/stub-loader.mjs scripts/guard-sweep.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",
