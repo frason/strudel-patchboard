@@ -83,6 +83,8 @@ const rid = () => Math.random().toString(36).slice(2, 7);
 // real: the board. oldImp / newImp: the importer's readings of the code before and after the edit. represented: ids of real modules that write code.
 export function applyEdit(real, oldImp, newImp, represented) {
   const m1 = matchNodes(oldImp, newImp);   // newImp id -> oldImp id
+  // an empty patch has no Output module at all: the one the code brings is new, not a match for something that is not there
+  if (!real.nodes.some((n) => n.type === 'output')) for (const [nid] of [...m1]) if (newImp.nodes.find((n) => n.id === nid)?.type === 'output') m1.delete(nid);
   const m0 = matchNodes(real, oldImp);     // oldImp id -> real id
   const oldOfNew = m1, newOfOld = new Map([...m1].map(([n, o]) => [o, n]));
   const realOfOld = (oid) => { const r = m0.get(oid); return r && represented.has(r) ? r : undefined; };

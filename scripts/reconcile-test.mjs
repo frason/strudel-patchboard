@@ -96,4 +96,14 @@ check('every result compiles', [gone, more, swapped, renamed, kept, g2, odd].eve
   const s4 = checkSync(g, canon + '\nfoo.bar(baz)');
   check('read-back: a line the board cannot show is listed, with the reason', s4.state === 'partial' && s4.parts.length >= 1 && !!s4.parts[0].why);
 }
+
+// 8. starting from an empty patch: typing code builds a whole working board, including the Output module with the tempo
+{
+  const empty = emptyGraph();
+  const r = applyCodeEdit(empty, 'setcpm(130/4)\n\n$: s("bd")');
+  const out = r.graph?.nodes.find((n) => n.type === 'output');
+  check('typing code into an empty patch creates the module and an Output with the tempo, cabled together', !r.error && r.graph.nodes.length === 2 && out && out.params.bpm === 130 && r.graph.wires.length === 1 && compile(r.graph).code.includes('s("bd")') && checkSync(r.graph, 'setcpm(130/4)\n\n$: s("bd")').state === 'ok');
+  const again = applyCodeEdit(r.graph, 'setcpm(130/4)\n\n$: s("bd")');
+  check('and typing the same code again changes nothing', !again.changes.added.length && !again.changes.removed.length && !again.changes.updated.length);
+}
 process.exit(failures ? 1 : 0);

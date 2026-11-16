@@ -22,6 +22,6 @@ export default defineConfig({
   server: { port: 5174, host: '127.0.0.1' },
   preview: { headers },
   define: { global: 'globalThis', __BUILD__: JSON.stringify(build) },   // some audio dependencies written for bundlers expect Node's `global`
-  optimizeDeps: { esbuildOptions: { define: { global: 'globalThis' } }, rolldownOptions: { transform: { define: { global: 'globalThis' } } } },
+  optimizeDeps: { rolldownOptions: { transform: { define: { global: 'globalThis' } } } },
   build: { target: 'es2022' },
 });
