@@ -193,5 +193,19 @@ export function applyCodeEdit(real, newCode, { sounds = null, baseCode = null } 
   if (oldImp.error) return { error: oldImp.error };
   const represented = new Set(before.segments.map((s) => s.node).filter(Boolean));
   const out = applyEdit(real, oldImp.graph, newImp.graph, represented);
+  // A merge is for edits. When most of the board would change, the person has replaced the song, not edited it: rebuild the board from the new code
+  // (modules the code never described, such as muted ones, are kept) instead of blending the old board into it.
+  const c = out.changes, churn = c.updated.length + c.added.length + c.removed.length + c.unapplied.length;
+  if (churn * 2 >= Math.max(1, newImp.graph.nodes.length) && churn >= 3) {
+    const keep = real.nodes.filter((n) => !represented.has(n.id)), keepIds = new Set(keep.map((n) => n.id));
+    const fresh = newImp.graph;
+    const taken = new Set(fresh.nodes.map((n) => n.id));
+    const kept = keep.map((n) => (taken.has(n.id) ? { ...n, id: n.id + '_k' } : n));
+    const idOf = new Map(keep.map((n, i) => [n.id, kept[i].id]));
+    const graph = { ...real, nodes: [...fresh.nodes, ...kept], wires: [...fresh.wires, ...real.wires.filter((w) => keepIds.has(w.from.node) && keepIds.has(w.to.node)).map((w) => ({ ...w, id: w.id + '_k', from: { ...w.from, node: idOf.get(w.from.node) }, to: { ...w.to, node: idOf.get(w.to.node) } }))] };
+    delete graph.groups;
+    normalize(graph);
+    return { graph, changes: { updated: [], added: fresh.nodes.map((n) => n.id), removed: real.nodes.filter((n) => represented.has(n.id)).map((n) => n.id), unapplied: [] }, report: newImp.report, via: 'replace' };
+  }
   return { ...out, report: newImp.report };
 }

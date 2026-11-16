@@ -706,6 +706,7 @@ function codeTyped(text, { full = false } = {}) {
     applying = true;
     try { store.update((g) => { g.nodes = res.graph.nodes; g.wires = res.graph.wires; if (res.graph.groups) g.groups = res.graph.groups; else delete g.groups; }, { label: 'edit code', coalesce: 'code' }); }
     finally { applying = false; }
+    if (res.via === 'replace') requestAnimationFrame(() => board.tidy({ merge: true }));   // a rebuilt board: lay the new modules out like an import does
   }
   textBase = current.code;
   setSync(checkSync(store.graph, text, { sounds }));

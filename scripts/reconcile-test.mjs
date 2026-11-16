@@ -116,4 +116,31 @@ check('every result compiles', [gone, more, swapped, renamed, kept, g2, odd].eve
   check('a line added on the board lands on its own line with the same indentation as its neighbours', added === '// my comment\nsetcpm(123 / 4)\n\n// Rim\n$: s("~@4 rim")\n  .bank("RolandTR909")\n  .gain(0.48)\n');
   check('removing that line again gives back the exact original text, with no blank or indented leftovers', patchText(added, newC, oldC) === user);
 }
+
+// 10. pasting a whole different song over an existing board rebuilds the board from the new code; small edits still merge
+{
+  const { importStrudel } = await import('../src/importer.js');
+  const prev = importStrudel('setcpm(100/4)\n$: note("c3 e3 g3 b3").slow(2).clip(0.5).s("sawtooth").gain(0.3)\n$: s("bd*2")');
+  const muted = makeNode('filter', 10, 10, { cutoff: 900 }); muted.muted = true;
+  const board = clone(prev.graph); board.nodes.push(muted);
+  const song = `setcpm(128 / 4)
+
+$: note("c2@4 ~ c2@4 ~ eb2@4 ~ g2@4 ~ c2@4 ~ c2@4 ~ bb1@4 ~ g1@4 ~")
+  .s("square").attack(0.01).release(0.15).lpf(1200)
+  .gain(0.28)
+
+$: s("~@5 sd ~@9 sd ~@4")
+  .gain(0.21)
+
+$: s("~@5 hh ~@9 hh ~@9 hh ~@9 hh ~@4")
+  .gain(0.15)
+`;
+  const r = applyCodeEdit(board, song), want = importStrudel(song);
+  const types = (g) => g.nodes.filter((n) => n.id && !n.muted).map((n) => n.type).sort().join(',');
+  check('a whole new song pasted over an existing board rebuilds the board from the new code (no scrambled blend, nothing left unsettled)', r.via === 'replace' && !r.error && types(r.graph) === types(want.graph) && !r.changes.unapplied.length);
+  check('after the rebuild the text and the board agree (reading the board back gives no further changes)', checkSync(r.graph, song).state === 'ok');
+  check('a muted module the code never described survives the rebuild', r.graph.nodes.some((n) => n.type === 'filter' && n.muted));
+  const small = applyCodeEdit(prev.graph, compile(prev.graph).code.replace('0.3', '0.4'));
+  check('a small edit still merges into the existing board and does not rebuild it', small.via !== 'replace' && small.changes.updated.length >= 1 && !small.changes.added.length);
+}
 process.exit(failures ? 1 : 0);
