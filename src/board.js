@@ -492,7 +492,7 @@ const WAVE_ICONS = [
   ['supersaw', 'M1 12 L9 2 L9 12 L17 2 L17 12 L23 6 M1 9 L9 4 M9 9 L17 4'],
 ];
 // the sound names inside a pattern like "bd*2 [bd:3 sd]": bd, sd (numbers and symbols are not names)
-const soundNames = (t) => [...new Set(String(t || '').split(/[\s\[\]<>*!@?,~(){}.|]+/).filter((x) => /^[a-z_][\w]*(:\d+)?$/i.test(x)).map((x) => x.split(':')[0]))];
+const soundNames = (t) => [...new Set(String(t || '').split(/[\s\[\]<>*!@?,~(){}.|]+/).filter((x) => /^(?=.*[a-z_])[a-z0-9_]\w*(:\d+)?$/i.test(x)).map((x) => x.split(':')[0]))];
 const waveSvg = (d) => { const el = svg('svg', { viewBox: '0 0 24 14', width: 24, height: 14 }); el.append(svg('path', { d, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })); return el; };
 const speakerSvg = (muted) => { const el = svg('svg', { viewBox: '0 0 16 16', width: 14, height: 14 }); el.append(svg('path', { d: 'M2 6h3l4-3v10l-4-3H2z', fill: 'currentColor' })); el.append(svg('path', { d: muted ? 'M11.5 5.5l3 5M14.5 5.5l-3 5' : 'M11.5 5.5c1.3 1.5 1.3 3.5 0 5', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.4, 'stroke-linecap': 'round' })); return el; };
 const powerSvg = () => { const el = svg('svg', { viewBox: '0 0 16 16', width: 14, height: 14 }); el.append(svg('path', { d: 'M8 2v5M4.5 4.2a5 5 0 1 0 7 0', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round' })); return el; };
@@ -1841,12 +1841,25 @@ export function createBoard(root, store, hooks) {
     if (v.ctl.toDrums) v.ctl.toDrums.hidden = !(soundNames(node.params.name).length >= 2 && !wiresInto(g, node.id, 'in').length);   // several different sounds typed in, and no rhythm cable: offer the Drum Machine
     if (v.ctl.sampleCard) {
       const names = soundNames(node.params.name), first = names[0] || '', bank = node.params.bank || '';
-      const known = !!first && soundsFor(bank).includes(first);
+      const all = soundsFor(bank), unknown = names.filter((x) => !all.includes(x));
+      const known = !!first && all.includes(first);
       const pic = h('span', { class: 'ib-pic' });
-      pic.innerHTML = known ? soundIconSvg(soundGlyph(first, sampleCategoryOf(first)), 30) : '<b>?</b>';
-      const extra = names.length > 1 ? ` · +${names.length - 1} more` : '';
-      v.ctl.sampleCard.replaceChildren(pic, h('span', { class: 'ib-text' }, h('span', { class: 'ib-name' }, first ? (describe(first) || first) : 'Pick a sound'), h('span', { class: 'ib-sub' }, first ? `${first}${extra}${bank ? ' · ' + bank : ''}${known ? '' : ' · not in this bank'}` : 'click to choose')), h('i', { class: 'ti ti-chevron-down' }));
-      v.ctl.sampleCard.classList.toggle('bad', !!first && !known);
+      let title, sub;
+      if (names.length >= 2) {   // several sounds in the pattern: a little mosaic of them, the count, and every name
+        pic.classList.add('multi');
+        const shown = names.length > 4 ? names.slice(0, 3) : names.slice(0, 4);
+        pic.innerHTML = shown.map((x) => `<span class="mo">${all.includes(x) ? soundIconSvg(soundGlyph(x, sampleCategoryOf(x)), 17) : '<b>?</b>'}</span>`).join('') + (names.length > 4 ? `<span class="mo more">+${names.length - 3}</span>` : '');
+        title = `${names.length} sounds`;
+        sub = names.join(' · ') + (bank ? ' · ' + bank : '') + (unknown.length ? ` · ${unknown.length} not in this bank` : '');
+        v.ctl.sampleCard.title = 'In this pattern: ' + names.join(', ') + '. Click to add another sound.';
+      } else {
+        pic.innerHTML = known ? soundIconSvg(soundGlyph(first, sampleCategoryOf(first)), 30) : '<b>?</b>';
+        title = first ? (describe(first) || first) : 'Pick a sound';
+        sub = first ? `${first}${bank ? ' · ' + bank : ''}${known ? '' : ' · not in this bank'}` : 'click to choose';
+        v.ctl.sampleCard.title = 'choose a sound: hover one to hear it, click to add it';
+      }
+      v.ctl.sampleCard.replaceChildren(pic, h('span', { class: 'ib-text' }, h('span', { class: 'ib-name' }, title), h('span', { class: 'ib-sub' }, sub)), h('i', { class: 'ti ti-chevron-down' }));
+      v.ctl.sampleCard.classList.toggle('bad', unknown.length > 0);
     }
     if (node.type === 'sample' && v.ctl.inputs.name) {
       const driven = wiresInto(g, node.id, 'in').length > 0;

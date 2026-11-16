@@ -914,3 +914,9 @@ html, body { overscroll-behavior: none; }
 
 .to-drums { margin-top: 6px; align-self: flex-start; }
 .to-drums[hidden] { display: none; }
+
+/* a Sample with several sounds: a small mosaic of them */
+.ib-pic.multi { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 1px; padding: 2px; }
+.ib-pic.multi .mo { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+.ib-pic.multi .mo svg { width: 17px; height: 17px; }
+.ib-pic.multi .mo.more { font: 700 10px var(--mono); color: var(--dim); }

@@ -73,8 +73,8 @@ export const LESSONS = [
   },
   {
     id: 'layers', title: '5 · Layers: many sounds in one pattern',
-    learned: 'One Sample can play several layers at once. In the pattern, a comma starts a new layer that plays at the same time: [bd]*4 is a kick four times, [cp east] squeezes a clap and "east" into one step, and 808lt 808lc is two toms one after the other. Press Start and watch each word light up in the box as it plays. Typing a beat like this is quick, but it is hard to see. Press the "→ Drum Machine" button under the pattern and the same beat appears as a grid, one row per sound, that plays exactly the same thing.',
-    graph: () => build([['s', 'sample', 60, 120, { name: '[bd]*4, [cp east], 808lt 808lc', gain: 0.6 }], ['o', 'output', 440, 120, {}]], [['s', 'o']]),
+    learned: 'One Sample can play several layers at once. In the pattern, a comma starts a new layer that plays at the same time as the one before. Here there are two: [bd]*4 is a kick four times, and [cp east] 808lt 808lc is a second layer of three steps, one after another: a clap with "east" squeezed into the first step, then 808lt, then 808lc (two toms). Press Start and watch each word light up in the box as it plays. Typing a beat like this is quick, but it is hard to see. Press the "→ Drum Machine" button under the pattern and the same beat appears as a grid, one row per sound, that plays exactly the same thing.',
+    graph: () => build([['s', 'sample', 60, 120, { name: '[bd]*4, [cp east] 808lt 808lc', gain: 0.6 }], ['o', 'output', 440, 120, {}]], [['s', 'o']]),
   },
   {
     id: 'banks', title: '6 · Banks and chaining',

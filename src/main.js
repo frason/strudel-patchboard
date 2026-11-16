@@ -583,7 +583,7 @@ const hooks = {
     store.update((g) => {
       const s = nodeById(g, id);
       s.type = 'drums';
-      s.params = { ...defaultParams('drums'), steps: r.steps, mode: r.steps > 8 ? 'pace' : 'steps', bank: n.params.bank, gain: n.params.gain, pan: n.params.pan, tracks: JSON.parse(JSON.stringify(r.tracks)) };
+      s.params = { ...defaultParams('drums'), steps: r.steps, mode: 'steps', bank: n.params.bank, gain: n.params.gain, pan: n.params.pan, tracks: JSON.parse(JSON.stringify(r.tracks)) };
       g.wires = g.wires.filter((w) => !(w.to.node === id && w.to.port.startsWith('p:') && !['p:gain', 'p:pan'].includes(w.to.port)));   // cables into settings the Drum Machine does not have
     }, { label: 'convert to Drum Machine' });
     toast(`Now a Drum Machine: ${r.tracks.length} rows, ${r.steps} steps.${r.alternates ? ' The first cycle of the pattern was used.' : ''}${lost.length ? ` The Sample's ${lost.join(', ')} setting${lost.length > 1 ? 's' : ''} had no place on a Drum Machine.` : ''}`, [undoAction], 9000);

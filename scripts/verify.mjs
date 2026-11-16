@@ -747,6 +747,11 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const ons = async (code) => (await evaluate(code, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()} ${String(h.value.s)}`).sort();
   const a = await ons(`s("${text}")`), b = await ons(compile(g).code);
   check('Sample to Drum Machine: the Drum Machine plays exactly the same hits at the same times as the original pattern', a.length === 16 && JSON.stringify(a) === JSON.stringify(b));
+  // lesson 5's pattern: two layers, the second of three steps: it needs a 12-step grid, and the Drum Machine must still play it in ONE cycle
+  const t5 = '[bd]*4, [cp east] 808lt 808lc', r5 = patternToDrums(t5);
+  const g5 = emptyGraph(), d5 = N('drums', { steps: r5.steps, tracks: r5.tracks }), o5 = N('output'); g5.nodes.push(d5, o5); g5.wires.push({ id: 'w', from: { node: d5.id, port: 'out' }, to: { node: o5.id, port: 'in' } });
+  const a5 = await ons(`s("${t5}")`), b5 = await ons(compile(g5).code);
+  check('Sample to Drum Machine: lesson 5\'s pattern needs 12 steps, and the Drum Machine plays the same hits in the same one cycle', !r5.error && r5.steps === 12 && a5.length > 0 && JSON.stringify(a5) === JSON.stringify(b5));
   const e1 = patternToDrums('bd sd hh oh cp rim cb lt mt'), e2 = patternToDrums('bd(3,8)');
   check('Sample to Drum Machine: more than 8 sounds is refused; a euclid pattern fits an 8-step grid', e1.error && /holds 8/.test(e1.error) && !e2.error && e2.steps === 8 && e2.tracks[0].cells.filter((c) => c.on).length === 3);
 }
