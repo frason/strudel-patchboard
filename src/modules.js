@@ -640,7 +640,7 @@ export const MODULES = {
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true, multi: true }],
     blurb: 'The speakers. Every sound wired in becomes its own $: line, all playing together. The master knobs add one effect to everything at once: all(x => x.phaser(...)).',
     params: [
-      { key: 'bpm', label: 'tempo', kind: 'knob', min: 40, max: 220, step: 1, def: 120, unit: 'bpm', always: true },
+      { key: 'bpm', label: 'tempo', kind: 'knob', min: 40, max: 220, step: 0.1, def: 120, unit: 'bpm', always: true },
       { key: 'mvol', label: 'volume', kind: 'knob', min: 0, max: 1.5, step: 0.01, def: 1, master: true, wire: true, tip: 'master volume: scales every part together and keeps their balance (1 = unchanged). Plug a slider in to ride the volume while it plays.' },
       { key: 'beats', label: 'beats / cycle', kind: 'select', def: 4, options: [2, 3, 4, 5, 6, 8], num: true, fold: true },
       { key: 'mphaser', label: 'phaser', kind: 'knob', min: 0, max: 8, step: 0.1, def: 0, master: true, tip: 'master phaser on everything (0 = off)', fold: true },

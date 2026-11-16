@@ -53,6 +53,13 @@ npm test         # evaluates every starter in real Strudel, checks graph rules, 
   Open in strudel.cc use your full text. Code that is not valid JavaScript shows the error and leaves the board as it was. While your text differs from the
   board's code the highlights and plain-English notes are off (they are positions in the board's code); "Show the board's code" brings them back and replaces your
   text. Opening a lesson, Import or New starts from the board's code. Settings → Code panel → "numbers only" brings back the old locked panel.
+- **Tap tempo**: the Tap button next to BPM. Tap along to a song: from the third tap the Output's tempo follows (it keeps one decimal, so 62.5 or 125.2 work), a stray or
+  missed tap is ignored, and a pause of 2.5 seconds starts a new count.
+- **Rhythm snapshot**: the Snapshot button in the code panel draws what the patch plays over 1, 2, 4 or 8 bars as a picture: a lane per sound (kick, snare, hats, then
+  pitched lanes with their note range), numbered beats and bar lines at the current tempo, and a seconds axis. Download it as a PNG or copy it. It is worked out
+  offline from the same code that plays, goes through the same safety check, and starts no sound. A drum hit is drawn as a short mark; a pitched note shows its length.
+- **Measuring a recording** (outside the app): `tools/tempo-snapshot/tempo_snapshot.py` measures the tempo of a short audio clip and draws its rhythm with beat grids over it
+  (see the README in that folder). Loudness only; it shows evidence to look at, not an answer.
 - **Code panel choices**: a sound name, a bank, a filter type, shuffle or scramble, and what Sometimes or Every does are underlined with a ▾. Click one (or press Enter
   on it) and the same picker or menu the module uses opens right there; the pick goes to the module and the code rewrites. In a Sample pattern each sound word is its own
   choice (only that word is replaced). Scales and keys, chord symbols and note names are not choices: use the modules for those.

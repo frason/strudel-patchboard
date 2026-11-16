@@ -15,6 +15,8 @@ import { strudelFile, parseImport, b64 } from './io.js';
 import { importStrudel } from './importer.js';
 import { numberTarget } from './codenums.js';
 import { applyCodeEdit } from './reconcile.js';
+import { tapBpm } from './tap.js';
+import { queryPatch, layoutSnapshot, drawSnapshot } from './snapshot.js';
 import { patchText, checkSync } from './textsync.js';
 import { LESSONS } from './starters.js';
 import { patternToDrums } from './todrums.js';
@@ -99,15 +101,30 @@ const fileInput = h('input', { type: 'file', accept: '.json,.strudel,.txt,.js', 
 const importBtn = h('button', { class: 'btn', id: 'import-btn', onclick: () => openImport() }, 'Import');
 const aiBtn = h('button', { class: 'btn', id: 'ai-btn', title: 'AI helper: make a starter patch, or get a review of yours (bring your own key)', onclick: () => openAI() }, 'AI');
 const popHost = h('div', { class: 'pop-host' });
-const bpmInput = h('input', { type: 'number', id: 'bpm', min: 40, max: 220, step: 1, title: 'Tempo: beats per minute (the Output module\'s tempo knob)', class: 'bpm-input' });
+const bpmInput = h('input', { type: 'number', id: 'bpm', min: 40, max: 220, step: 0.1, title: 'Tempo: beats per minute (the Output module\'s tempo knob). Decimals are fine: 62.5, 125.2.', class: 'bpm-input' });
 bpmInput.addEventListener('keydown', (e) => e.stopPropagation());
 bpmInput.addEventListener('change', () => {
   const out = store.graph.nodes.find((n) => n.type === 'output');
-  const v = Math.min(220, Math.max(40, Math.round(Number(bpmInput.value))));
+  const v = Math.min(220, Math.max(40, Math.round(Number(bpmInput.value) * 10) / 10));
   if (out && Number.isFinite(v)) hooks.setParam(out.id, 'bpm', v);
   syncBpm();
 });
 const bpmBox = h('label', { class: 'bpm' }, bpmInput, h('span', {}, 'BPM'));
+// Tap tempo: tap along to a song and the Output's tempo follows (three taps or more; a pause of 2.5 s starts again)
+let taps = [], tapReset = null;
+const tapBtn = h('button', { class: 'btn sm tap-btn', id: 'tap', type: 'button', title: 'Tap along to the song to set the tempo (three taps or more)', 'aria-label': 'Tap tempo' }, 'Tap');
+tapBtn.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const out = store.graph.nodes.find((n) => n.type === 'output');
+  if (!out) return toast('Add an Output module first: the tempo lives there.', [], 3000);
+  taps.push(e.timeStamp || performance.now()); taps = taps.slice(-12);   // the event's own time, so a busy moment in the app never skews a tap
+  clearTimeout(tapReset); tapReset = setTimeout(() => { taps = []; tapBtn.textContent = 'Tap'; }, 2500);
+  const r = tapBpm(taps);
+  if (!r) { tapBtn.textContent = taps.length + ' · tap on'; return; }
+  const v = Math.min(220, Math.max(40, r.bpm));
+  tapBtn.textContent = v + '';
+  if (v !== out.params.bpm) hooks.setParam(out.id, 'bpm', v);
+});
 const beatsSel = h('select', { id: 'beats', class: 'beats-sel', title: 'Beats per cycle (the time signature)' }, [2, 3, 4, 5, 6, 8].map((v) => h('option', { value: v }, v)));
 beatsSel.addEventListener('change', () => { const out = store.graph.nodes.find((n) => n.type === 'output'); if (out) hooks.setParam(out.id, 'beats', Number(beatsSel.value)); });
 const beatsBox = h('label', { class: 'bpm' }, beatsSel, h('span', {}, 'B/C'));
@@ -121,7 +138,7 @@ iconify(learnBtn, 'book', 'Learning path'); iconify(savesBtn, 'folder', 'Saves a
 iconify(addBtn, 'plus', 'Add a module (Ctrl/⌘ K)'); iconify(codeBtn, 'code', 'Show or hide the Strudel code (Ctrl/⌘ \\)'); iconify(settingsBtn, 'sliders', 'Display settings');
 const top = h('header', { class: 'topbar' },
   h('div', { class: 'brand' }, h('b', {}, 'Strudel'), ' Patchboard'),
-  h('div', { class: 'transport' }, playBtn, bpmBox, beatsBox, scopeCv, statusEl, overEl, busyEl),
+  h('div', { class: 'transport' }, playBtn, bpmBox, tapBtn, beatsBox, scopeCv, statusEl, overEl, busyEl),
   h('div', { class: 'toolbar' }, addBtn, newBtn, undoBtn, redoBtn, learnBtn, savesBtn, exportBtn, importBtn, aiBtn, settingsBtn, codeBtn), fileInput);
 
 const paletteEl = h('aside', { class: 'palette' }, h('div', { class: 'pal-head' },
@@ -135,6 +152,7 @@ const codeHead = h('div', { class: 'code-head' },
   h('label', { class: 'toggle', title: 'Show a plain-English note after each line' },
     h('input', { type: 'checkbox', id: 'notes-toggle', checked: showNotes, onchange: (e) => { showNotes = e.target.checked; localStorage.setItem('pb.notes', showNotes ? '1' : '0'); panel.setShowNotes(showNotes); } }), ' explain'),
   h('button', { class: 'btn sm', id: 'copy', onclick: copyCode }, 'Copy'),
+  h('button', { class: 'btn sm', id: 'snapshot', title: 'Draw the rhythm of this patch over a few bars as a picture you can look at, download or share', onclick: () => openSnapshot() }, 'Snapshot'),
   h('button', { class: 'btn sm code-close', id: 'code-close', 'aria-label': 'Close the code', onclick: () => setCodeShown(false) }, 'Close'),
   h('button', { class: 'btn sm', id: 'open-cc', onclick: openInStrudel }, 'Open in strudel.cc ↗'));
 const codeHost = h('div', { class: 'code-host', id: 'code-host' });
@@ -823,6 +841,41 @@ function doUndo() { if (store.undo()) toast('Undone', [{ label: 'Redo', fn: doRe
 function doRedo() { store.redo(); }
 
 // ---------- copy / strudel.cc ----------
+// Rhythm snapshot: the patch's rhythm over a few bars as a picture (lanes per sound, beat and bar lines at the current tempo, time in seconds)
+async function openSnapshot() {
+  if (!store.graph.nodes.some((n) => n.type === 'output')) return toast('Add an Output module first, so there is a rhythm to draw.', [], 3500);
+  let cycles = 2, last = null;
+  const canvas = h('canvas', { class: 'snap-canvas', id: 'snap-canvas', role: 'img', 'aria-label': 'Rhythm snapshot' });
+  const msg = h('div', { class: 'menu-empty snap-msg', id: 'snap-msg' }, 'Drawing…');
+  const bars = h('select', { id: 'snap-bars', title: 'How many bars to draw', onchange: () => { cycles = Number(bars.value); draw(); } }, [1, 2, 4, 8].map((n) => h('option', { value: n, selected: n === cycles }, n + (n === 1 ? ' bar' : ' bars'))));
+  const draw = async () => {
+    const out = store.graph.nodes.find((n) => n.type === 'output');
+    if (!out) { msg.textContent = 'There is no Output module.'; return; }
+    msg.textContent = 'Drawing…';
+    try {
+      const lay = layoutSnapshot(await queryPatch(current.code, cycles), { bpm: Number(out.params.bpm) || 120, beats: Number(out.params.beats) || 4, cycles });
+      last = lay;
+      if (!lay.hits) { canvas.width = 1; canvas.height = 1; msg.textContent = 'Nothing plays in these bars yet.'; return; }
+      drawSnapshot(canvas, lay);
+      msg.textContent = `${lay.hits} hits over ${lay.total.toFixed(2)} s at ${+lay.bpm.toFixed(2)} BPM. Teal lines are beats; the taller ones start each bar.`;
+    } catch (e) { msg.textContent = 'Could not draw this: ' + e.message; }
+  };
+  const blob = () => new Promise((res) => canvas.toBlob(res, 'image/png'));
+  const download = async () => {
+    const b = await blob(); if (!b || !last) return;
+    const a = h('a', { href: URL.createObjectURL(b), download: `rhythm-snapshot-${+last.bpm.toFixed(1)}bpm.png` }); document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+  const copy = async () => {
+    try { const b = await blob(); await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Snapshot copied. Paste it where you want it.', [], 2500); }
+    catch { toast('Copy was blocked by the browser. Use Download instead.', [], 4000); }
+  };
+  showModal('Rhythm snapshot', h('div', {},
+    h('div', { class: 'modal-btns snap-row' }, bars, h('button', { class: 'btn', id: 'snap-download', onclick: download }, 'Download PNG'), h('button', { class: 'btn ghost', id: 'snap-copy', onclick: copy }, 'Copy image'), h('button', { class: 'btn ghost', onclick: closeModal }, 'Close')),
+    h('div', { class: 'snap-wrap' }, canvas), msg));
+  modalEl.firstChild.style.width = 'min(1100px, 100%)';
+  draw();
+}
 async function copyCode() {
   try { await navigator.clipboard.writeText(panel.code); toast('Code copied', [], 1800); }
   catch { toast('Copy blocked by the browser — select the code and copy it by hand.', [], 4000); }

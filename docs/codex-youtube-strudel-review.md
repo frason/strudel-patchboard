@@ -124,6 +124,38 @@ Each stage writes a typed result with provenance, confidence and the tool versio
 - **Audio file, CPU only:** all stages above are feasible for 20 seconds. Stem separation is the slowest.
 - **Browser only:** onset and tempo work are possible (for example with essentia.js or Meyda, unverified), but stem separation and bass transcription are impractical. A small local Python service is the realistic route.
 
+### 3.4 Visual tempo check (a tool that exists now)
+
+A tempo claim is cheap to check by eye. `tools/tempo-snapshot/tempo_snapshot.py` (standard library only; decodes with macOS `afconvert`, or `ffmpeg` if installed,
+or takes a `.wav`) measures a clip and draws one picture: four onset curves (all bands, then low = kick and bass, mid, high = hats and snare air), the best-fitting
+beat grid over them in teal, and one extra strip per `--compare` tempo. A wrong tempo shows up as a strip that slides away from the teal one.
+
+```bash
+python3 tools/tempo-snapshot/tempo_snapshot.py clip.m4a --compare 128 --out check.png
+```
+
+Worked example (a 20.2 s clip the project owner supplied; this is a measurement of the loudness pattern, not a claim about the song):
+- best grid 125.0 to 125.2 BPM (score 2.10), stable between the first and second half; the strongest repeating pulse is the half-time 62.5 BPM (score 2.74);
+- the model's estimate of 128 BPM scored 0.85 and drifted about 0.4 s against the measured grid by the 17 s mark;
+- timing alone cannot choose between 125 and 62.5 (the script prints both), and it does not find which beat is the bar's "1".
+
+How to use it in the pipeline:
+1. Run it on the same clip the model sees, before the model's tempo is trusted. Put the measured tempo, the half/double candidates and the score in the IR as `measured`.
+2. If a model's tempo disagrees with the measurement, keep both in the output comments and use the measured one for `setcpm`.
+3. Attach the picture to the human review step (section 7.4) and, if a vision-capable model is used, give it the picture together with the numbers.
+4. Treat the score as a relative fit, not a probability. Sparse or heavily syncopated music can fool it; the picture is there so a person can overrule it.
+
+Prompt to hand a coding agent:
+
+```text
+Add a tempo check to the audio-to-Strudel pipeline using tools/tempo-snapshot/tempo_snapshot.py (read-only; copy it into the experiment if you need to
+change it). For every clip: (1) decode it, run the measurement, and store best_bpm, the half and double candidates, the per-half stability and the score
+in the IR with provenance "measured"; (2) save the PNG next to the generated Strudel file and reference it in the file's header comment; (3) if the model's
+tempo differs from the measured one by more than 2 percent, write both into the comments and use the measured tempo for setcpm; (4) add a test that runs the
+script on a synthetic clip with a known tempo (render a Strudel pattern at 100 BPM and at 140 BPM) and asserts the measured tempo within 1 BPM or at the
+half/double. Report what the picture shows, separate measured facts from estimates, and do not claim the music is accurate.
+```
+
 ---
 
 ## 4. Intermediate representation (IR)

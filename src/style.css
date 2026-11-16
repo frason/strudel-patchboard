@@ -146,7 +146,8 @@ button { font: inherit; color: inherit; }
 
 /* code column */
 .codecol { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.code-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.code-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.code-head b, .code-head .btn, .code-head .toggle { white-space: nowrap; }
 .toggle { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; cursor: pointer; }
 .code-host { flex: 1; min-height: 0; overflow: auto; background: #12171c; }
 .code-host .cm-editor { min-height: 100%; background: transparent; }
@@ -936,3 +937,15 @@ html, body { overscroll-behavior: none; }
 @media (max-width: 700px) { .ip-grid.list .ip-card .ip-name { width: 110px; } .ip-grid.list .ip-desc { display: none; } }
 /* the code panel shows a text cursor when you can type in it */
 .code-host.free .cm-content { caret-color: var(--accent); }
+
+/* tap tempo and the rhythm snapshot */
+.tap-btn { min-width: 46px; padding: 4px 8px; font-variant-numeric: tabular-nums; }
+.snap-canvas { display: block; width: 100%; height: auto; margin-top: 10px; border: 1px solid var(--line, #2f3a46); border-radius: 8px; background: #14181d; }
+.snap-row { align-items: center; margin-top: 0; }
+.snap-row select { background: #11161b; color: var(--text); border: 1px solid #364250; border-radius: 6px; padding: 6px 8px; font: 600 13px var(--mono); }
+.snap-msg { margin-top: 8px; }
+@media (max-width: 700px) { .tap-btn { padding: 6px 8px; font-size: 14px; } }
+
+.snap-wrap { overflow-x: auto; margin-top: 10px; }
+.snap-wrap .snap-canvas { margin-top: 0; }
+@media (max-width: 700px) { .snap-wrap .snap-canvas { width: 900px; max-width: none; } }

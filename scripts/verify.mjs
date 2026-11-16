@@ -991,4 +991,32 @@ $: s("[hh ~@4 hh ~@14]*2")
   check('Sound check: rim with no bank is reported as silent, rim on a bank that has it is not, and a name the chosen bank lacks is reported', plain.report.notes.some((n) => /rim/.test(n)) && !banked.report.notes.length && wrongBank.report.notes.some((n) => /east/.test(n)));
   check('Sound check: a plain Set of names still works as before', importStrudel('$: s("rim")', { sounds: new Set(['bd']) }).report.notes.some((n) => /rim/.test(n)));
 }
+
+// Tap tempo and the rhythm snapshot
+{
+  const { tapBpm } = await import('../src/tap.js');
+  const steady = [0, 480, 960, 1440, 1920];
+  check('Tap tempo: taps 480 ms apart are 125 BPM, and fewer than three taps give nothing', tapBpm(steady)?.bpm === 125 && tapBpm([0, 480]) === null && tapBpm([0]) === null && tapBpm([]) === null);
+  const jitter = tapBpm([0, 489, 957, 1452, 1918, 2410, 2885]);
+  check('Tap tempo: uneven human taps still land within 1 BPM of the true tempo', jitter && Math.abs(jitter.bpm - 125) <= 1);
+  check('Tap tempo: a missed beat (one double interval) does not drag the tempo down', Math.abs(tapBpm([0, 500, 1000, 2000, 2500, 3000, 3500]).bpm - 120) <= 0.5);
+  check('Tap tempo: a long pause starts a new count', tapBpm([0, 500, 1000, 9000, 9500, 10000, 10500]).bpm === 120 && tapBpm([0, 500, 1000, 9000, 9500]) === null);
+
+  const { layoutSnapshot, queryPatch, midiOf } = await import('../src/snapshot.js');
+  const { importStrudel } = await import('../src/importer.js');
+  const code = compile(importStrudel('setcpm(120/4)\n\n$: s("bd*4")\n\n$: s("~ sd ~ sd")\n\n$: note("c2 g2").s("sine").clip(0.5)\n\n$: s("hh*8").gain(0.4)').graph).code;
+  const lay = layoutSnapshot(await queryPatch(code, 2), { bpm: 120, beats: 4, cycles: 2 });
+  const lane = (n) => lay.lanes.find((l) => l.name === n);
+  check('Snapshot: a 120 BPM, 4-beat patch over 2 bars is 4 s long with a bar line every 2 s and a beat line every 0.5 s', lay.cycleSec === 2 && lay.total === 4 && lay.beatLines.length === 9 && lay.beatLines.filter((b) => b.bar).map((b) => b.t).join() === '0,2,4' && lay.beatLines[1].t === 0.5);
+  check('Snapshot: lanes read kick, snare, hat, then the pitched lane last', lay.lanes.map((l) => l.name).join() === 'bd,sd,hh,sine' && lay.lanes[3].pitched);
+  check('Snapshot: hits land at the right seconds (4 kicks a bar on every beat, snare on beats 2 and 4)', lane('bd').events.map((e) => e.t0).join() === '0,0.5,1,1.5,2,2.5,3,3.5' && lane('sd').events.map((e) => e.t0).join() === '0.5,1.5,2.5,3.5');
+  const bass = lane('sine');
+  check('Snapshot: a pitched lane keeps its note range, and a shortened note (clip 0.5) is drawn half as long as its step', bass.lo === midiOf('c2') && bass.hi === midiOf('g2') && /c2.g2/.test(bass.label) && Math.abs((bass.events[0].t1 - bass.events[0].t0) - 0.5) < 1e-9);
+  check('Snapshot: a quiet line is drawn fainter than a loud one', lane('hh').events[0].level < lane('bd').events[0].level);
+  const one = layoutSnapshot(await queryPatch(code, 1), { bpm: 120, beats: 4, cycles: 1 });
+  check('Snapshot: showing one bar shows half the hits', one.hits * 2 === lay.hits && one.total === 2);
+  let refused = false; try { await queryPatch('globalThis.__pwn = 1;\n$: s("bd")', 1); } catch (e) { refused = /Not drawn/.test(e.message) && globalThis.__pwn === undefined; }
+  check('Snapshot: code that playback would refuse is refused here too, and never run', refused);
+  check('Snapshot: note names and numbers become MIDI notes', midiOf('c3') === 48 && midiOf('eb2') === 39 && midiOf('bb1') === 34 && midiOf(60) === 60 && midiOf('xx') === null);
+}
 process.exit(failures ? 1 : 0);
