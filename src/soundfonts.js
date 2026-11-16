@@ -2,6 +2,7 @@
 // into the same Strudel instance that @strudel/web bundles. Fonts download from the network only when an instrument is first played.
 import { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } from '@strudel/web';
 import gm from '@strudel/soundfonts/gm.mjs';
+import { parseFontPreset } from './safeparse.js';
 
 let defaultSoundfontUrl = 'https://felixroos.github.io/webaudiofontdata/sound';
 let soundfontUrl = defaultSoundfontUrl;
@@ -18,9 +19,9 @@ async function loadFont(name) {
   const load = async () => {
     // TODO: make soundfont source configurable
     const url = `${soundfontUrl}/${name}.js`;
-    const preset = await fetch(url).then((res) => res.text());
-    let [_, data] = preset.split('={');
-    return eval('{' + data);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`could not load the instrument "${name}" (${res.status})`);
+    return parseFontPreset(await res.text());   // read as data, never evaluated
   };
   loadCache[name] = load();
   return loadCache[name];

@@ -1,17 +1,37 @@
-// Bring-your-own-key AI helper. The key lives only in this browser (localStorage) and is sent only to api.anthropic.com.
+// Bring-your-own-key AI helper. The key is sent only to api.anthropic.com.
 // Two jobs: write a starter patch from a description, and review the current patch. Both return Strudel code, which then goes
 // through the normal importer (so anything the modules cannot express is listed, never guessed) and its preview dialog.
-const KEY = 'pb.ai';
+// The key is kept in memory only (this tab, until it is closed or reloaded). Storing it in the browser is an explicit choice ("remember"), because anything
+// that can run script on this page can read browser storage.
+const KEY_STORE = 'pb.aiKey', MODEL_STORE = 'pb.aiModel', LEGACY = 'pb.ai';
 export const AI_MODELS = [
   ['claude-sonnet-5-5', 'Sonnet 5.5 (good balance)'],
   ['claude-haiku-5-5', 'Haiku 5.5 (fastest, cheapest)'],
   ['claude-opus-5-5', 'Opus 5.5 (best, costs more)'],
 ];
-export function getAI() {
-  try { const v = JSON.parse(localStorage.getItem(KEY) || '{}'); return { key: v.key || '', model: AI_MODELS.some(([m]) => m === v.model) ? v.model : AI_MODELS[0][0] }; } catch { return { key: '', model: AI_MODELS[0][0] }; }
+const okModel = (m) => (AI_MODELS.some(([x]) => x === m) ? m : AI_MODELS[0][0]);
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } };
+let mem = { key: '', model: okModel(lsGet(MODEL_STORE)) };
+let migrated = false;
+{ // older versions stored the key in plain text: remove it (the model choice is kept); the key is asked for again, with the option to remember it
+  const old = lsGet(LEGACY);
+  if (old !== null) {
+    try { const v = JSON.parse(old); if (v && v.model) { mem.model = okModel(v.model); lsSet(MODEL_STORE, mem.model); } migrated = !!(v && v.key); } catch { /* damaged: just remove it */ }
+    lsDel(LEGACY);
+  }
+  const kept = lsGet(KEY_STORE);
+  if (kept) mem.key = kept;
 }
-export function setAI(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch { /* private mode */ } }
-export function clearAI() { try { localStorage.removeItem(KEY); } catch { /* ignore */ } }
+export const consumeAiNotice = () => { const m = migrated; migrated = false; return m; };
+export function getAI() { return { key: mem.key, model: mem.model, remembered: lsGet(KEY_STORE) !== null }; }
+export function setAI({ key, model, remember = false }) {
+  mem = { key: String(key || '').trim(), model: okModel(model) };
+  lsSet(MODEL_STORE, mem.model);
+  if (remember && mem.key) lsSet(KEY_STORE, mem.key); else lsDel(KEY_STORE);
+}
+export function clearAI() { mem.key = ''; lsDel(KEY_STORE); lsDel(LEGACY); }
 
 const SUBSET = `The editor can only read a small part of Strudel back into modules, so stay inside it:
 - First line: setcpm(BPM/4). Then each part on its own line starting with "$:".

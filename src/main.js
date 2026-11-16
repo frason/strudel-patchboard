@@ -13,10 +13,9 @@ import { INSTRUMENTS, CATEGORIES as INST_CATS } from './instruments.js';
 import { compile } from './compile.js';
 import { strudelFile, parseImport, b64 } from './io.js';
 import { importStrudel } from './importer.js';
-import { setHydraMode, prepareWindow, hydraNotes } from './hydra.js';
 import { LESSONS } from './starters.js';
 import { patternToDrums } from './todrums.js';
-import { getAI, setAI, clearAI, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
+import { getAI, setAI, clearAI, consumeAiNotice, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
 import { defaultParams, FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
 import { effectiveKey, makeNode, nodeById, wiresFrom, wiresInto, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
 
@@ -31,9 +30,12 @@ let firstLesson = null;
 try {
   if (saved) { startGraph = validateShape(saved); normalize(startGraph); }
 } catch { startGraph = null; }
+const droppedAtStart = startGraph && startGraph.dropped && startGraph.dropped.length ? startGraph : null;
 if (!startGraph) { firstLesson = LESSONS[0]; startGraph = firstLesson.graph(); }
 
 const store = createStore(startGraph);
+setTimeout(() => { if (consumeAiNotice()) toast('For safety, saved API keys are no longer kept by default. If you use the AI helper, paste your key again (tick "Remember on this device" to keep it).', [], 14000); }, 1200);
+setTimeout(() => droppedAtStart && noteDropped(droppedAtStart), 800);
 const engine = createEngine();
 if (import.meta.env.DEV) { window.__engine = engine; window.__lessons = () => LESSONS.map((l) => ({ title: l.title, code: compile(l.graph()).code })); }   // developer-only, for audio capture experiments
 let showNotes = localStorage.getItem('pb.notes') !== '0';
@@ -667,16 +669,12 @@ function afterChange() {
   undoBtn.disabled = !store.canUndo;
   redoBtn.disabled = !store.canRedo;
   renderIssues();
-  if (engine.playing) { const hy = store.graph.nodes.find((n) => n.type === 'hydra' && !n.muted); if (hy) setHydraMode(hy.params.mode); }
   if (engine.playing && current.code !== evaluated.code) {
     clearTimeout(evalTimer);
     evalTimer = setTimeout(runEval, 140);
   }
 }
-hydraNotes((t) => toast(t, [], 7000));
 async function runEval() {
-  const hy = store.graph.nodes.find((n) => n.type === 'hydra' && !n.muted);
-  if (hy) setHydraMode(hy.params.mode === 'window' ? 'window' : hy.params.mode);
   evaluated = current;
   await engine.evaluate(current.code);
 }
@@ -755,8 +753,6 @@ engine.onStatus((s) => {
 playBtn.addEventListener('click', async () => {
   if (engine.playing) { engine.stop(); panel.clearFlashes(); board.clearPulses(); setPlayUI(false); return; }
   evaluated = current;
-  const hy = store.graph.nodes.find((n) => n.type === 'hydra' && !n.muted);
-  if (hy) { setHydraMode(hy.params.mode); if (hy.params.mode === 'window') prepareWindow(); }
   try { await engine.start(current.code); } catch (e) { toast('Could not start audio: ' + e.message, [], 8000); }
   setPlayUI(engine.playing);
 });
@@ -864,7 +860,16 @@ learnBtn.addEventListener('click', () => {
 
 // saves
 function fmtTime(t) { return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+// A Hydra module in a saved or imported patch is not run here: tell the person, and keep its code reachable
+function noteDropped(g) {
+  const d = g && g.dropped;
+  if (!d || !d.length) return;
+  const code = d.map((x) => x.code).filter(Boolean).join('\n\n');
+  toast('This patch had a Hydra visuals module. Hydra does not run in Patchboard, so the module was left off the board. Your Hydra code is not lost.',
+    code ? [{ label: 'Copy the Hydra code', fn: async () => { try { await navigator.clipboard.writeText(code); toast('Hydra code copied. Paste it into strudel.cc to run it.', [], 5000); } catch { toast('Could not copy the code.', [], 4000); } } }] : [], 16000);
+}
 function loadGraph(graph, label) {
+  noteDropped(graph);
   try { store.replace(graph, label); setBanner(null); closePop(); requestAnimationFrame(() => board.fit()); toast(`Loaded ${label}`, [undoAction], 4000); }
   catch (e) { toast('Could not load: ' + e.message); }
 }
@@ -928,6 +933,7 @@ function reportDialog(r, label, back) {
     : null;
   const notes = rep.notes.length ? h('div', { class: 'imp-notes' }, rep.notes.map((n) => h('div', {}, '• ' + n))) : null;
   const go = h('button', { class: 'btn', id: 'import-go', onclick: () => { closeModal(); loadImported(r.graph, label); } }, rep.skipped.length ? 'Import what I can' : 'Import');
+  const copySkipped = rep.skipped.length ? h('button', { class: 'btn ghost', id: 'import-copy-skipped', title: 'Copy the code that was left out, so nothing is lost', onclick: async () => { try { await navigator.clipboard.writeText([...new Set(rep.skipped.map((s) => s.full || s.text))].join('\n\n')); toast('Skipped code copied', [], 2500); } catch { toast('Could not copy the code.', [], 4000); } } }, 'Copy the skipped code') : null;
   const note = aiNote; aiNote = null;
   const still = (note?.left || []).filter((x) => !/cannot read this/.test(x));
   const aiBox = note && (note.plan || note.limits || still.length) ? h('div', { class: 'ai-note' },
@@ -939,7 +945,7 @@ function reportDialog(r, label, back) {
     h('p', { class: 'imp-sum' }, r.empty ? 'Nothing in this code could be turned into modules.' : `Built ${r.graph.nodes.filter((n) => n.type !== 'output').length} modules from ${rep.done.length} pattern${rep.done.length === 1 ? '' : 's'}.`, rep.skipped.length ? ` ${rep.skipped.length} part${rep.skipped.length === 1 ? '' : 's'} could not be shown as modules:` : ' Everything was converted.'),
     list, notes,
     h('p', { class: 'imp-hint' }, 'Skipped parts are left out, not guessed. Importing replaces the board (Undo brings it back).'),
-    h('div', { class: 'modal-btns' }, r.empty ? null : go, h('button', { class: 'btn ghost', onclick: back }, 'Back')));
+    h('div', { class: 'modal-btns' }, r.empty ? null : go, copySkipped, h('button', { class: 'btn ghost', onclick: back }, 'Back')));
   void total;
   showModal('What the import found', body);
 }
@@ -995,6 +1001,7 @@ fileInput.addEventListener('change', async () => {
   const f = fileInput.files[0];
   fileInput.value = '';
   if (!f) return;
+  if (f.size > 2_000_000) return toast(`That file is too large (${Math.round(f.size / 1000)} KB; the limit is 2000 KB).`, [], 7000);
   try { importText(await f.text(), f.name, openImport); }
   catch (e) { toast('Could not read that file: ' + e.message, [], 8000); }
 });
@@ -1055,17 +1062,20 @@ function aiKeyDialog() {
   const ai = getAI();
   const key = noKeys(h('input', { class: 'txt', id: 'ai-key', type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'sk-ant-…', value: ai.key }));
   const model = h('select', { class: 'sel', id: 'ai-model' }, AI_MODELS.map(([v, t]) => h('option', { value: v, selected: v === ai.model }, t)));
+  const remember = h('input', { type: 'checkbox', id: 'ai-remember', checked: ai.remembered });
   showModal('AI helper: your key', h('div', { class: 'ai-box' },
     h('p', { class: 'imp-hint' }, 'This uses your own Anthropic API key (create one at console.anthropic.com). Usage is billed to your account, so set a spending limit there.'),
     h('ul', { class: 'ai-notes' },
-      h('li', {}, 'The key is kept only in this browser, on this device. It is never sent to this site or anywhere except api.anthropic.com. Anyone who can use this browser profile, or a browser extension that reads page data, could see it.'),
+      h('li', {}, 'By default the key is kept only in this tab\'s memory: it is forgotten when you close or reload the page. It is never sent to this site or anywhere except api.anthropic.com.'),
+      h('li', {}, 'Ticking "Remember on this device" stores it in this browser so you do not have to paste it again. Anything that can run script on this page, and anyone who can use this browser profile, could then read it. Leave it off on a shared computer.'),
       h('li', {}, 'What you type, and for a review the code of your patch, is sent to Anthropic. Nothing else is.'),
       h('li', {}, 'Use a key you can delete or limit, not your main one.')),
     h('label', { class: 'set-l' }, 'API key'), key,
     h('label', { class: 'set-l' }, 'Model'), model,
+    h('label', { class: 'ai-remember' }, remember, ' Remember on this device (stored in this browser)'),
     h('div', { class: 'modal-btns' },
-      h('button', { class: 'btn', id: 'ai-save', onclick: () => { const k = key.value.trim(); if (!k) return toast('Paste your API key first.', [], 3000); setAI({ key: k, model: model.value }); toast('Key saved in this browser.', [], 2500); openAI(); } }, 'Save'),
-      ai.key ? h('button', { class: 'btn ghost', onclick: () => { clearAI(); toast('Key removed from this browser.', [], 3000); closeModal(); } }, 'Remove key') : null,
+      h('button', { class: 'btn', id: 'ai-save', onclick: () => { const k = key.value.trim(); if (!k) return toast('Paste your API key first.', [], 3000); setAI({ key: k, model: model.value, remember: remember.checked }); toast(remember.checked ? 'Key saved in this browser.' : 'Key kept for this tab only.', [], 2500); openAI(); } }, 'Save'),
+      ai.key ? h('button', { class: 'btn ghost', onclick: () => { clearAI(); toast('Key removed.', [], 3000); closeModal(); } }, 'Remove key') : null,
       h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'))));
   setTimeout(() => key.focus(), 0);
 }

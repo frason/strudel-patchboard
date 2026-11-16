@@ -755,4 +755,123 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const e1 = patternToDrums('bd sd hh oh cp rim cb lt mt'), e2 = patternToDrums('bd(3,8)');
   check('Sample to Drum Machine: more than 8 sounds is refused; a euclid pattern fits an 8-step grid', e1.error && /holds 8/.test(e1.error) && !e2.error && e2.steps === 8 && e2.tracks[0].cells.filter((c) => c.on).length === 3);
 }
+{
+  // ================= security: untrusted input must never become code =================
+  const { cleanParams, cleanGraph, LIMITS, checkSize } = await import('../src/validate.js');
+  const { guardCode } = await import('../src/guard.js');
+  const { MODULES, DRUM_PRESETS, MELODY_TEMPLATES, FM_ALGORITHMS, fmLinkKey } = await import('../src/modules.js');
+  const { emptyGraph, validateShape } = await import('../src/graph.js');
+  const { parseImport, strudelFile } = await import('../src/io.js');
+  const { importStrudel } = await import('../src/importer.js');
+  const { parseFontPreset } = await import('../src/safeparse.js');
+  const EVIL = '1); globalThis.__pwned = "x"; (0';
+  const hostile = [EVIL, '"', '`${globalThis.__pwned=1}`', '\\u0000', NaN, Infinity, -Infinity, 1e308, -1e308, null, undefined, {}, [], [EVIL], { toString: EVIL }, true];
+
+  // 1. every parameter of every module, given every hostile value, comes out as something its own spec allows
+  let badParam = '';
+  for (const [type, def] of Object.entries(MODULES)) {
+    for (const spec of def.params) {
+      for (const h of hostile) {
+        const out = cleanParams(type, { [spec.key]: h })[spec.key];
+        const okNum = (v) => typeof v === 'number' && Number.isFinite(v);
+        let ok = true;
+        if (spec.kind === 'knob' || spec.kind === 'num') ok = okNum(out) && (spec.dyn || !Number.isFinite(spec.min) || (out >= spec.min - 10 * (spec.max - spec.min) && out <= spec.max + 10 * (spec.max - spec.min)));
+        else if (spec.kind === 'view') ok = okNum(out);
+        else if (spec.kind === 'toggle') ok = typeof out === 'boolean';
+        else if (spec.kind === 'select') ok = spec.key === 'bank' ? /^[A-Za-z0-9_\-]{0,40}$/.test(out) : (spec.options || []).some((o) => (Array.isArray(o) ? o[0] : o) === out);
+        else if (spec.kind === 'text') ok = typeof out === 'string' && out.length <= 8000 && !/[\u0000-\u001f]/.test(out);
+        else if (spec.kind === 'instrument') ok = typeof out === 'string' && /^[A-Za-z0-9_:.\-]{1,80}$/.test(out);
+        if (!ok) { badParam = `${type}.${spec.key} (${spec.kind}) accepted ${String(h)} as ${String(out)}`; break; }
+      }
+      if (badParam) break;
+    }
+    if (badParam) break;
+  }
+  check('security: every parameter of every module, given hostile values, is rebuilt as a bounded number, option or plain text' + (badParam ? ' [' + badParam + ']' : ''), !badParam);
+
+  // 1b. code written outside a dial's range, a long pattern and accented names come in as written (security cleaning must not change the music)
+  const fid = (code) => compile(importStrudel(code).graph).code.replace(/\s+/g, ' ');
+  const longPat = 'bd sd '.repeat(300).trim();
+  check('import fidelity: gain(3), speed(8), slow(32), 300 BPM, a 1800-character pattern and an accented name are all kept as written',
+    /\.gain\(3\)/.test(fid('$: s("bd").gain(3)')) && /\.speed\(8\)/.test(fid('$: s("bd").speed(8)')) && /\.slow\(32\)/.test(fid('$: s("bd sd").slow(32)')) && /setcpm\(300\/4\)/.test(fid('setcpm(300/4)\n$: s("bd")')) && fid(`$: s("${longPat}")`).includes(longPat) && /s\("bd é"\)/.test(fid('$: s("bd é")')));
+  let absurd = ''; try { cleanGraph({ nodes: [{ id: 'a', type: 'sample', params: { name: 'x'.repeat(8001) } }], wires: [] }); } catch (e) { absurd = e.message; }
+  check('import fidelity: a pattern past 8000 characters is refused out loud, not cut off', /too long/.test(absurd) && cleanParams('synth', { gain: 1e30 }).gain < 1e3);
+  // 2. the exact attack: an imported patch whose values are code. It must not execute, whichever way it arrives.
+  const hostileGraph = () => {
+    const g = emptyGraph(), N = (t, q = {}) => makeNode(t, 0, 0, q);
+    const m = N('melody', { steps: 4, cells: [{ n: ['c3"); globalThis.__pwned = 2; ("'], d: null, len: 1, vel: 1 }, { n: null, d: EVIL, len: EVIL, vel: EVIL }, { n: 'c3', d: null, len: 1, vel: 1 }, { n: null, d: null, len: 1, vel: 1 }] });
+    const sy = N('synth', { gain: EVIL, lpf: EVIL, pan: EVIL, wave: 'sine");globalThis.__pwned=3;("', release: EVIL });
+    const f = N('filter', { cutoff: EVIL, type: 'lpf);globalThis.__pwned=4;(', q: EVIL, env: EVIL });
+    const sm = N('sample', { name: 'bd"); globalThis.__pwned=5; ("', bank: 'x"); globalThis.__pwned=6; ("', gain: EVIL });
+    const dm = N('drums', { tracks: [{ name: 'bd"); globalThis.__pwned=7; ("', mute: false, cells: [{ on: EVIL }, EVIL, null] }] });
+    const rv = N('reverb', { room: EVIL, size: EVIL }), fm = N('fm', { index: EVIL, harm: EVIL, owave: EVIL, decay: EVIL }), o = N('output', { bpm: EVIL, beats: EVIL, mvol: EVIL });
+    g.nodes.push(m, sy, f, sm, dm, rv, fm, o);
+    const W = (a, b, port = 'in') => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+    W(m, sy); W(sy, f); W(f, rv); W(rv, fm); W(fm, o); W(sm, o); W(dm, o);
+    return g;
+  };
+  const runHostile = async (viaText) => {
+    globalThis.__pwned = undefined;
+    const g = hostileGraph();
+    const parsed = viaText ? parseImport(viaText(g)) : { graph: validateShape(g) };
+    if (parsed.error && !parsed.graph) return { code: '', blocked: 'import refused', pwned: globalThis.__pwned };
+    const code = compile(parsed.graph).code;
+    const refused = guardCode(code);
+    let ran = false;
+    if (!refused) { try { await evaluate(code, false); ran = true; } catch { /* a bad pattern may throw: that is fine */ } }
+    return { code, refused, ran, pwned: globalThis.__pwned };
+  };
+  const { b64 } = await import('../src/io.js');
+  const viaJson = await runHostile((g) => JSON.stringify(g)), viaFile = await runHostile((g) => `// crafted\n$: s("bd")\n\n/* patchboard-patch v1\n${b64(JSON.stringify(g))}\n*/\n`), direct = await runHostile(null);
+  check('security: a hostile patch (JSON, a .strudel file, or loaded directly) compiles to code with no injected statement, and runs none of it',
+    [viaJson, viaFile, direct].every((r) => r.pwned === undefined && !r.refused && !/\"\s*\)\s*;\s*globalThis/.test(r.code) && !/;\s*globalThis/.test(r.code)));
+  check('security: ...and what remains of the hostile patch is allowed by the code guard (it is safe to play, with defaults in place of the bad values)', [viaJson, viaFile, direct].every((r) => !r.refused));
+  // the guard on its own: the old attack text, written straight into code, is refused
+  check('security: the guard refuses injected statements, other functions, template strings, computed access, constructors and imports',
+    ['setcpm(1); globalThis.__pwned = 1; (0/4)', '$: s("bd").gain(1); fetch("x")', 's("bd")["gain"](1)', '$: s(`bd ${1}`)', 's("bd").constructor.constructor("1")()', 'eval("1")', 'import("x")', 'new Function("1")()', '$: s("bd").every(2, x=>{globalThis.a=1})', '$: s("bd").lpf);globalThis.a=1;((1)', 'x => 1', 'globalThis.a = 1'].every((c) => !!guardCode(c)));
+  const good = [...LESSONS.map((l) => compile(l.graph()).code), ...DRUM_PRESETS.map((p) => { const g = emptyGraph(), d = makeNode('drums', 0, 0, JSON.parse(JSON.stringify(p.params))), o = makeNode('output', 0, 0); g.nodes.push(d, o); g.wires.push({ id: 'w', from: { node: d.id, port: 'out' }, to: { node: o.id, port: 'in' } }); return compile(g).code; })];
+  const refusedGood = good.map((c, i) => [i, guardCode(c)]).filter(([, r]) => r);
+  check('security: the guard allows everything the app really writes (all lessons and drum templates) [' + refusedGood.slice(0, 2).map(([i, r]) => i + ': ' + r).join('; ') + ']', refusedGood.length === 0 && good.length > 40);
+
+  // 3. limits
+  const big = { v: 1, nodes: Array.from({ length: LIMITS.nodes + 1 }, (_, i) => ({ id: 'n' + i, type: 'fast', x: 0, y: 0, params: {} })), wires: [] };
+  let tooMany = false; try { cleanGraph(big); } catch (e) { tooMany = /too many modules/.test(e.message); }
+  let tooBig = false; try { checkSize('x'.repeat(LIMITS.bytes + 1)); } catch (e) { tooBig = /too large/.test(e.message); }
+  check('security: too many modules, an oversized file and oversized code are refused with a clear message', tooMany && tooBig && /too large/.test(parseImport('{' + ' '.repeat(LIMITS.bytes + 5) + '}').error || '') && /too large/.test(importStrudel('$: s("bd")\n'.repeat(40000)).error || ''));
+  const oddGraph = JSON.parse('{"nodes":[{"id":"ok1","type":"fast","x":1e30,"y":"zzz","w":99999,"params":{"n":2,"__proto__":{"polluted":1},"evil":"x"}}],"wires":[{"from":{"node":"ok1","port":"x\\""},"to":{"node":"ok1","port":"in"}}]}');
+  const odd = cleanGraph(oddGraph);
+  check('security: odd ids, positions, widths, extra keys and prototype keys are dropped or clamped, and nothing is polluted', odd.nodes[0].x === 1e6 && odd.nodes[0].y === 0 && odd.nodes[0].w === undefined && !('evil' in odd.nodes[0].params) && ({}).polluted === undefined && odd.wires.length === 0);
+  let badId = false; try { cleanGraph({ nodes: [{ id: 'a"b', type: 'fast', params: {} }], wires: [] }); } catch { badId = true; }
+  check('security: a module id that is not plain letters, digits, dash or underscore is refused', badId);
+
+  // 4. Hydra is not run: a Hydra module in a patch is removed (its code kept for the person), Hydra code in a paste is skipped, not deleted
+  const withHydra = cleanGraph({ nodes: [{ id: 'h1', type: 'hydra', x: 0, y: 0, params: { code: 'osc(10).out()' } }, { id: 'o1', type: 'output', params: {} }], wires: [] });
+  check('Hydra: a Hydra module in a saved patch is dropped, its code is kept on the result so the person can copy it, and the rest loads', withHydra.nodes.length === 1 && withHydra.dropped.length === 1 && withHydra.dropped[0].code === 'osc(10).out()');
+  const hp = importStrudel('await initHydra()\nosc(10, 0.1, 1.2).out()\n$: s("bd sd")');
+  check('Hydra: pasted Hydra lines are skipped with a reason and their full text kept for copying; the music still imports', !hp.error && hp.report.skipped.filter((x) => /Hydra/.test(x.reason)).length >= 2 && hp.report.skipped.every((x) => typeof x.full === 'string' && x.full.length > 0) && hp.graph.nodes.some((n) => n.type === 'sample') && !hp.graph.nodes.some((n) => n.type === 'hydra') && hp.report.notes.some((n) => /Hydra/.test(n)));
+  check('Hydra: the module no longer exists and nothing writes initHydra into code', !MODULES.hydra && !compile(validateShape(hostileGraph())).code.includes('initHydra'));
+
+  // 5. soundfont files are parsed as data
+  const fixture = "console.log('load x');\nvar _tone_x={\n\tzones:[\n\t\t{\n\t\t\tmidi:0\n\t\t\t,originalPitch:2400\n\t\t\t,keyRangeLow:-1\n\t\t\t,coarseTune:0\n\t\t\t,sampleRate:44100\n\t\t\t,ahdsr:true\n\t\t\t,file:'SUQzBAAA+/='\n\t\t\t,anchor:0.01\n\t\t\t//_tone.Gd_pno_\n\t\t}\n\t]\n};\n";
+  const font = { zones: parseFontPreset(fixture) };
+  const evilFonts = ["var x={zones:[{file:'a'+(globalThis.__pwned=1)}]};", "var x={zones:[{midi:(function(){globalThis.__pwned=1})()}]};", "var x={zones:[{midi:globalThis.__pwned=1}]};", "var x={[globalThis.__pwned=1]:1,zones:[]};", "var x={zones:[{file:'a\"b'}]};", "var x={__proto__:{a:1},zones:[]};", 'var x=1;'];
+  globalThis.__pwned = undefined;
+  const fontsRefused = evilFonts.every((t) => { try { parseFontPreset(t); return false; } catch { return true; } });
+  check('security: a soundfont file is read as data (comments, leading commas and negatives work), and anything executable in it is refused and never run', font.zones.length === 1 && font.zones[0].keyRangeLow === -1 && font.zones[0].file === 'SUQzBAAA+/=' && fontsRefused && globalThis.__pwned === undefined);
+
+  // 6. the AI key: in memory by default, stored only when asked, and an old stored key is removed
+  const store = new Map();
+  globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  store.set('pb.ai', JSON.stringify({ key: 'sk-ant-OLD', model: 'claude-haiku-5-5' }));
+  const ai = await import('../src/ai.js?security-test');
+  const afterMigrate = { key: ai.getAI().key, model: ai.getAI().model, legacyGone: !store.has('pb.ai'), noKeyStored: !store.has('pb.aiKey'), notice: ai.consumeAiNotice(), noticeOnce: ai.consumeAiNotice() };
+  ai.setAI({ key: 'sk-ant-NEW', model: 'claude-sonnet-5-5' });
+  const inMemory = { key: ai.getAI().key, stored: [...store.values()].some((v) => v.includes('sk-ant')) };
+  ai.setAI({ key: 'sk-ant-NEW', model: 'claude-sonnet-5-5', remember: true });
+  const remembered = { stored: store.get('pb.aiKey') === 'sk-ant-NEW', flag: ai.getAI().remembered };
+  ai.clearAI();
+  check('security: an old stored API key is removed (once, with a notice), a new key stays in memory unless "remember" is chosen, and Remove clears both',
+    afterMigrate.key === '' && afterMigrate.model === 'claude-haiku-5-5' && afterMigrate.legacyGone && afterMigrate.noKeyStored && afterMigrate.notice === true && afterMigrate.noticeOnce === false && inMemory.key === 'sk-ant-NEW' && inMemory.stored === false && remembered.stored && remembered.flag && ai.getAI().key === '' && !store.has('pb.aiKey'));
+  delete globalThis.localStorage;
+}
 process.exit(failures ? 1 : 0);

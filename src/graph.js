@@ -1,6 +1,7 @@
 // The one serialisable graph. Everything else (compiler, code panel, undo, saves, export) reads this.
 //   { v:1, nodes:[{id,type,x,y,params,collapsed?}], wires:[{id,from:{node,port},to:{node,port}}] }
 import { MODULES, PATTERN_TYPES, defaultParams, portsOf, resizeCells, resizeTracks } from './modules.js';
+import { cleanGraph } from './validate.js';
 
 let counter = 0;
 export function uid(prefix = 'n') {
@@ -123,22 +124,13 @@ export function normalize(g) {
 }
 
 export function validateShape(g) {
-  if (!g || typeof g !== 'object' || !Array.isArray(g.nodes) || !Array.isArray(g.wires)) throw new Error('not a patch');
-  const ids = new Set();
-  for (const n of g.nodes) {
-    if (!MODULES[n.type]) throw new Error(`unknown module type "${n.type}"`);
-    if (ids.has(n.id)) throw new Error('duplicate module id');
-    ids.add(n.id);
-    if (n.params?.tracks) n.params.tracks.forEach((t) => { t.cells = (t.cells || []).map((c) => (typeof c === 'boolean' ? { on: c } : c)); }); // older drum patches stored plain booleans
-    const hadScale = n.params && 'scale' in n.params;
-    n.params = { ...defaultParams(n.type), ...(n.params || {}) };
-    if (n.type === 'melody' && !hadScale) n.params.scale = 'off'; // patches from before keys existed keep their note names
-    n.x = Number(n.x) || 0;
-    n.y = Number(n.y) || 0;
-  }
-  g.wires = g.wires.filter((w) => w && w.from && w.to && ids.has(w.from.node) && ids.has(w.to.node));
+  const c = cleanGraph(g);   // rebuilt from the module specifications: see validate.js
+  g.nodes = c.nodes;
+  g.wires = c.wires;
+  if (c.groups) g.groups = c.groups; else delete g.groups;
   g.wires.forEach((w) => (w.id = w.id || uid('w')));
   g.v = 1;
+  Object.defineProperty(g, 'dropped', { value: c.dropped, enumerable: false, configurable: true, writable: true });
   return g;
 }
 

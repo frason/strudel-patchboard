@@ -38,7 +38,7 @@ export function isValidSound(bank, text) {
 export async function loadCatalog() {
   try {
     const cached = JSON.parse(localStorage.getItem('pb.catalog2') || 'null');
-    if (cached && Date.now() - cached.t < 7 * 864e5) return ingestCatalog(cached.dm, cached.dirt, cached.extra);
+    if (cached && typeof cached === 'object' && cached.dm && typeof cached.dm === 'object' && Date.now() - cached.t < 7 * 864e5) return ingestCatalog(cached.dm, cached.dirt, cached.extra);
   } catch { /* ignore */ }
   try {
     const [dm, dirt, extra] = await Promise.all([
@@ -48,7 +48,7 @@ export async function loadCatalog() {
     ]);
     // keep only names and counts: small enough for localStorage
     const slim = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, k === '_base' ? v : count(v)]));
-    try { localStorage.setItem('pb.catalog2', JSON.stringify({ t: Date.now(), dm: slim(dm), dirt: slim(dirt), extra: slim(extra) })); } catch { /* quota */ }
+    try { const json = JSON.stringify({ t: Date.now(), dm: slim(dm), dirt: slim(dirt), extra: slim(extra) }); if (json.length < 1_500_000) localStorage.setItem('pb.catalog2', json); } catch { /* quota */ }
     ingestCatalog(dm, dirt, extra);
   } catch { /* offline: the fallback list stays */ }
 }

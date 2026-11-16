@@ -1,9 +1,9 @@
 // Strudel is the only clock. We hand it the compiled code string and tap the events it schedules.
-import { initHydra, clearHydra, H } from './hydra.js';
 import { initStrudel, initAudio, webaudioOutput, getAudioContext, samples, evalScope, ref, getAnalyzerData, superdough, getSuperdoughAudioController } from '@strudel/web';
 import { getPrefs, onPrefs } from './prefs.js';
 import { makeSliderWithID, sliderValues } from './slider.js';
 import { registerSoundfonts } from './soundfonts.js';
+import { guardCode } from './guard.js';
 
 const DS = 'https://raw.githubusercontent.com/felixroos/dough-samples/main';
 
@@ -124,7 +124,7 @@ export function createEngine() {
           defaultOutput,
           onEvalError: (e) => setStatus('error', e.message),
           prebake: async () => {
-            await evalScope({ sliderWithID: makeSliderWithID(ref), initHydra, clearHydra, H });
+            await evalScope({ sliderWithID: makeSliderWithID(ref) });
             registerSoundfonts(); // General MIDI instruments: nothing downloads until one is played
             const results = await Promise.allSettled([
               samples(`${DS}/tidal-drum-machines.json`),
@@ -158,10 +158,12 @@ export function createEngine() {
       await ensure();
       routeSafeOutput();
       playing = true;
-      await api.evaluate(code);
+      if ((await api.evaluate(code)) === false) playing = false;
     },
     async evaluate(code) {
-      if (!repl) return;
+      if (!repl) return false;
+      const refused = guardCode(code);   // only code made of the shapes the compiler writes is ever evaluated
+      if (refused) { setStatus('error', 'Not played: ' + refused + '. This patch contains something Patchboard does not allow, so nothing was run.'); return false; }
       const seq = ++evalSeq;
       setStatus('ok', '');
       // An orbit (mix bus) only exists once the first sound has played on it, and .duck("3") on a kick that hits before that logs
@@ -173,11 +175,11 @@ export function createEngine() {
       await repl.evaluate(code, playing);
       if (seq === evalSeq && repl.state.evalError) setStatus('error', repl.state.evalError.message);
       else if (seq === evalSeq) setStatus(playing ? 'playing' : 'ready', '');
+      return true;
     },
     stop() {
       playing = false;
       try { keepAlive?.pause(); } catch { /* ignore */ }
-      clearHydra();
       repl?.stop();
       setStatus('ready', '');
     },

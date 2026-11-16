@@ -33,7 +33,6 @@ function stepText(t, leaf) {
 export function compile(g) {
   const issues = [];
   let acidNode = null;
-  const hydraNode = g.nodes.find((n) => n.type === 'hydra' && !n.muted) || null;
   const mutedOut = new Set(); // modules that are silent on purpose (muted, or fed only by muted ones): not worth a warning
   const stack = [];
   const nodeLabel = (n) => MODULES[n.type].title;
@@ -578,12 +577,6 @@ export function compile(g) {
     mk('mphaser', 'phaser', (v) => `phaser(${fmt(v)}) on everything: all() applies it to every pattern.`);
     mk('mtrem', 'tremolo', (v) => `tremolo(${fmt(v)}) on everything.`);
     mk('mchorus', 'chorus', (v) => `chorus(${fmt(v)}) on everything.`);
-    if (hydraNode && !parts.some((x) => x.hydraHeader)) {
-      const hm = { node: hydraNode.id, role: 'fn' };
-      const lines = String(hydraNode.params.code || '').split('\n');
-      parts.push(NL(0), NL(0), { ...S('await initHydra()', { ...hm, note: 'initHydra() starts Hydra, a live visuals engine. Where its picture appears (behind the board, a panel, or a window) is chosen on the Hydra module, not in the code.' }), hydraHeader: true });
-      for (const ln of lines) parts.push(NL(0), S(ln, { ...hm, note: 'Hydra code: a chain of visual functions ending in .out(). It runs on its own, in the GPU, next to your music.' }));
-    }
     if (acidNode && !parts.some((x) => x.acidHeader)) parts.push(NL(0), NL(0), { ...S("register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9).lps(.2).lpd(.12))", { node: acidNode.id, role: 'fn', note: 'register() teaches Strudel a new method: acidenv(x) = a 100 Hz low-pass whose cutoff opens by x × 9 on each note (lpenv), holds at 20% (lps) and falls over 0.12 s (lpd).' }), acidHeader: true });
     if (masterCalls.length) parts.push(NL(0), NL(0), S('all(x => x', { node: o.id, role: 'fn', note: 'all(x => x.effect()) applies an effect to every pattern at once: a global effect.' }), ...masterCalls, S(')', { node: o.id }));
     for (const b of blocks) parts.push(NL(0), NL(0), ...b);

@@ -1,0 +1,13 @@
+# Security headers for Cloudflare Pages (this file is copied to the site as it is).
+# The Content-Security-Policy was measured against the production build: audio worklets (blob:), General MIDI fonts and sample libraries (github hosts),
+# the optional AI call (api.anthropic.com). 'unsafe-eval' is needed because Strudel builds the pattern code it plays with Function(); the app only ever
+# evaluates code that passed its own allow-list guard (src/guard.js). script-src needs data: because the audio engine loads its AudioWorklet modules from
+# data: URLs (without it supersaw and the worklet effects do not load); there is no HTML-injection path to abuse that. 'unsafe-inline' for styles is needed
+# for the inline style attributes the UI sets.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' blob: data:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: data:; font-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com https://felixroos.github.io https://api.anthropic.com blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), midi=(), display-capture=()
+  Cross-Origin-Opener-Policy: same-origin-allow-popups

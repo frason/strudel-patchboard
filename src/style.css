@@ -463,17 +463,6 @@ button { font: inherit; color: inherit; }
 .imp-why { opacity: .75; }
 .imp-notes { font-size: 12px; opacity: .8; margin-top: 8px; }
 
-/* hydra */
-.field.col { flex-direction: column; align-items: stretch; gap: 4px; }
-.field.col > span { width: auto; }
-.code-area { font: 12px/1.4 var(--mono); resize: vertical; min-height: 70px; white-space: pre; width: 100%; box-sizing: border-box; }
-.hydra-bg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; }
-body.hydra-on, body.hydra-on #app { background: transparent; }
-body.hydra-on .board { background-color: transparent; }
-.hydra-panel { position: fixed; right: 18px; bottom: 56px; width: 360px; z-index: 50; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5); resize: both; min-width: 200px; }
-.hydra-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 11px; color: var(--dim); background: var(--panel2); cursor: move; user-select: none; }
-.hydra-bar button { background: none; border: 0; cursor: pointer; font-size: 15px; line-height: 1; }
-.hydra-panel-canvas { display: block; width: 100%; aspect-ratio: 16 / 9; }
 
 /* Arrange: the song strip; each block has its input jack right beneath it, in the same colour */
 .arrange { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
@@ -920,3 +909,5 @@ html, body { overscroll-behavior: none; }
 .ib-pic.multi .mo { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
 .ib-pic.multi .mo svg { width: 17px; height: 17px; }
 .ib-pic.multi .mo.more { font: 700 10px var(--mono); color: var(--dim); }
+
+.ai-remember { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); margin: 4px 0; }

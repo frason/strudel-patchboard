@@ -10,10 +10,6 @@ import { transpiler } from '@strudel/transpiler';
 
 await evalScope(import('@strudel/core'), import('@strudel/mini'), import('@strudel/tonal'), { sliderWithID: makeSliderWithID(ref) });
 const { evaluate } = repl({ defaultOutput() {}, getTime: () => 0, transpiler, setInterval, clearInterval, onEvalError: (e) => { throw e; } });
-// Hydra needs a browser: stand in with objects that accept any call
-const noop = new Proxy(function () {}, { get: () => noop, apply: () => noop });
-globalThis.initHydra = async () => {};
-for (const k of ['osc', 'setResolution', 'src', 'noise', 'voronoi', 's0', 's1', 'time']) globalThis[k] = noop;
 const FL = { db: 'c#', eb: 'd#', gb: 'f#', ab: 'g#', bb: 'a#' };
 const events = async (code) => {
   const pat = await evaluate(code, false);

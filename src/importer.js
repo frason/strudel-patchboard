@@ -145,6 +145,8 @@ function splitTop(t) {
 // ---------- the importer ----------
 export function importStrudel(code, { sounds = null } = {}) {
   const report = { done: [], skipped: [], notes: [] };
+  if (typeof code !== 'string') return { error: 'There is no code to read.' };
+  if (code.length > 300_000) return { error: `This code is too large to read (${Math.round(code.length / 1000)} KB; the limit is 300 KB).` };
   const lines = code.split('\n');
   const lineText = (n) => (lines[n.loc.start.line - 1] || '').trim().slice(0, 110);
   let ast;
@@ -156,7 +158,7 @@ export function importStrudel(code, { sounds = null } = {}) {
   const out = { bpm: 120, beats: 4, master: {}, masterSig: {} };
   const add = (type, params, stmt) => { const n = makeNode(type, 0, 0, params); n.__stmt = stmt; nodes.push(n); return n; };
   const wire = (a, b, port = 'in') => wires.push({ id: 'iw' + wid++, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
-  const skip = (node, reason, text) => report.skipped.push({ line: node.loc.start.line, text: (text ?? lineText(node)), reason });
+  const skip = (node, reason, text) => report.skipped.push({ line: node.loc.start.line, text: (text ?? lineText(node)), reason, full: code.slice(node.start, node.end).slice(0, 20000) });
 
   const keyFor = (root, scale, stmt) => { const k = root + ':' + scale; if (!keys.has(k)) keys.set(k, add('key', { root, scale }, -1)); return keys.get(k); };
 
@@ -614,8 +616,8 @@ export function importStrudel(code, { sounds = null } = {}) {
   }
 
   const vars = new Map();
-  const hydraLines = [];
   let hydraSeen = false;
+  const HYDRA_WHY = 'Hydra visuals do not run here (they are left out, not deleted: your code is unchanged, and Hydra runs in strudel.cc)';
   const HYDRA_ROOTS = new Set(['osc', 'noise', 'voronoi', 'gradient', 'shape', 'solid', 'src', 'render', 'setResolution', 'update', 'hush', 's0', 's1', 's2', 's3', 'o0', 'o1', 'o2', 'o3', 'a']);
   // ----- the statements -----
   const heads = [];     // {head, meta}
@@ -632,11 +634,10 @@ export function importStrudel(code, { sounds = null } = {}) {
       const hroot = inner.type === 'AssignmentExpression' ? (inner.left.type === 'Identifier' ? inner.left.name : inner.left.object?.name) : rootName(unwrap(inner).root) || (unwrap(inner).root.type === 'Identifier' ? unwrap(inner).root.name : null);
       if (inner.type === 'CallExpression' && inner.callee.type === 'Identifier' && inner.callee.name === 'initHydra') {
         hydraSeen = true;
-        const o = code.slice(inner.start, inner.end);
-        if (/feedStrudel\s*:\s*(1|true)/.test(o)) report.notes.push('initHydra({feedStrudel}) is not supported: Hydra cannot read Strudel\'s own drawing here, so that part of the visuals will be blank');
+        skip(st, HYDRA_WHY);
         continue;
       }
-      if (hydraSeen && hroot && HYDRA_ROOTS.has(hroot)) { hydraLines.push(code.slice(st.start, st.end).replace(/;\s*$/, '')); continue; }
+      if (hydraSeen && hroot && HYDRA_ROOTS.has(hroot)) { skip(st, HYDRA_WHY); continue; }
       const cn = expr.type === 'CallExpression' && expr.callee.type === 'Identifier' ? expr.callee.name : null;
       if (cn === 'setcpm' || cn === 'setCpm') {
         const a = expr.arguments[0];
@@ -694,7 +695,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     }
   }
   void acidDefined;
-  if (hydraSeen) add('hydra', { code: hydraLines.join('\n'), mode: 'panel' }, -1);
+  if (hydraSeen) report.notes.push('Hydra (live visuals) does not run in Patchboard. Those lines were left out of the board but not deleted: use "Copy the skipped code", or paste your original into strudel.cc, where Hydra runs.');
 
   // top-level ducking across separate $: statements
   let finalHeads = heads;

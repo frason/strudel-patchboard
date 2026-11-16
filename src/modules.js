@@ -10,9 +10,12 @@ export const PORT_TYPES = {
 };
 export const PATTERN_TYPES = ['notes', 'trigger', 'sound'];
 
+// A number as it is written in code. It never returns anything but digits, a minus sign, a point or an exponent: whatever else is passed
+// (text, NaN, Infinity, an object) becomes 0, so a bad value can not turn into code.
 export function fmt(v) {
-  if (typeof v !== 'number') return String(v);
-  return String(Number(v.toFixed(3)));
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return '0';
+  return String(Number(n.toFixed(3)));
 }
 
 export const NOTE_NAMES = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
@@ -554,14 +557,6 @@ export const MODULES = {
     blurb: 'The twelve pitch classes on a circle; the notes sounding right now light up and join into a shape. View only: it passes the sound through untouched and adds nothing to the code.',
     params: [],
   },
-  hydra: {
-    title: 'Hydra Visuals', cat: 'view', single: true,
-    blurb: 'Live visuals with Hydra. Whatever you write here runs after await initHydra(), exactly like strudel.cc. Show it behind the board, in a floating panel, or in its own window. Hydra is its own clock-free engine: it can read Strudel through H("<1 2>") but does not make sound.',
-    params: [
-      { key: 'mode', label: 'show', kind: 'select', def: 'panel', options: [['panel', 'floating panel'], ['background', 'behind the board'], ['window', 'separate window']] },
-      { key: 'code', label: 'hydra', kind: 'code', def: 'osc(10, 0.1, 1.2)\n  .kaleid(4)\n  .out()' },
-    ],
-  },
   scope: {
     title: 'Scope', cat: 'view', out: 'through', canvas: 'scope',
     inputs: [{ id: 'in', type: ['sound'], label: 'watch', required: true }],
@@ -815,7 +810,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
-  ...['melody', 'rhythm', 'chords', 'drums', 'synth', 'sample', 'hydra', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
+  ...['melody', 'rhythm', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
   ...['fast', 'slow', 'rev', 'transpose', 'ply', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'ring', 'vowel', 'djf', 'leslie', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'chorus', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
 ]);
 

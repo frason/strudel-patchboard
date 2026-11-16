@@ -105,7 +105,5 @@ AGPL-3.0-or-later (see `LICENSE`), because it is built on Strudel, which is AGPL
 If you host your own public copy, link to your source: set `SOURCE_URL` near the top of `src/main.js`.
 
 ## Hydra visuals
-The **Hydra Visuals** module (Views) writes `await initHydra()` plus your Hydra code into the patch and runs it with hydra-synth
-(lazy-loaded, so it costs nothing until used). Where the picture appears is an app setting on the module, not part of the code:
-floating panel, behind the board, or a separate window. Not supported: `feedStrudel` (Hydra reading Strudel's own canvas).
-Hydra overwrites the globals `time`, `speed` and `shape` while it runs, as it does on strudel.cc; Stop puts Strudel's back.
+Patchboard does not run Hydra. If you paste code that uses it, the Hydra lines are left out of the board, listed in the import report, and can be copied
+with **Copy the skipped code**: nothing is deleted. Run that code on [strudel.cc](https://strudel.cc), where Hydra works.
