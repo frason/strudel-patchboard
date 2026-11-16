@@ -319,7 +319,7 @@ export function compile(g) {
         calls.push(...paramCalls(n, depth, ['name']));
         return chain(base, calls, depth, inline);
       }
-      case 'fast': case 'slow': case 'ply': case 'degrade': case 'transpose': {
+      case 'fast': case 'slow': case 'ply': case 'late': case 'clip': case 'degrade': case 'transpose': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'input');
         const c = knobCall(n, def.params[0], def.params[0].call, depth, { say: SAY[def.params[0].call](p.n) });
@@ -329,6 +329,11 @@ export function compile(g) {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'input');
         return chain(up, [[S('.rev()', { ...m, role: 'fn', note: SAY.rev() })]], depth, inline);
+      }
+      case 'swing': {
+        const up = input(n, 'in', depth, inline);
+        if (!up) return silent(n, 'input');
+        return chain(up, [[S(`.swingBy(${fmt(p.amount)}, ${fmt(p.slices)})`, { ...m, role: 'knob', key: 'amount', note: SAY.swingBy(p.amount, p.slices) })]], depth, inline);
       }
       case 'euclid': {
         const up = input(n, 'in', depth, inline);
@@ -603,6 +608,9 @@ const SAY = {
   fast: (n) => `fast(${fmt(n)}) plays the pattern ${fmt(n)}× as quickly.`,
   slow: (n) => `slow(${fmt(n)}) stretches the pattern to take ${fmt(n)}× as long.`,
   degradeBy: (n) => `degradeBy(${fmt(n)}) randomly drops about ${Math.round(n * 100)}% of the events, a different set each cycle.`,
+  clip: (n) => (Number(n) === 1 ? 'clip(1) makes each note last exactly its step.' : `clip(${fmt(n)}) makes each note last ${fmt(n)}× its step: ${n < 1 ? 'short and detached' : 'long enough to ring on into the next'}. A sample is cut off when the time is up. legato(${fmt(n)}) means the same.`),
+  late: (n) => (Number(n) === 0 ? 'late(0) leaves the timing alone.' : `late(${fmt(n)}) nudges every event ${fmt(Math.abs(n))} of a cycle ${n < 0 ? 'earlier' : 'later'}.`),
+  swingBy: (a, k) => `swingBy(${fmt(a)}, ${fmt(k)}) cuts each cycle into ${fmt(k)} slices and delays the second half of each by ${fmt(a)} of that half: a swing or shuffle feel. 0 is straight.`,
   ply: (n) => `ply(${fmt(n)}) repeats every event ${fmt(n)} times in the space of one.`,
   transpose: (n) => `transpose(${fmt(n)}) moves every note ${fmt(Math.abs(n))} semitones ${n < 0 ? 'down' : 'up'}.`,
   rev: () => 'rev() plays each cycle backwards.',

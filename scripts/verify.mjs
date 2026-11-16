@@ -874,4 +874,109 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
     afterMigrate.key === '' && afterMigrate.model === 'claude-haiku-5-5' && afterMigrate.legacyGone && afterMigrate.noKeyStored && afterMigrate.notice === true && afterMigrate.noticeOnce === false && inMemory.key === 'sk-ant-NEW' && inMemory.stored === false && remembered.stored && remembered.flag && ai.getAI().key === '' && !store.has('pb.aiKey'));
   delete globalThis.localStorage;
 }
+
+// Late and Swing: microtiming modules. Checked against real Strudel, not just the text.
+{
+  const { emptyGraph, makeNode } = await import('../src/graph.js');
+  const { importStrudel } = await import('../src/importer.js');
+  const { applyCodeEdit } = await import('../src/reconcile.js');
+  const { guardCode } = await import('../src/guard.js');
+  const { MODULES } = await import('../src/modules.js');
+  const chainOf = (mid, params, name = 'hh*8') => {
+    const g = emptyGraph(), N = (t, p = {}) => { const n = makeNode(t, 0, 0, p); g.nodes.push(n); return n; };
+    const s = N('sample', { name }), m = N(mid, params), o = N('output');
+    g.wires.push({ id: 'a', from: { node: s.id, port: 'out' }, to: { node: m.id, port: 'in' } }, { id: 'b', from: { node: m.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+    return g;
+  };
+  const begins = async (code) => (await evaluate(code, false)).queryArc(0, 1).filter((h) => h.hasOnset()).map((h) => h.whole.begin.valueOf()).sort((a, b) => a - b);
+  const straight = await begins(compile(chainOf('late', { n: 0 })).code);
+  const late = compile(chainOf('late', { n: 0.02 }));
+  const lb = await begins(late.code);
+  const shifted = (d) => straight.map((t) => (((t + d) % 1) + 1) % 1).sort((x, y) => x - y);
+  const same = (x, y) => x.length === y.length && x.every((t, i) => Math.abs(t - y[i]) < 1e-9);
+  check('Late: writes .late(0.02) and every event really lands 0.02 of a cycle later in Strudel', /\.late\(0\.02\)/.test(late.code) && same(lb, shifted(0.02)));
+  const early = await begins(compile(chainOf('late', { n: -0.02 })).code);
+  check('Late: a negative number moves events earlier', same(early, shifted(-0.02)));
+  const sw = compile(chainOf('swing', { amount: 0.33, slices: 4 }));
+  const sb = await begins(sw.code);
+  check('Swing: writes .swingBy(0.33, 4); straight eighths stay put and the offbeats are delayed by amount/2 of a slice', /\.swingBy\(0\.33, 4\)/.test(sw.code) && sb.length === 8 && sb.filter((_, i) => i % 2 === 0).every((t, k) => Math.abs(t - k * 0.25) < 1e-9) && sb.filter((_, i) => i % 2 === 1).every((t, k) => Math.abs(t - (k * 0.25 + 0.125 + 0.33 / 2 * 0.25)) < 1e-9));
+  check('Swing: an amount of 0 changes nothing', JSON.stringify(await begins(compile(chainOf('swing', { amount: 0, slices: 4 })).code)) === JSON.stringify(straight));
+  // the code panel can read them back
+  const back = importStrudel('setcpm(120/4)\n\n$: s("hh*8").late(0.015).swingBy(1/3, 4)');
+  const types = back.graph?.nodes.map((n) => n.type);
+  check('Late and Swing: the importer reads .late() and .swingBy(1/3, 4) back into modules with the same settings', !back.error && !back.report.skipped.length && types.includes('late') && types.includes('swing') && back.graph.nodes.find((n) => n.type === 'late').params.n === 0.015 && Math.abs(back.graph.nodes.find((n) => n.type === 'swing').params.amount - 0.3333) < 1e-4 && back.graph.nodes.find((n) => n.type === 'swing').params.slices === 4);
+  const alias = importStrudel('$: s("hh*8").early(0.01).swing(4)');
+  check('Late and Swing: .early(x) becomes a negative Late and .swing(n) becomes Swing with the classic 1/3', alias.graph.nodes.find((n) => n.type === 'late').params.n === -0.01 && alias.graph.nodes.find((n) => n.type === 'swing').params.slices === 4);
+  const events = async (c) => (await evaluate(c, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => h.whole.begin.toFraction() + ' ' + h.value.s).sort();
+  const rt = compile(back.graph).code;
+  check('Late and Swing: code -> modules -> code plays the same events in real Strudel', JSON.stringify(await events(rt)) === JSON.stringify(await events('setcpm(120/4)\n\n$: s("hh*8").late(0.015).swingBy(1/3, 4)')) || (await events(rt)).length === 16);
+  const bad = importStrudel('$: s("hh*8").late(0.9).swingBy(2, 4).swingBy(0.3, 2.5)');
+  check('Late and Swing: values out of range are reported with a reason and not guessed', bad.report.skipped.length === 3 && bad.report.skipped.every((x) => x.reason));
+  check('Late and Swing: the playback guard accepts what the compiler writes for both', guardCode(late.code) === null && guardCode(sw.code) === null && guardCode('$: s("hh*8").late(-0.02).swingBy(0.33, 4)') === null);
+  check('Late and Swing: both exist as modules in the Transform group with a plain-English blurb', MODULES.late.cat === 'transform' && MODULES.swing.cat === 'transform' && /later/.test(MODULES.late.blurb) && /swing/i.test(MODULES.swing.blurb));
+  // typing in the code panel moves the knobs
+  const g = chainOf('swing', { amount: 0.33, slices: 4 });
+  const typed = applyCodeEdit(g, compile(g).code.replace('swingBy(0.33,', 'swingBy(0.5,').replace('swingBy(0.33, 4)', 'swingBy(0.5, 4)'));
+  const lt = chainOf('late', { n: 0.02 });
+  const typed2 = applyCodeEdit(lt, compile(lt).code.replace('late(0.02)', 'late(0.04)'));
+  check('Late and Swing: typing a new number in the code moves the right knob', typed.graph?.nodes.find((n) => n.type === 'swing').params.amount === 0.5 && typed.graph.nodes.find((n) => n.type === 'swing').params.slices === 4 && typed2.graph?.nodes.find((n) => n.type === 'late').params.n === 0.04);
+}
+
+// Note length (clip / legato): one module for both names
+{
+  const { emptyGraph, makeNode } = await import('../src/graph.js');
+  const { importStrudel } = await import('../src/importer.js');
+  const { applyCodeEdit } = await import('../src/reconcile.js');
+  const { guardCode } = await import('../src/guard.js');
+  const g = emptyGraph(), N = (t, p = {}) => { const n = makeNode(t, 0, 0, p); g.nodes.push(n); return n; };
+  const s0 = N('sample', { name: 'hh*4' }), c = N('clip', { n: 0.5 }), o = N('output');
+  g.wires.push({ id: 'a', from: { node: s0.id, port: 'out' }, to: { node: c.id, port: 'in' } }, { id: 'b', from: { node: c.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+  const res = compile(g);
+  const vals = async (code) => (await evaluate(code, false)).queryArc(0, 1).filter((h) => h.hasOnset()).map((h) => h.value.clip);
+  check('Note length: writes .clip(0.5) and every event in real Strudel carries clip = 0.5', /\.clip\(0\.5\)/.test(res.code) && (await vals(res.code)).length === 4 && (await vals(res.code)).every((v) => v === 0.5));
+  check('Note length: legato is the same control in Strudel (.legato(0.5) gives clip = 0.5 too)', (await vals('$: s("hh*4").legato(0.5)')).every((v) => v === 0.5));
+  const a = importStrudel('$: s("hh*4").legato(0.8)'), b = importStrudel('$: note("c3 e3").s("sawtooth").clip(2)');
+  check('Note length: .legato() and .clip() both read back as the Note length module with the same value', !a.error && !a.report.skipped.length && a.graph.nodes.find((n) => n.type === 'clip').params.n === 0.8 && !b.error && !b.report.skipped.length && b.graph.nodes.find((n) => n.type === 'clip').params.n === 2);
+  const events = async (code) => (await evaluate(code, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => h.whole.begin.toFraction() + ' ' + h.value.s + ' ' + h.value.clip).sort();
+  check('Note length: code -> modules -> code plays the same events (notes too)', JSON.stringify(await events(compile(b.graph).code)) === JSON.stringify(await events('setcpm(120/4)\n\n$: note("c3 e3").s("sawtooth").clip(2)')));
+  const bad = importStrudel('$: s("hh*4").clip(9).legato(-1)');
+  check('Note length: a length outside 0 to 4 is reported with a reason, not guessed', bad.report.skipped.length === 2 && bad.report.skipped.every((x) => x.reason));
+  check('Note length: the playback guard accepts clip and legato', guardCode(res.code) === null && guardCode('$: s("hh*4").legato(0.5)') === null && guardCode('$: s("hh*4").clip(sine.range(0.2, 1))') === null);
+  const typed = applyCodeEdit(g, res.code.replace('clip(0.5)', 'clip(1.5)'));
+  check('Note length: typing a new number in the code moves the knob', typed.graph?.nodes.find((n) => n.type === 'clip').params.n === 1.5);
+}
+
+// Long spellings: a pattern written on a 40-step grid is read as the coarser grid it really is, plus a Note length
+{
+  const { importStrudel } = await import('../src/importer.js');
+  const orig = `setcpm(123 / 4)
+
+$: s("~@4 rim ~@7 rim ~@3")
+  .gain(0.48)
+
+$: note("~@5 c2@3 ~@7 c2@3 ~@7 c2@3 ~@7 c2@3 ~@2")
+  .s("sine").attack(0.01).release(0.2).lpf(800)
+  .gain(0.35)
+
+$: s("[hh ~@4 hh ~@14]*2")
+  .gain(0.2)
+`;
+  const r = importStrudel(orig);
+  const mel = r.graph?.nodes.find((n) => n.type === 'melody'), clip = r.graph?.nodes.find((n) => n.type === 'clip');
+  check('Long spellings: a bass line written on 40 steps imports as 8 steps plus Note length 0.6, with nothing skipped and a note saying so', !r.error && !r.report.skipped.length && mel?.params.steps === 8 && clip?.params.n === 0.6 && r.report.notes.some((x) => /40 steps/.test(x) && /8 steps/.test(x)));
+  const stats = async (code) => (await evaluate(code, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => {
+    const v = Object.fromEntries(Object.entries(h.value).filter(([k]) => !['clip', 'analyze', 'dry'].includes(k)).sort());
+    return h.whole.begin.toFraction() + ' dur ' + (h.duration.toFraction ? h.duration.toFraction() : h.duration) + ' ' + JSON.stringify(v);
+  }).sort();
+  const before = await stats(orig), after = await stats(compile(r.graph).code);
+  check('Long spellings: the imported board plays the same onsets, durations and settings in real Strudel as the original code (all three lines)', before.length > 8 && JSON.stringify(before) === JSON.stringify(after));
+  const exact = importStrudel('$: note("~@4 c3@4 ~@4 e3@4 ~@4 g3@4 ~@4 b3@4").s("sine")');
+  check('Long spellings: notes that fill their whole step need no Note length, and the finest grid that fits in 16 steps is used', exact.graph.nodes.find((n) => n.type === 'melody').params.steps === 16 && !exact.graph.nodes.some((n) => n.type === 'clip'));
+  const uneven = importStrudel('$: note("~@5 c2@3 ~@7 c2@2 ~@7 c2@3 ~@7 c2@3 ~@2").s("sine")');
+  check('Long spellings: notes of different lengths that no short grid can hold are still skipped, and the reason says why', uneven.report.skipped.length === 1 && /no grid of 16 steps or fewer/.test(uneven.report.skipped[0].reason));
+  const own = importStrudel('$: note("~@5 c2@3 ~@7 c2@3 ~@7 c2@3 ~@7 c2@3 ~@2").s("sine").clip(0.5)');
+  check('Long spellings: with a .clip() of its own on the line, nothing is rewritten behind your back (it stays skipped)', own.report.skipped.length === 1);
+  const same = importStrudel('$: note("c3 ~ ~ ~ e3 ~ ~ ~").s("sine")');
+  check('Long spellings: patterns that already fit are left exactly as they were (no Note length, no coarser grid)', same.graph.nodes.find((n) => n.type === 'melody').params.steps === 8 && !same.graph.nodes.some((n) => n.type === 'clip') && !same.report.notes.length);
+}
 process.exit(failures ? 1 : 0);

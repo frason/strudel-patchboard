@@ -233,6 +233,28 @@ export const MODULES = {
     blurb: 'Repeats every event: ply(2) plays each one twice in the same space.',
     params: [{ key: 'n', label: 'times', kind: 'knob', min: 1, max: 8, step: 1, def: 2, call: 'ply', always: true, wire: true }],
   },
+  late: {
+    title: 'Late', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Nudges a pattern later in time, as a fraction of a cycle: late(0.02) lays everything back a hair, like a drummer who sits behind the beat. A negative number pushes it earlier. At 120 BPM with 4 beats per cycle a cycle lasts 2 seconds, so 0.01 is 20 milliseconds.',
+    params: [{ key: 'n', label: 'cycles', kind: 'knob', min: -0.5, max: 0.5, step: 0.001, def: 0.02, call: 'late', always: true, wire: true, unit: 'cyc', tip: 'a fraction of a cycle; negative is earlier' }],
+  },
+  clip: {
+    title: 'Note length', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Sets how long each note or hit lasts compared with its step: clip(1) is exactly the step, below 1 is short and detached (staccato), above 1 the notes ring on into the next step (legato). A sample is cut off when the time is up. legato(x) is another name for clip(x), and either is read from code.',
+    params: [{ key: 'n', label: 'length', kind: 'knob', min: 0, max: 4, step: 0.05, def: 0.5, call: 'clip', always: true, wire: true, tip: 'multiplies the length of each note; 1 = the whole step' }],
+  },
+  swing: {
+    title: 'Swing', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Gives the pattern a swing or shuffle feel: swingBy(1/3, 4) cuts each cycle into 4 slices and delays the second half of every slice. The swing knob is how far, as a fraction of that half: 0 does nothing, about 0.33 is a classic triplet swing. Choose the slices so a half-slice is the note length you want to swing (4 slices swings eighth notes in a 4-beat cycle).',
+    params: [
+      { key: 'amount', label: 'swing', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.33, always: true, tip: '0 = straight, about 0.33 = swing' },
+      { key: 'slices', label: 'slices', kind: 'knob', min: 1, max: 16, step: 1, def: 4, always: true, tip: 'slices per cycle; each is split in two halves' },
+    ],
+    call: 'swingBy',
+  },
   degrade: {
     title: 'Degrade', cat: 'transform', out: 'through',
     inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
@@ -811,7 +833,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
   ...['melody', 'rhythm', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
-  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'ring', 'vowel', 'djf', 'leslie', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'chorus', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
+  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'ring', 'vowel', 'djf', 'leslie', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'chorus', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
 ]);
 
 // FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.

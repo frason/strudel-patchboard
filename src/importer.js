@@ -108,6 +108,39 @@ function cellsFromItems(items, kind, conv) {
   }
   return cells;
 }
+// A pattern written with long weights, like "~@5 c2@3 ~@7 c2@3 ...", can need more than 16 steps only because of how it is spelled.
+// If every note starts on a coarser grid, and every note is the same fraction of its step long, the same notes and timing fit a grid of 16 steps
+// or fewer plus a Note length (clip). Only used when the pattern would otherwise be skipped. Returns { items, clip, from, to } or null.
+function coarsen(items, kind) {
+  const seq = expand(items);
+  if (seq.some((it) => it.t === 'sub' || it.t === 'turns' || it.rep || it.slow)) return null;
+  const w = (it) => it.len || 1;
+  const T = seq.reduce((a, it) => a + w(it), 0);
+  if (T <= 16 || !Number.isInteger(T)) return null;
+  const isRest = (it) => it.rest || it.t === 'rest' || (kind === 'rhythm' && it.t === 'word' && ['0', 'f', 'false', '-'].includes(it.v));
+  const notes = []; let pos = 0;
+  for (const it of seq) { if (!Number.isInteger(w(it))) return null; if (!isRest(it)) notes.push({ it, p: pos, d: w(it) }); pos += w(it); }
+  if (!notes.length) return null;
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+  const g = notes.reduce((a, n) => gcd(a, n.p), T);
+  for (let u = 1; u <= g; u++) {
+    if (g % u || T / u > 16) continue;
+    const lens = notes.map((n) => Math.ceil(n.d / u)), ratios = notes.map((n, i) => n.d / (lens[i] * u));
+    if (ratios.some((r) => Math.abs(r - ratios[0]) > 1e-9)) continue;
+    const out = []; let cursor = 0;
+    notes.forEach((n, i) => {
+      const gap = (n.p - cursor) / u;
+      if (gap > 0) out.push({ t: 'rest', rest: true, len: gap });
+      out.push({ ...n.it, len: lens[i] > 1 ? lens[i] : undefined });
+      cursor = n.p + lens[i] * u;
+    });
+    const tail = (T - cursor) / u;
+    if (tail > 0) out.push({ t: 'rest', rest: true, len: tail });
+    const clip = ratios[0];
+    return { items: out, clip: Math.abs(clip - 1) < 1e-9 ? null : +clip.toFixed(4), from: T, to: T / u };
+  }
+  return null;
+}
 // whole-string parse: plain sequence, or one <...> (optionally *N: the N becomes a Fast module)
 function readSteps(text, kind, conv, opts = {}) {
   let items;
@@ -307,14 +340,22 @@ export function importStrudel(code, { sounds = null } = {}) {
         const ps = leaf.pitches.map((w) => (deg ? (/^-?\d+$/.test(w) ? Number(w) : (() => { throw new Skip(`"${w}" is not a scale step number`); })()) : noteName(w)));
         return deg ? { n: null, d: ps.length ? ps : null } : { n: ps.length ? ps : null, d: null };
       };
-      const cells = cellsFromItems(items, 'melody', conv);
-      if (cells.length < 1 || cells.length > 16) throw new Skip(`${cells.length} steps (1 to 16 are supported)`);
+      let cells = cellsFromItems(items, 'melody', conv), coarse = null;
+      if (cells.length > 16 && mode0 === 'steps' && !calls.some((c) => c.name === 'clip' || c.name === 'legato')) {   // a long spelling of a simple pattern (see coarsen)
+        const co = coarsen(items, 'melody');
+        if (co) { coarse = co; cells = cellsFromItems(co.items, 'melody', conv); }
+      }
+      if (cells.length < 1 || cells.length > 16) throw new Skip(`${cells.length} steps (1 to 16 are supported${cells.length > 16 ? ', and no grid of 16 steps or fewer fits where these notes start and how long they last' : ''})`);
       cells.forEach((c) => { c.vel = 1; });
       const mode = paceMode(slow, mode0, cells.length);
       S.melody = add('melody', { steps: cells.length, mode, scale: 'off', cells, octave: 3 }, stmt);
       S.root = S.melody;
       S.kind = 'notes';
       if (fast !== 1) S.pre.push({ type: 'fast', params: { n: fast } });
+      if (coarse) {
+        if (coarse.clip !== null) S.pre.push({ type: 'clip', params: { n: coarse.clip } });
+        report.notes.push(`line ${root.loc.start.line}: this pattern spells out ${coarse.from} steps, but every note starts on a coarser grid, so it was written as ${coarse.to} steps${coarse.clip !== null ? ` plus a Note length of ${coarse.clip}` : ''}. The notes and their timing are the same.`);
+      }
       S.instrument = add('synth', { wave: 'triangle' }, stmt);
       S.sources.push(S.instrument);
     } else if (name === 'chord') {
@@ -520,6 +561,13 @@ export function importStrudel(code, { sounds = null } = {}) {
     }
     // transformers
     if (n === 'fast' || n === 'slow' || n === 'ply') { const v = num(a[0]); if (v === null) throw new Skip(`${n}() with something other than a plain number`); S.pre.push({ type: n, params: { n: v } }); return; }
+    if (n === 'clip' || n === 'legato') { const v = num(a[0]); if (v === null) throw new Skip(`${n}() with something other than a plain number`); if (v < 0 || v > 4) throw new Skip(`${n}() with a length outside 0 to 4`); S.pre.push({ type: 'clip', params: { n: v } }); return; }
+    if (n === 'late' || n === 'early') { const v = num(a[0]); if (v === null) throw new Skip(`${n}() with something other than a plain number`); if (Math.abs(v) > 0.5) throw new Skip(`${n}() by more than half a cycle`); S.pre.push({ type: 'late', params: { n: n === 'early' ? -v : v } }); return; }
+    if (n === 'swingBy' || n === 'swing') {
+      const amount = n === 'swing' ? 1 / 3 : num(a[0]), slices = n === 'swing' ? num(a[0]) : num(a[1]);
+      if (amount === null || slices === null || amount < 0 || amount > 1 || !Number.isInteger(slices) || slices < 1 || slices > 16) throw new Skip(`${n}() with something other than ${n === 'swing' ? 'a whole number of slices from 1 to 16' : 'an amount from 0 to 1 and a whole number of slices from 1 to 16'}`);
+      S.pre.push({ type: 'swing', params: { amount: +amount.toFixed(4), slices } }); return;
+    }
     if (n === 'degradeBy') { const v = num(a[0]); if (v === null) throw new Skip('degradeBy() with something other than a plain number'); S.pre.push({ type: 'degrade', params: { n: v } }); return; }
     if (n === 'ribbon' || n === 'rib') {
       const k = num(a[0]), cyc = num(a[1]);

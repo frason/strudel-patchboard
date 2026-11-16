@@ -8,7 +8,7 @@ import { parse } from 'acorn';
 const FUNCS = new Set(['setcpm', 'n', 'note', 's', 'chord', 'stack', 'cat', 'arrange', 'slider', 'irand', 'all']);   // all(x => x.postgain(..)) is how the Output module writes its master volume and effects
 const IDENTS = new Set(['rand', 'perlin', 'sine', 'saw', 'tri', 'square', 'isaw', 'cosine', 'silence', 'rev']);
 const METHODS = new Set(`acidenv analyze arp attack bank bpf bpq chord chorus coarse compressor crush decay degrade degradeBy delay delayfeedback delaytime detune distort djf duck duckattack duckdepth
-euclid every fast fit fm fm11 fm12 fm13 fm14 fm2 fm20 fm22 fm23 fm24 fm3 fm30 fm31 fm33 fm34 fm4 fm40 fm41 fm42 fm44 fmattack fmattack2 fmattack3 fmattack4 fmdecay fmdecay2 fmdecay3 fmdecay4
+clip euclid every fast fit late legato swingBy fm fm11 fm12 fm13 fm14 fm2 fm20 fm22 fm23 fm24 fm3 fm30 fm31 fm33 fm34 fm4 fm40 fm41 fm42 fm44 fmattack fmattack2 fmattack3 fmattack4 fmdecay fmdecay2 fmdecay3 fmdecay4
 fmh fmh2 fmh3 fmh4 fmsustain fmsustain2 fmsustain3 fmsustain4 fmwave fmwave2 fmwave3 fmwave4 ftype gain hpf hpq leslie lpa lpd lpenv lpf lpq lps lrate lsize mode mul orbit pan phaser phasercenter
 phaserdepth phasersweep ply postgain pow pattack pdecay penv range release repeat rev ribbon ring ringf room roomsize round s scale scramble segment shape shuffle slow sometimesBy speed squiz
 struct sustain tremolo tremolosync tremolodepth tremoloshape transpose velocity vib vibmod voicing vowel _scope _pianoroll _punchcard _spiral _pitchwheel`.split(/\s+/).filter(Boolean));

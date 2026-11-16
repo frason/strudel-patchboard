@@ -688,6 +688,7 @@ function renderSync() {
   } else if (panel.diverged) {
     kids.push(h('div', { class: 'sync-sub' }, 'Your own spacing and comments are kept. Highlights and notes are off while your text differs from the board\'s code. ', btn('Show the board\'s code', showBoard)));
   }
+  if (s.state === 'ok' || s.state === 'differs') for (const n of s.notes || []) kids.push(h('div', { class: 'sync-sub' }, n));   // what the reader noticed or changed on the way in (a long spelling made shorter, a sound that will be silent)
   syncEl.replaceChildren(...kids);
   syncEl.hidden = !kids.length;
 }

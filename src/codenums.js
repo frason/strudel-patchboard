@@ -8,7 +8,7 @@ const NUM_PATTERNS = [
   new RegExp(String.raw`^\.[A-Za-z_]\w*\(\s*${NUM}\s*\)$`),
   new RegExp(String.raw`^slider\(\s*${NUM}\s*,`),
   new RegExp(String.raw`^setcpm\(\s*(\d+(?:\.\d+)?)\s*/`),
-  new RegExp(String.raw`^\.(?:every|sometimesBy|ribbon)\(\s*${NUM}\s*,`),
+  new RegExp(String.raw`^\.(?:every|sometimesBy|ribbon|swingBy)\(\s*${NUM}\s*,`),
   new RegExp(String.raw`^irand\(\s*(\d+)\s*\)`),
 ];
 function numberIn(text) {

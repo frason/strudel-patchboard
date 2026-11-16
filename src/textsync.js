@@ -27,6 +27,20 @@ export function oneHunk(a, b) {
   return { at: p, del: a.slice(p, a.length - s), ins: b.slice(p, b.length - s), tail: s };
 }
 
+// Put `ins` where the stretch [from, to) of the person's text was. A change that is whole lines is placed as whole lines: the person's own indentation is
+// kept, and removing a line removes its newline too, instead of leaving an indented blank line.
+function place(user, from, to, del, ins) {
+  let k = from;
+  while (k > 0 && (user[k - 1] === ' ' || user[k - 1] === '\t')) k--;
+  const atLineStart = k === 0 || user[k - 1] === '\n';
+  if (atLineStart && (/\n$/.test(del) || /\n$/.test(ins))) {
+    let end = to;
+    if (del) { while (end < user.length && (user[end] === ' ' || user[end] === '\t')) end++; if (user[end] === '\n') end++; } else end = k;
+    return user.slice(0, k) + ins + user.slice(end);
+  }
+  return user.slice(0, from) + (atLineStart ? ins.replace(/^[ \t]+/, '') : ins) + user.slice(to);
+}
+
 export function patchText(user, oldCanon, newCanon) {
   if (user === oldCanon) return newCanon;
   if (oldCanon === newCanon) return user;
@@ -34,11 +48,11 @@ export function patchText(user, oldCanon, newCanon) {
   for (const ctx of [8, 20, 40, 80, 160]) {
     const pre = oldCanon.slice(Math.max(0, at - ctx), at), post = oldCanon.slice(oldCanon.length - tail, oldCanon.length - tail + ctx);
     const found = findLoose(user, pre, del, post);
-    if (found.length === 1) return user.slice(0, found[0].from) + ins + user.slice(found[0].to);
+    if (found.length === 1) return place(user, found[0].from, found[0].to, del, ins);
     if (found.length === 0) break;   // more context can only match less
   }
   // the text around the change was edited or moved, but a stretch long enough to be distinctive that is removed or replaced can still be found on its own
-  if (del.trim().length >= 10) { const only = findLoose(user, '', del, ''); if (only.length === 1) return user.slice(0, only[0].from) + ins + user.slice(only[0].to); }
+  if (del.trim().length >= 10) { const only = findLoose(user, '', del, ''); if (only.length === 1) return place(user, only[0].from, only[0].to, del, ins); }
   return null;
 }
 

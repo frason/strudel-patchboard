@@ -106,4 +106,14 @@ check('every result compiles', [gone, more, swapped, renamed, kept, g2, odd].eve
   const again = applyCodeEdit(r.graph, 'setcpm(130/4)\n\n$: s("bd")');
   check('and typing the same code again changes nothing', !again.changes.added.length && !again.changes.removed.length && !again.changes.updated.length);
 }
+
+// 9. whole-line changes keep the person's indentation, and adding then removing a line gives back the exact text
+{
+  const oldC = 'setcpm(123/4)\n\n$: s("~@4 rim")\n  .gain(0.48)\n';
+  const newC = 'setcpm(123/4)\n\n$: s("~@4 rim")\n  .bank("RolandTR909")\n  .gain(0.48)\n';
+  const user = '// my comment\nsetcpm(123 / 4)\n\n// Rim\n$: s("~@4 rim")\n  .gain(0.48)\n';
+  const added = patchText(user, oldC, newC);
+  check('a line added on the board lands on its own line with the same indentation as its neighbours', added === '// my comment\nsetcpm(123 / 4)\n\n// Rim\n$: s("~@4 rim")\n  .bank("RolandTR909")\n  .gain(0.48)\n');
+  check('removing that line again gives back the exact original text, with no blank or indented leftovers', patchText(added, newC, oldC) === user);
+}
 process.exit(failures ? 1 : 0);
