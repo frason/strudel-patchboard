@@ -77,9 +77,13 @@ export const LESSONS = [
     graph: () => build([['s', 'sample', 60, 120, { name: '[bd]*4, [cp east] 808lt 808lc', gain: 0.6 }], ['o', 'output', 440, 120, {}]], [['s', 'o']]),
   },
   {
-    id: 'banks', title: '6 · Banks and chaining',
-    learned: 'Methods chain with dots: .bank() picks a drum machine, .gain() sets the volume and .decay() shortens the tail. Each knob is one method.',
-    graph: () => build([['s', 'sample', 60, 80, { name: 'bd sd', bank: 'RolandTR909', gain: 0.8, decay: 0.2 }], ['o', 'output', 420, 80, {}]], [['s', 'o']]),
+    id: 'banks', title: '6 · Banks: one drum machine per layer',
+    learned: 'This is the beat from lesson 5 with its two layers split into two Samples. In lesson 5 both layers lived in one pattern, so they had to share one setting. Now each Sample has its own: .bank("RolandTR909") makes the kick come from the Roland TR-909 drum machine, while the second layer stays on the default sounds, because a bank only changes the sounds it has (east, 808lt and 808lc are not in the TR-909). Two Samples plugged into Output play at the same time, each on its own $: line. Each setting is one method chained on the end: .bank() and .gain(). Open the bank menu on the kick and listen to the same rhythm change character.',
+    graph: () => build([
+      ['k', 'sample', 60, 40, { name: '[bd]*4', bank: 'RolandTR909', gain: 0.6 }],
+      ['p', 'sample', 60, 380, { name: '[cp east] 808lt 808lc', gain: 0.6 }],
+      ['o', 'output', 460, 210, {}],
+    ], [['k', 'o'], ['p', 'o']]),
   },
   {
     id: 'stack', title: '7 · Layering with stack()',
