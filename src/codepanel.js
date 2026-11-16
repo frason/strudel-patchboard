@@ -14,31 +14,8 @@ const programmatic = Annotation.define();   // a change we make ourselves (a new
 const setModel = StateEffect.define();   // { lines, showNotes, segments, hover }
 const setPlaying = StateEffect.define(); // Map<string,{from,to,n}>
 
-// Which numbers can be edited: the single plain number in a knob's call, e.g. .lpf(800), .room(0.4), the value in slider(0.5, 0, 1), the tempo in setcpm(120/4)
-const NUM = String.raw`(-?\d*\.?\d+)`;
-const NUM_PATTERNS = [
-  new RegExp(String.raw`^\.[A-Za-z_]\w*\(\s*${NUM}\s*\)$`),
-  new RegExp(String.raw`^slider\(\s*${NUM}\s*,`),
-  new RegExp(String.raw`^setcpm\(\s*(\d+(?:\.\d+)?)\s*/`),
-  new RegExp(String.raw`^\.(?:every|sometimesBy|ribbon)\(\s*${NUM}\s*,`),
-  new RegExp(String.raw`^irand\(\s*(\d+)\s*\)`),
-];
-function numberIn(text) {
-  for (const re of NUM_PATTERNS) {
-    const m = re.exec(text);
-    if (m) { const at = text.indexOf(m[1], text.indexOf('(') + 1); return [at, at + m[1].length]; }
-  }
-  return null;
-}
-export function editableNumbers(res) {
-  const out = [];
-  for (const s of res.segments) {
-    if (s.role !== 'knob' || !s.node || !s.key) continue;
-    const call = res.code.slice(s.from, s.to), r = numberIn(call);
-    if (r) out.push({ from: s.from + r[0], to: s.from + r[1], seg: s, call });
-  }
-  return out;
-}
+import { editableNumbers } from './codenums.js';
+export { editableNumbers };
 
 class NoteWidget extends WidgetType {
   constructor(text, node, key) { super(); this.text = text; this.node = node; this.key = key; }
@@ -64,11 +41,14 @@ const highlight = HighlightStyle.define([
   { tag: t.labelName, color: 'var(--c-label)' },
 ]);
 
+let freeMode = false;   // set by createCodePanel: in free mode the person's own typing makes the highlights stale at once (they are positions in the board's code, not in theirs)
+const STALE = { lines: [], segments: [], editable: [], choices: [], hover: null };
 const field = StateField.define({
   create: () => ({ model: { lines: [], showNotes: true, segments: [], hover: null, editable: [], choices: [] }, playing: new Map(), deco: Decoration.none }),
   update(v, tr) {
     let { model, playing } = v;
     let dirty = tr.docChanged;
+    if (freeMode && tr.docChanged && !tr.annotation(programmatic) && !tr.effects.some((e) => e.is(setModel))) model = { ...model, ...STALE };
     for (const e of tr.effects) {
       if (e.is(setModel)) { model = { ...model, ...e.value }; dirty = true; }
       if (e.is(setPlaying)) { playing = e.value; dirty = true; }
@@ -98,16 +78,17 @@ const field = StateField.define({
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
 });
 
-export function createCodePanel(parent, { onHover, onEdit, onNudge, choicesOf, onChoice }) {
+export function createCodePanel(parent, { onHover, onEdit, onNudge, choicesOf, onChoice, isFree = () => false, onText }) {
   let pending = null;          // the number being typed: { from, to, seg, call } (positions follow the typing)
-  let idle = null, queued = null, lastEdit = null;
+  let idle = null, queued = null, lastEdit = null, typing = null;
+  const flushText = () => { clearTimeout(typing); typing = null; onText?.(view.state.doc.toString()); };
   let current = { code: '', segments: [], lines: [] }, currentShow = true;
   const choiceAt = (state, pos) => state.field(field).model.choices.find((c) => pos >= c.from && pos <= c.to) || null;
   const openChoice = (v, c) => { const a = v.coordsAtPos(c.from), b = v.coordsAtPos(c.to) || a; if (a) onChoice?.(c, { left: a.left, right: b.right, top: a.top, bottom: a.bottom }); };
   const rangeAt = (state, pos) => state.field(field).model.editable.find((r) => pos >= r.from && pos <= r.to) || null;
   // the text stays locked except inside an editable number, and only digits, a minus sign and a point can go there
   const guard = EditorState.transactionFilter.of((tr) => {
-    if (!tr.docChanged || tr.annotation(programmatic)) return tr;
+    if (!tr.docChanged || tr.annotation(programmatic) || isFree()) return tr;
     const ranges = pending ? [pending] : tr.startState.field(field).model.editable;
     let hit = null, ok = true;
     tr.changes.iterChanges((fromA, toA, fromB, toB, ins) => {
@@ -125,13 +106,16 @@ export function createCodePanel(parent, { onHover, onEdit, onNudge, choicesOf, o
       extensions: [
         javascript(), syntaxHighlighting(highlight), field,
         guard,
-        EditorView.contentAttributes.of({ 'aria-label': 'Strudel code. The numbers can be edited; the rest follows the modules.', spellcheck: 'false', inputmode: 'decimal', enterkeyhint: 'done' }),   // the only thing that can be typed is a number: phones show the number pad
+        EditorView.contentAttributes.of({ 'aria-label': 'Strudel code. You can type anywhere; the board follows what you write.', spellcheck: 'false', inputmode: isFree() ? 'text' : 'decimal', enterkeyhint: 'done' }),   // the only thing that can be typed is a number: phones show the number pad
         EditorView.updateListener.of((u) => {
+          if (u.docChanged && isFree() && !u.transactions.some((t) => t.annotation(programmatic))) { clearTimeout(typing); typing = setTimeout(flushText, 600); return; }
           if (u.docChanged && pending && !u.transactions.some((t) => t.annotation(programmatic))) { clearTimeout(idle); idle = setTimeout(commit, 900); }
         }),
         EditorView.lineWrapping,
         EditorView.domEventHandlers({
-          pointerdown(e, v) {   // a number pad has no minus sign: a number that is already negative gets the full keyboard instead
+          pointerdown(e, v) {
+            if (isFree()) return false;
+            // a number pad has no minus sign: a number that is already negative gets the full keyboard instead
             const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
             const r = pos == null ? null : rangeAt(v.state, pos);
             v.contentDOM.setAttribute('inputmode', r && /^-/.test(v.state.sliceDoc(r.from, r.to)) ? 'text' : 'decimal');
@@ -154,12 +138,13 @@ export function createCodePanel(parent, { onHover, onEdit, onNudge, choicesOf, o
             const ch = pos == null || pending ? null : choiceAt(v.state, pos);
             if (ch) { openChoice(v, ch); return true; }
             const r = pos == null ? null : rangeAt(v.state, pos);
-            if (r && !pending) v.dispatch({ selection: { anchor: r.from, head: r.to }, annotations: programmatic.of(true) });
+            if (r && !pending && !isFree()) v.dispatch({ selection: { anchor: r.from, head: r.to }, annotations: programmatic.of(true) });
             return false;
           },
-          blur() { commit(); lastEdit = null; },
+          blur() { if (typing) flushText(); commit(); lastEdit = null; },
           keydown(e, v) {
             const mod = e.metaKey || e.ctrlKey;
+            if (isFree()) return false;   // free typing: Enter, arrows and Escape do what they do in any editor
             if (mod && e.key.toLowerCase() === 'z' && pending) { e.preventDefault(); e.stopPropagation(); pending = null; clearTimeout(idle); revert(); return true; }
             if (e.key === 'Enter') {
               e.preventDefault();
@@ -213,8 +198,34 @@ export function createCodePanel(parent, { onHover, onEdit, onNudge, choicesOf, o
     if (view.state.doc.toString() !== current.code) revert();   // nothing changed in the patch (same value, or clamped back): show the real code again
   }
 
+  freeMode = isFree();
+  parent.classList.toggle('free', freeMode);
+  // the empty space under the last line is not part of the text area: a click there starts typing at the end, like any editor
+  parent.addEventListener('mousedown', (e) => {
+    if (!isFree() || (e.target !== view.dom && e.target !== parent)) return;
+    e.preventDefault(); view.focus(); view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+  });
+  const stale = () => view.state.doc.toString() !== current.code;
   return {
     view,
+    // the board's code changed but the person's own text stays: only the highlight model is refreshed (and switched off while the texts differ)
+    sync(res, showNotes) {
+      current = res; currentShow = showNotes;
+      const same = !stale();
+      view.dispatch({ effects: setModel.of(same ? { lines: res.lines, segments: res.segments, showNotes, editable: editableNumbers(res), choices: choicesOf ? choicesOf(res) : [] } : { ...STALE, showNotes }), annotations: programmatic.of(true) });
+    },
+    // put a new text in the editor as one small change, so the caret and the scroll position stay where they are
+    patch(text) {
+      const cur = view.state.doc.toString();
+      if (cur === text) return;
+      let a = 0; const max = Math.min(cur.length, text.length);
+      while (a < max && cur[a] === text[a]) a++;
+      let z = 0; while (z < max - a && cur[cur.length - 1 - z] === text[text.length - 1 - z]) z++;
+      view.dispatch({ changes: { from: a, to: cur.length - z, insert: text.slice(a, text.length - z) }, annotations: programmatic.of(true) });
+    },
+    get diverged() { return stale(); },
+    setFree(on) { freeMode = on; parent.classList.toggle('free', on); view.contentDOM.setAttribute('inputmode', on ? 'text' : 'decimal'); },
+    flushText,
     setCompiled(res, showNotes) {
       if (pending) { queued = [res, showNotes]; current = res; currentShow = showNotes; return; }   // do not rewrite the text under someone's fingers
       apply(res, showNotes);

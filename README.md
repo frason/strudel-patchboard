@@ -46,8 +46,13 @@ npm test         # evaluates every starter in real Strudel, checks graph rules, 
 - **Instrument and Sample**: the sound comes first (a card with a graphic for its family), then the envelope, then the waveform buttons (only while the
   sound is a synth wave), then the knobs. The sound picker is a wide grid of cards with a drawing per family (keys, strings, brass, drums ...).
 - **Descriptions** fold away behind "about this module" on every module (Settings → Module descriptions keeps them all open).
-- **Code panel**: the text is locked except for the numbers that come from a knob (underlined): click one, type, press Enter and the module's knob takes the
-  value (Esc cancels, up and down arrows nudge it). It follows the same limits as the knob. Whole code is still brought in with Import.
+- **Code panel**: type anywhere. A moment after you stop, the board follows: a changed number moves its knob, a new line adds modules, a deleted line removes
+  only its own modules and cables, and a module you did not touch stays exactly as it was (settings, position, size, collapsed, muted). Your text stays as you
+  typed it: comments and spacing are kept, and a knob moved on the board changes only that number in your text. Code the board cannot show (a custom function,
+  Hydra, a pattern the modules cannot express) stays in your text and does not play here; the bar under the code lists each part with the reason, and Copy and
+  Open in strudel.cc use your full text. Code that is not valid JavaScript shows the error and leaves the board as it was. While your text differs from the
+  board's code the highlights and plain-English notes are off (they are positions in the board's code); "Show the board's code" brings them back and replaces your
+  text. Opening a lesson, Import or New starts from the board's code. Settings → Code panel → "numbers only" brings back the old locked panel.
 - **Code panel choices**: a sound name, a bank, a filter type, shuffle or scramble, and what Sometimes or Every does are underlined with a ▾. Click one (or press Enter
   on it) and the same picker or menu the module uses opens right there; the pick goes to the module and the code rewrites. In a Sample pattern each sound word is its own
   choice (only that word is replaced). Scales and keys, chord symbols and note names are not choices: use the modules for those.

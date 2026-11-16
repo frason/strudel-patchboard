@@ -13,6 +13,9 @@ import { INSTRUMENTS, CATEGORIES as INST_CATS } from './instruments.js';
 import { compile } from './compile.js';
 import { strudelFile, parseImport, b64 } from './io.js';
 import { importStrudel } from './importer.js';
+import { numberTarget } from './codenums.js';
+import { applyCodeEdit } from './reconcile.js';
+import { patchText, checkSync } from './textsync.js';
 import { LESSONS } from './starters.js';
 import { patternToDrums } from './todrums.js';
 import { getAI, setAI, clearAI, consumeAiNotice, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
@@ -136,10 +139,13 @@ const codeHead = h('div', { class: 'code-head' },
   h('button', { class: 'btn sm', id: 'open-cc', onclick: openInStrudel }, 'Open in strudel.cc ↗'));
 const codeHost = h('div', { class: 'code-host', id: 'code-host' });
 const issuesEl = h('div', { class: 'issues', id: 'issues' });
+const syncEl = h('div', { class: 'sync-bar', id: 'sync-bar', hidden: true, role: 'status' });
 const learnEl = h('div', { class: 'learn-banner', id: 'learn-banner', hidden: true });
-const readOnlyNote = h('div', { class: 'ro-note' }, 'The numbers are editable: click one, type, press Enter (↑ ↓ nudge it, Esc cancels). The rest follows the modules; to bring in whole code use Import.');
+const readOnlyNote = h('div', { class: 'ro-note', id: 'ro-note' });
+const noteText = () => (getPrefs().codeEdit === 'numbers' ? 'The numbers are editable: click one, type, press Enter (↑ ↓ nudge it, Esc cancels). The rest follows the modules; to bring in whole code use Import.' : 'You can type anywhere in the code: the board follows what you write, and your comments and spacing are kept. A line the board cannot show stays in your text and does not play here.');
+readOnlyNote.textContent = noteText();
 const codeResizer = h('div', { class: 'code-resizer', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize the code panel', tabindex: 0, title: 'Drag to resize the code panel (double-click to reset)' });
-const codeCol = h('aside', { class: 'codecol' }, codeResizer, codeHead, codeHost, learnEl, issuesEl, readOnlyNote);
+const codeCol = h('aside', { class: 'codecol' }, codeResizer, codeHead, codeHost, syncEl, learnEl, issuesEl, readOnlyNote);
 const toastEl = h('div', { class: 'toasts', id: 'toasts' });
 app.append(top, h('div', { class: 'main' }, paletteEl, boardEl, codeCol), popHost, toastEl);
 
@@ -219,6 +225,7 @@ function codeEdit({ seg, call, value, dir, big }) {
   const n = nodeById(store.graph, seg.node);
   if (!n) return;
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v)), r4 = (v) => Number(v.toFixed(4)), nudge = dir ? { dir, big } : null;
+  if (!nudge) { const t = numberTarget(store.graph, seg, call, value); if (t) hooks.setParam(t.id, t.key, t.value); return; }   // a typed number: same rules as a number typed anywhere in the code
   if (n.type === 'mixer' && seg.key === 'strips') {   // .postgain(x) and .pan(x) on a part are that strip's fader and pan
     const isPan = /^\.pan\(/.test(call), f = isPan ? 'pan' : 'vol';
     const strips = (n.params.strips || []).map((s) => ({ vol: 1, pan: 0.5, mute: false, solo: false, ...s }));
@@ -296,7 +303,7 @@ function openChoice(c, rect) {
   else showPop(a, h('div', { class: 'menu' }, h('div', { class: 'menu-h' }, c.title || 'Choose'),
     c.options.map((o) => h('button', { class: 'menu-item' + (String(o.value) === String(c.current) ? ' on' : ''), onclick: () => { c.apply(o.value); closePop(); } }, o.label))));
 }
-const panel = createCodePanel(codeHost, { onHover: (hv) => board.setHover(hv), onEdit: (e) => codeEdit(e), onNudge: (e) => codeEdit(e), choicesOf: codeChoices, onChoice: openChoice });
+const panel = createCodePanel(codeHost, { onHover: (hv) => board.setHover(hv), onEdit: (e) => codeEdit(e), onNudge: (e) => codeEdit(e), choicesOf: codeChoices, onChoice: openChoice, isFree: () => getPrefs().codeEdit !== 'numbers', onText: (t) => codeTyped(t) });
 
 // step through: plain -> x2 -> x3 -> x4 -> [2] -> [3] -> [4] -> plain. Keeps what was written when entering or leaving brackets.
 function cycleX(c, pitched, f) { applyX(c, pitched, f, X_STATES[(X_STATES.indexOf(c.x || '') + 1) % X_STATES.length]); }
@@ -650,7 +657,7 @@ const hooks = {
   },
 };
 const board = createBoard(boardEl, store, hooks);
-if (import.meta.env.DEV) window.__app = { store, hooks, LESSONS, setPref };   // developer-only, for tests
+if (import.meta.env.DEV) window.__app = { store, hooks, LESSONS, setPref, panel };   // developer-only, for tests
 const palette = buildPalette(paletteEl, hooks, () => store.graph);
 const views = createViews({ board, store, engine, getEvaluated: () => evaluated });
 views.start();
@@ -659,9 +666,59 @@ loadCatalog();
 
 // ---------- compile -> panel -> engine ----------
 let evalTimer = null;
-function afterChange() {
+// The person's own text. `textBase` is the board's code at the moment the text last agreed with the board.
+let textBase = current.code, applying = false, syncState = { state: 'ok' };
+const TEXT_KEY = 'pb.codeText';
+const saveText = () => { try { if (panel.diverged) localStorage.setItem(TEXT_KEY, JSON.stringify({ text: panel.code, base: current.code })); else localStorage.removeItem(TEXT_KEY); } catch { /* private mode */ } };
+const knownSounds = () => new Set(soundsFor(''));
+function renderSync() {
+  const s = syncState, kids = [];
+  const btn = (label, fn) => h('button', { class: 'btn sm', onclick: fn }, label);
+  const showBoard = () => { panel.setCompiled(current, showNotes); textBase = current.code; setSync({ state: 'ok' }); saveText(); };
+  const makeBoardMatch = () => { codeTyped(panel.code, { full: true }); };
+  if (s.state === 'error') kids.push(h('div', { class: 'sync-err' }, s.message, h('div', { class: 'sync-sub' }, 'The board keeps the last version that was valid. Fix the text and it will follow.')));
+  else if (s.state === 'partial') {
+    kids.push(h('div', { class: 'sync-warn' }, `${s.parts.length} part${s.parts.length === 1 ? ' of your code stays' : 's of your code stay'} in your text but ${s.parts.length === 1 ? 'does' : 'do'} not play here:`),
+      ...s.parts.slice(0, 5).map((p) => h('div', { class: 'sync-item' }, (p.line ? 'line ' + p.line + ': ' : '') + String(p.text).slice(0, 60) + ' — ' + p.why)),
+      ...(s.notes || []).map((n) => h('div', { class: 'sync-sub' }, n)),
+      h('div', { class: 'sync-sub' }, '"Copy" and "Open in strudel.cc" use your full text, so they run in Strudel as written.'));
+    if (s.differs) kids.push(h('div', { class: 'sync-warn' }, 'The text and the board also say different things elsewhere.'), h('div', { class: 'sync-row' }, btn('Make the text match the board', showBoard), btn('Make the board match the text', makeBoardMatch)));
+  } else if (s.state === 'differs') {
+    kids.push(h('div', { class: 'sync-warn' }, s.message || 'The text and the board say different things.'), h('div', { class: 'sync-row' }, btn('Make the text match the board', showBoard), btn('Make the board match the text', makeBoardMatch)));
+  } else if (panel.diverged) {
+    kids.push(h('div', { class: 'sync-sub' }, 'Your own spacing and comments are kept. Highlights and notes are off while your text differs from the board\'s code. ', btn('Show the board\'s code', showBoard)));
+  }
+  syncEl.replaceChildren(...kids);
+  syncEl.hidden = !kids.length;
+}
+function setSync(s) { syncState = s; renderSync(); }
+// the person typed: apply their text to the board as the smallest change, then read the board back to check the text still says what the board says
+function codeTyped(text, { full = false } = {}) {
+  if (getPrefs().codeEdit === 'numbers') return;
+  const sounds = knownSounds();
+  const res = applyCodeEdit(store.graph, text, { sounds, baseCode: full ? null : textBase });
+  if (res.error) { setSync({ state: 'error', message: res.error }); return; }
+  const ch = res.changes;
+  if (ch.updated.length || ch.added.length || ch.removed.length) {
+    applying = true;
+    try { store.update((g) => { g.nodes = res.graph.nodes; g.wires = res.graph.wires; if (res.graph.groups) g.groups = res.graph.groups; else delete g.groups; }, { label: 'edit code', coalesce: 'code' }); }
+    finally { applying = false; }
+  }
+  textBase = current.code;
+  setSync(checkSync(store.graph, text, { sounds }));
+  saveText();
+}
+function afterChange(meta = {}) {
+  const prev = current.code;
   current = compile(store.graph);
-  panel.setCompiled(current, showNotes);
+  if (applying) panel.sync(current, showNotes);
+  else if (!panel.diverged || (meta.replaced && meta.label !== 'undo' && meta.label !== 'redo')) { panel.setCompiled(current, showNotes); textBase = current.code; if (syncState.state !== 'ok') setSync({ state: 'ok' }); else renderSync(); saveText(); }   // a whole new patch starts from the board's code
+  else {   // a change made on the board, while the text has the person's own layout: carry it into their text as one small edit
+    const patched = patchText(panel.code, prev, current.code);
+    if (patched === null) { panel.sync(current, showNotes); setSync({ state: 'differs', message: 'The board changed where your text was edited, so the text was not updated.' }); }
+    else { panel.patch(patched); panel.sync(current, showNotes); textBase = current.code; setSync(checkSync(store.graph, patched, { sounds: knownSounds() })); }
+    saveText();
+  }
   board.sync();
   syncBpm();
   views.dirty();
@@ -682,7 +739,7 @@ function renderIssues() {
   issuesEl.replaceChildren(...current.issues.map((i) => h('div', { class: 'issue', onmouseenter: () => hooks.hover({ node: i.node }), onmouseleave: () => hooks.hover(null) }, '• ' + i.msg)));
 }
 store.subscribe((g, meta) => {
-  afterChange();
+  afterChange(meta);
   if (meta.removed?.length) meta.removed.forEach((r) => toast(`A cable was removed: ${r.reason}`, [undoAction]));
 });
 
@@ -734,7 +791,7 @@ engine.onHap(({ locations, delayMs, durMs }) => {
   setTimeout(() => {
     nodes.forEach((n) => board.flashNode(n, Math.min(durMs, 260)));
     steps.forEach(([n, s, tr]) => board.flashStep(n, s, Math.min(Math.max(durMs, 120), 600), tr));
-    if (ranges.length) panel.flash(ranges, Math.min(Math.max(durMs, 140), 700));
+    if (ranges.length && !panel.diverged) panel.flash(ranges, Math.min(Math.max(durMs, 140), 700));
     textHits.forEach(([nid, a, b]) => board.flashText(nid, a, b, Math.min(Math.max(durMs, 120), 600)));
     for (const [w, d] of edges) {
       board.pulse(w.id, d * 170, 200);
@@ -763,10 +820,10 @@ function doRedo() { store.redo(); }
 
 // ---------- copy / strudel.cc ----------
 async function copyCode() {
-  try { await navigator.clipboard.writeText(current.code); toast('Code copied', [], 1800); }
+  try { await navigator.clipboard.writeText(panel.code); toast('Code copied', [], 1800); }
   catch { toast('Copy blocked by the browser — select the code and copy it by hand.', [], 4000); }
 }
-function openInStrudel() { window.open('https://strudel.cc/#' + encodeURIComponent(b64(current.code)), '_blank', 'noopener'); }
+function openInStrudel() { window.open('https://strudel.cc/#' + encodeURIComponent(b64(panel.code)), '_blank', 'noopener'); }
 
 // ---------- popovers ----------
 let openPop = null;
@@ -797,6 +854,8 @@ function loadLesson(l) {
   closePop();
   requestAnimationFrame(() => board.tidy({ merge: true }));
 }
+const BUILD = typeof __BUILD__ !== 'undefined' ? __BUILD__ : { number: 'dev', commit: 'local', dirty: false, date: '' };
+const BUILD_LABEL = `${BUILD.number} · ${BUILD.commit}${BUILD.dirty ? '+' : ''}${BUILD.date ? ' · ' + BUILD.date : ''}`;
 function openSettings() {
   const seg = (key, label, options) => h('div', { class: 'set-row' }, h('span', { class: 'set-l' }, label),
     h('div', { class: 'seg' }, options.map(([v, t]) => h('button', { class: 'seg-btn' + (getPrefs()[key] === v ? ' on' : ''), onclick: (e) => { setPref(key, v); e.target.parentNode.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b === e.target)); } }, t))));
@@ -809,11 +868,13 @@ function openSettings() {
     seg('jackHelp', 'Socket help (?)', [[true, 'show'], [false, 'hide']]),
     seg('outScope', 'Output waveform', [[true, 'show'], [false, 'hide']]),
     seg('animations', 'Animations', [[true, 'on'], [false, 'off']]),
+    seg('codeEdit', 'Code panel', [['free', 'type anywhere'], ['numbers', 'numbers only']]),
     h('div', { class: 'menu-empty' }, 'Off stops the flashing steps, cable pulses, playheads and the live drawing in Piano Roll and Scope, which saves memory and processor time on a big patch. The sound is not affected.'),
     h('div', { class: 'menu-h' }, 'Sound'),
     seg('safeOutput', 'Safe output', [[true, 'on'], [false, 'off']]),
     h('div', { class: 'menu-empty' }, 'Safe output softly rounds off peaks above about 0.8 so a loud patch does not crackle. It is part of this app, not of the code, so it is not in the code panel and is not there on strudel.cc: on, the board sounds a little different from the same code elsewhere only when a patch is very loud.'),
     h('div', { class: 'menu-empty' }, 'These only change how the board looks. The patch and the code are untouched.'),
+    h('div', { class: 'menu-empty build', title: 'Quote this when reporting a problem' }, 'Build ' + BUILD_LABEL),
     h('div', { class: 'menu-empty about' }, 'An unofficial visual editor for ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ', not made or endorsed by the Strudel team. Built on Strudel (AGPL-3.0).', SOURCE_URL ? [' ', h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code')] : null)));
 }
 settingsBtn.addEventListener('click', openSettings);
@@ -1165,7 +1226,22 @@ window.addEventListener('beforeunload', () => store.flush());
 // ---------- boot ----------
 setCodeShown(codeShown);
 setPaletteShown(paletteShown);
+// the person's own text survives a reload when the board is still exactly what it was written against
+let savedText = null;
+try { savedText = JSON.parse(localStorage.getItem(TEXT_KEY) || 'null'); } catch { /* none */ }
 afterChange();
+if (savedText && typeof savedText.text === 'string' && savedText.text.length < 300000 && savedText.base === current.code && savedText.text !== current.code && getPrefs().codeEdit !== 'numbers') {
+  panel.patch(savedText.text); panel.sync(current, showNotes); textBase = savedText.base;
+  setSync(checkSync(store.graph, savedText.text, { sounds: knownSounds() })); saveText();
+}
+onPrefs((p, k) => {
+  if (k !== 'codeEdit') return;
+  panel.setFree(p.codeEdit !== 'numbers');
+  readOnlyNote.textContent = noteText();
+  if (p.codeEdit === 'numbers' && panel.diverged) { panel.setCompiled(current, showNotes); textBase = current.code; setSync({ state: 'ok' }); saveText(); toast('The code panel shows the board\'s code again; your own text was replaced.', [], 5000); }
+  else renderSync();
+});
+
 if (firstLesson) setBanner(firstLesson);
 requestAnimationFrame(() => (firstLesson ? board.tidy({ merge: true }) : board.fit()));
 // ---------- intro page ----------

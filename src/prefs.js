@@ -1,6 +1,6 @@
 // Display preferences, kept per browser. None of these change the patch or the code.
 const KEY = 'pb.prefs';
-const DEFAULTS = { colourful: false, cables: 'curved', labels: 'hover', minimap: true, safeOutput: true, descriptions: 'folded', animations: true, jackHelp: true, outScope: true };
+const DEFAULTS = { colourful: false, cables: 'curved', labels: 'hover', minimap: true, safeOutput: true, descriptions: 'folded', animations: true, jackHelp: true, outScope: true, codeEdit: 'free', soundView: 'cards' };
 let prefs = { ...DEFAULTS };
 try { prefs = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { /* defaults */ }
 const subs = new Set();

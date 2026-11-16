@@ -216,8 +216,10 @@ export function openSoundPicker({ anchor, items, cats, current, onPick }) {
   const r = anchor.getBoundingClientRect();
   const width = Math.min(740, window.innerWidth - 16);
   const top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - 560));
+  const viewBtn = (v, label, title) => h('button', { class: 'ip-view', type: 'button', title, 'aria-label': title, 'aria-pressed': String(getPrefs().soundView === v), onclick: () => { setPref('soundView', v); viewBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === getPrefs().soundView))); render(); search.focus(); }, 'data-v': v }, label);
+  const viewBtns = [viewBtn('cards', '▦', 'Show as cards'), viewBtn('list', '☰', 'Show as a list')];
   const closeBtn = h('button', { class: 'btn ip-close', type: 'button', 'aria-label': 'Close the sound list' }, 'Close');   // a keyboard can press Esc; a phone cannot
-  const pop = h('div', { class: 'ip-pop wide', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - width - 8))}px;top:${top}px;width:${width}px;max-height:calc(100vh - ${top}px - 12px)` }, h('div', { class: 'ip-top' }, search, closeBtn), chips, box, foot);
+  const pop = h('div', { class: 'ip-pop wide', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - width - 8))}px;top:${top}px;width:${width}px;max-height:calc(100vh - ${top}px - 12px)` }, h('div', { class: 'ip-top' }, search, h('div', { class: 'ip-views', role: 'group', 'aria-label': 'Layout' }, viewBtns), closeBtn), chips, box, foot);
   closeBtn.addEventListener('click', () => close());
   const close = () => { clearTimeout(timer); pop.remove(); soundPop = null; document.removeEventListener('pointerdown', away, true); };
   const away = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
@@ -232,11 +234,12 @@ export function openSoundPicker({ anchor, items, cats, current, onPick }) {
     const wave = WAVE_ICONS.find(([wid]) => wid === i.id);   // the synth waves show their own shape
     const el = h('span', { class: 'ip-pic' });
     el.innerHTML = wave
-      ? `<svg viewBox="0 0 24 14" width="44" height="26" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${wave[1]}"/></svg>`
-      : soundIconSvg(i.kind === 'sample' && i.id !== 'piano' ? soundGlyph(i.id, i.cat) : i.cat, 38);
+      ? `<svg viewBox="0 0 24 14" width="${getPrefs().soundView === 'list' ? 34 : 30}" height="${getPrefs().soundView === 'list' ? 20 : 18}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${wave[1]}"/></svg>`
+      : soundIconSvg(i.kind === 'sample' && i.id !== 'piano' ? soundGlyph(i.id, i.cat) : i.cat, getPrefs().soundView === 'list' ? 24 : 26);
     return el;
   };
   const render = () => {
+    box.classList.toggle('list', getPrefs().soundView === 'list');
     list = filtered();
     hi = Math.min(hi, Math.max(list.length - 1, 0));
     chips.replaceChildren(...['All', '★', ...cats].map((c) => {

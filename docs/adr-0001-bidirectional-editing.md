@@ -1,6 +1,6 @@
 # ADR 0001: Bidirectional editing of Strudel code and the module board
 
-Status: proposed (not implemented). Date: 2026-11-16. Baseline commit: b141faf.
+Status: stages 1 and 2 implemented (engine, and free typing in the code panel with the person's text kept); the rest proposed. Date: 2026-11-16. Baseline commit: b141faf.
 
 ## Context (verified in the code)
 
@@ -72,3 +72,46 @@ guards). 4. Structural edits, opaque regions, execution guard. 5. v2 persistence
 2. API key storage default: in-memory (recommended) or persisted with explicit opt-in.
 3. Whether imported patches containing a Hydra module are refused or require explicit confirmation.
 4. Whether to keep the plain-text key migration (clear old stored keys on upgrade).
+
+
+## Progress: stage 1, the pure engine (2026-11-16)
+
+`src/reconcile.js` (`applyCodeEdit(graph, editedCode)`) turns edited text into the smallest change to the board, with no DOM, store or audio:
+
+1. Exact path (`numberEdits`): when the edited text is the compiled text with only knob numbers changed, each number goes straight to the module and knob
+   that wrote it (compile's segments), through the same clamping rules as typing in the panel (`src/codenums.js`, shared with the panel).
+2. Structural path (`applyEdit`): the code the board writes (before) and the edited code (after) are both read by the importer, the two readings are matched
+   by chain position and kind (never by line or offset), and only the differences are applied to the real board. A module the edit did not touch is never
+   rewritten, so its settings, position, size, collapsed and mute state survive, even where the importer reads it back in another shape.
+3. Reported, not dropped: code the importer cannot read is returned in `report.skipped`; an edit that touches a module the importer reads back as several
+   (drum machine, a multi-layer Sample) comes back in `changes.unapplied` with a reason, and that module is left as it is.
+4. Modules the code does not describe (muted, or with no cable to the output) are never removed by an edit.
+
+Tests (`npm run test:reconcile`): unchanged code leaves every lesson's board identical (31/31); changing one number in every lesson moves the right knob and
+the board writes back exactly the edited code (25/25); delete, add, reorder, rename, muted and unconnected modules, groups, invalid code, unreadable lines.
+
+Open design question for stage 2 (the editor): what the text shows after an edit is applied. Regenerating the document from the board would drop the
+person's comments and layout; keeping their text means the segment offsets (hover, playing marks, click-to-edit numbers) no longer line up until the importer
+records source spans for each reading. See the question to the project owner.
+
+
+## Progress: stage 2, free typing with the person's text kept (2026-11-16)
+
+Decision by the project owner: when the board and the typed text disagree, the person's text wins (nothing is rewritten without being asked).
+
+- Text -> board (`codeTyped` in `src/main.js`): 600 ms after typing stops, `applyCodeEdit` runs against `textBase` (the board's code when the text last agreed
+  with the board), so a board change made in the meantime is merged, not undone. One coalesced undo step ("edit code").
+- Read-back (`checkSync`, `src/textsync.js`): after every apply the board is read back and compared with the text. States: ok, error (invalid JavaScript; the
+  board keeps the last valid state), partial (parts kept in the text that do not play, each listed with its reason) and differs (two buttons: make the text match
+  the board, or the board match the text).
+- Board -> text (`patchText`): a knob move, undo, redo or any board edit is carried into the person's text as one small edit found by the text around it
+  (whitespace-tolerant, ambiguity refused); if the surrounding text was edited away it falls back to a unique match of the changed text itself, and otherwise
+  the "differs" state asks. Multi-line changes are aligned to whole lines.
+- Highlights, plain-English notes and click-to-edit are positions in the board's code, so they are switched off while the text differs from it. Restoring them
+  for a differing text needs the importer to record source spans (stage 3).
+- The text survives a reload while the board is unchanged (`pb.codeText`, keyed by the canonical code); opening a lesson, Import and New start from the board's code.
+- Settings -> Code panel -> "numbers only" keeps the previous locked panel.
+
+Known limits: the person's text is not part of saved patches, exports or history snapshots yet (v2 format, stage 5); a module the importer reads back as several
+(drum machine, a multi-layer Sample) cannot be changed structurally from the text yet (reported as "differs"/partial, never dropped); the typed text is not
+evaluated directly: the audio plays what the board writes, so text that cannot be shown does not play.
