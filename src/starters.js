@@ -78,10 +78,10 @@ export const LESSONS = [
   },
   {
     id: 'banks', title: '6 · Banks: one drum machine per layer',
-    learned: 'This is the beat from lesson 5 with its two layers split into two Samples. In lesson 5 both layers lived in one pattern, so they had to share one setting. Now each Sample has its own: .bank("RolandTR909") makes the kick come from the Roland TR-909 drum machine, while the second layer stays on the default sounds, because a bank only changes the sounds it has (east, 808lt and 808lc are not in the TR-909). Two Samples plugged into Output play at the same time, each on its own $: line. Each setting is one method chained on the end: .bank() and .gain(). Open the bank menu on the kick and listen to the same rhythm change character.',
+    learned: 'This is lesson 5\'s beat, split in two. A bank is a setting on the whole Sample, so everything inside one Sample shares it. The top Sample holds the sounds a drum machine has (the kick bd and the clap cp) and uses .bank("RolandTR909"). But east, 808lt and 808lc are not in any drum machine: they come from the plain sample set. So they go in a second Sample with no bank. A ~ is a rest: [cp ~] is the clap on the first half of the step with the second half left empty, and [~ east] is the other way round, so every hit lands at exactly the same moment as in lesson 5. Both Samples play into one Output, so they share its tempo. Open the bank menu on the top Sample and listen to the kit change while the rest stays put.',
     graph: () => build([
-      ['k', 'sample', 60, 40, { name: '[bd]*4', bank: 'RolandTR909', gain: 0.6 }],
-      ['p', 'sample', 60, 380, { name: '[cp east] 808lt 808lc', gain: 0.6 }],
+      ['k', 'sample', 60, 40, { name: '[bd]*4, [cp ~] ~ ~', bank: 'RolandTR909', gain: 0.6 }],
+      ['p', 'sample', 60, 380, { name: '[~ east] 808lt 808lc', gain: 0.6 }],
       ['o', 'output', 460, 210, {}],
     ], [['k', 'o'], ['p', 'o']]),
   },
