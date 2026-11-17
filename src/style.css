@@ -279,7 +279,7 @@ button { font: inherit; color: inherit; }
 
 .mm { width: 44px; }
 .node { width: max-content; }
-.node:has(.seq), .node:has(.drums) { max-width: none; }
+.node:has(.seq), .node:has(.drums), .node:has(.rollwrap) { max-width: none; }   /* sequencers and the note and hit pictures can be dragged as wide as you like */
 
 .node[data-type=drums] .n-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; gap: 6px 12px; }
 .node[data-type=drums] .drums { grid-column: 1 / -1; }

@@ -221,6 +221,8 @@ function view(node, ctl, { store, hooks, h }, kind) {
     key = k; clearTimeout(timer);
     timer = setTimeout(() => compute(p), events && !selfEdit ? 250 : 0);   // while you type, wait for a pause
   };
+  // the module can be made wider (drag its corner): draw again at the new width, so a wider box shows a bigger picture
+  if (typeof ResizeObserver !== 'undefined') { let lastW = 0, raf = 0; new ResizeObserver(() => { const w = Math.round(scroll.clientWidth); if (!w || w === lastW) return; lastW = w; cancelAnimationFrame(raf); raf = requestAnimationFrame(() => paint()); }).observe(scroll); }
   ctl[kind === 'notes' ? 'noteroll' : 'hitstrip'] = { draw };
   draw(node.params);
   return wrap;
