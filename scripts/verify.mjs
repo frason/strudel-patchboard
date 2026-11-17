@@ -973,9 +973,9 @@ $: s("[hh ~@4 hh ~@14]*2")
   const exact = importStrudel('$: note("~@4 c3@4 ~@4 e3@4 ~@4 g3@4 ~@4 b3@4").s("sine")');
   check('Long spellings: notes that fill their whole step need no Note length, and the finest grid that fits in 16 steps is used', exact.graph.nodes.find((n) => n.type === 'melody').params.steps === 16 && !exact.graph.nodes.some((n) => n.type === 'clip'));
   const uneven = importStrudel('$: note("~@5 c2@3 ~@7 c2@2 ~@7 c2@3 ~@7 c2@3 ~@2").s("sine")');
-  check('Long spellings: notes of different lengths that no short grid can hold are still skipped, and the reason says why', uneven.report.skipped.length === 1 && /no grid of 16 steps or fewer/.test(uneven.report.skipped[0].reason));
+  check('Long spellings: notes of different lengths that no short grid can hold are kept exactly as written in a Note Pattern, with a note saying why', uneven.report.skipped.length === 0 && uneven.graph.nodes.some((n) => n.type === 'notetext') && uneven.report.notes.some((x) => /Note Pattern/.test(x)));
   const own = importStrudel('$: note("~@5 c2@3 ~@7 c2@3 ~@7 c2@3 ~@7 c2@3 ~@2").s("sine").clip(0.5)');
-  check('Long spellings: with a .clip() of its own on the line, nothing is rewritten behind your back (it stays skipped)', own.report.skipped.length === 1);
+  check('Long spellings: with a .clip() of its own on the line, nothing is rewritten behind your back (the text is kept exactly as written)', own.report.skipped.length === 0 && own.graph.nodes.some((n) => n.type === 'notetext' && n.params.text.startsWith('~@5 c2@3 ~@7')));
   const same = importStrudel('$: note("c3 ~ ~ ~ e3 ~ ~ ~").s("sine")');
   check('Long spellings: patterns that already fit are left exactly as they were (no Note length, no coarser grid)', same.graph.nodes.find((n) => n.type === 'melody').params.steps === 8 && !same.graph.nodes.some((n) => n.type === 'clip') && !same.report.notes.length);
 }
@@ -1115,5 +1115,112 @@ $: s("[hh ~@4 hh ~@14]*2")
     wires: [{ id: 'w1', from: { node: 'a', port: 'out' }, to: { node: 'r', port: 'in' } }, { id: 'w2', from: { node: 'r', port: 'out' }, to: { node: 'c', port: 'in' } }, { id: 'w3', from: { node: 'c', port: 'out' }, to: { node: 'o', port: 'in' } }] };
   const fixed = cleanGraph(old);
   check('An old patch with Ring mod and Chorus in a row still loads: they are taken out and the cables joined up, and the names are listed', fixed.nodes.map((n) => n.type).join() === 'sample,output' && fixed.wires.length === 1 && fixed.wires[0].from.node === 'a' && fixed.wires[0].to.node === 'o' && fixed.removedFx.slice().sort().join() === 'chorus,ring');
+}
+// A recorded take written as Strudel code, played by the real engine.
+{
+  const { takeToCode, takeToPattern, quantizeTake, noteName } = await import('../src/takecode.js');
+  const { guardCode } = await import('../src/guard.js');
+  // a deterministic two-minute take at 120 BPM: a melody with human timing, chords every bar, and a long bass note under it
+  let seed = 12345; const rnd = () => { seed = (seed + 0x6d2b79f5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+  const events = [];
+  for (let bar = 0; bar < 60; bar++) {
+    const b0 = bar * 4;
+    events.push({ t: b0 + (rnd() - 0.5) * 0.04 + 0.04, d: 3.6, n: 36 + [0, 5, 7, 3][bar % 4], v: 0.7 });                         // bass, almost a whole bar, overlaps the next one a little
+    for (const n of [60, 64, 67]) events.push({ t: b0 + 0.001, d: 1.5, n: n + [0, 5, 7, 3][bar % 4], v: 0.6 });                        // a chord, played together
+    let t = b0 + 0.5;
+    while (t < b0 + 3.9) { const d = [0.25, 0.5, 0.75, 1][Math.floor(rnd() * 4)]; events.push({ t: t + (rnd() - 0.5) * 0.06, d: d * 0.9, n: 67 + Math.floor(rnd() * 9), v: 0.5 + rnd() * 0.5 }); t += d; }
+  }
+  const take = { bpm: 120, beatsPerBar: 4, events };
+  const t0 = Date.now();
+  const r = takeToCode(take, { grid: 24, sound: 'sawtooth' });
+  const guardMsg = guardCode(r.code);
+  const T = r.ticksPerBar;
+  const want = r.debugSteps.flatMap((s) => s.notes.map((n) => ({ a: s.s / T, b: (s.s + s.dur) / T, name: noteName(n), v: Math.round(s.vel * 100) / 100 }))).sort((x, y) => x.a - y.a || x.name.localeCompare(y.name));
+  const got = (await evaluate(r.code, false)).queryArc(0, r.bars).filter((h) => h.hasOnset()).map((h) => ({ a: h.whole.begin.valueOf(), b: h.whole.end.valueOf(), name: String(h.value.note), v: h.value.velocity })).sort((x, y) => x.a - y.a || x.name.localeCompare(y.name));
+  const ms = Date.now() - t0;
+  const same = got.length === want.length && want.every((w, i) => Math.abs(w.a - got[i].a) < 1e-9 && Math.abs(w.b - got[i].b) < 1e-9 && w.name === got[i].name && Math.abs(w.v - got[i].v) < 1e-9);
+  console.log(`   take: ${events.length} notes, ${r.bars} bars, ${r.lanes} lanes, ${r.sections} sections, ${r.codeChars} characters, generated and played in ${ms} ms`);
+  check('Take code: a two-minute take (60 bars) plays in real Strudel with every note at the right time, pitch, length and velocity', same && r.bars >= 60 && r.bars <= 61 && want.length >= events.length - 5);
+  const widest = Math.max(...r.code.split('\n').map((l) => l.length));
+  check('Take code: the generated code passes the same code check as everything else, and a two-minute take fits in one section whose strings stay under the 8000-character limit of a Note Pattern', guardMsg === null && r.sections === 1 && widest < 8000 && /\.slow\(\d+\)/.test(r.code) && /\.velocity\("/.test(r.code));
+  const rs = takeToCode(take, { grid: 24, sound: 'sawtooth', maxChars: 1200 });
+  const gotS = (await evaluate(rs.code, false)).queryArc(0, rs.bars).filter((h) => h.hasOnset()).map((h) => ({ a: h.whole.begin.valueOf(), b: h.whole.end.valueOf(), name: String(h.value.note), v: h.value.velocity })).sort((x, y) => x.a - y.a || x.name.localeCompare(y.name));
+  const wantS = rs.debugSteps.flatMap((s) => s.notes.map((n) => ({ a: s.s / rs.ticksPerBar, b: (s.s + s.dur) / rs.ticksPerBar, name: noteName(n), v: Math.round(s.vel * 100) / 100 }))).sort((x, y) => x.a - y.a || x.name.localeCompare(y.name));
+  check('Take code: with a small limit the same take is cut into arrange sections, one slowed sequence per lane, and still plays every note', rs.sections > 3 && /^\$: arrange\(/m.test(rs.code) && gotS.length === wantS.length && wantS.every((w, i) => Math.abs(w.a - gotS[i].a) < 1e-9 && Math.abs(w.b - gotS[i].b) < 1e-9 && w.name === gotS[i].name && Math.abs(w.v - gotS[i].v) < 1e-9) && Math.max(...rs.code.split('\n').map((l) => l.length)) < 2600);
+  // the generated code reads back into modules and plays the same notes
+  const events2 = async (code, n) => (await evaluate(code, false)).queryArc(0, n).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(6)} ${h.whole.end.valueOf().toFixed(6)} ${h.value.note} ${h.value.velocity === undefined ? '' : (+h.value.velocity).toFixed(2)}`).sort();
+  const { importStrudel: impT } = await import('../src/importer.js');
+  const roundTrip = async (code, bars) => { const imp = impT(code); if (imp.error) return { err: imp.error }; const back = compile(imp.graph).code; return { skipped: imp.report.skipped, types: imp.graph.nodes.map((n) => n.type), same: JSON.stringify(await events2(back, bars)) === JSON.stringify(await events2(code, bars)) }; };
+  const rt1 = await roundTrip(r.code, r.bars);
+  check('Take code: the two-minute take imports with nothing skipped (as Note Pattern modules) and plays the same notes, times and velocities' + (rt1.skipped?.length ? ' [' + rt1.skipped.map((x) => x.reason).join('; ').slice(0, 200) + ']' : ''), !rt1.err && rt1.skipped.length === 0 && rt1.same && rt1.types.filter((x) => x === 'notetext').length >= 2);
+  const rs2 = takeToCode(take, { grid: 24, sound: 'sawtooth', maxChars: 450 });
+  const rt2 = await roundTrip(rs2.code, rs2.bars);
+  check('Take code: a take cut into many sections (more than six: ' + rs2.sections + ') imports into nested Arrange modules with nothing skipped, and plays the same notes' + (rt2.skipped?.length ? ' [' + rt2.skipped.map((x) => x.reason).join('; ').slice(0, 200) + ']' : ''), !rt2.err && rt2.skipped.length === 0 && rt2.same && rt2.types.filter((x) => x === 'arrange').length >= 2);
+  // loop over part of it
+  const loopR = takeToCode(take, { grid: 24, loop: { start: 2, bars: 3 }, sound: 'sawtooth' });
+  const flat = (code, a, b, shift = 0) => (async () => (await evaluate(code, false)).queryArc(a, b).filter((h) => h.hasOnset()).map((h) => `${(h.whole.begin.valueOf() - shift).toFixed(6)} ${h.value.note}`).sort())();
+  const full24 = await flat(r.code, 2, 5), looped = await flat(loopR.code, 0, 3), looped2 = await flat(loopR.code, 3, 6, 3);
+  check('Take code: .ribbon(2, 3) plays bars 3 to 5 of the take and then plays them again', JSON.stringify(looped.map((x) => x)) === JSON.stringify(full24.map((x) => { const [a, n] = x.split(' '); return `${(+a - 2).toFixed(6)} ${n}`; }).sort()) && JSON.stringify(looped2) === JSON.stringify(looped));
+  // small cases
+  const one = (events2, o = {}) => takeToCode({ bpm: 120, beatsPerBar: 4, events: events2 }, { grid: 24, sound: 'sine', ...o });
+  const tie = one([{ t: 3.5, d: 2, n: 60, v: 0.8 }, { t: 8, d: 1, n: 62, v: 0.8 }]);
+  const tieEv = (await evaluate(tie.code, false)).queryArc(0, 3).filter((h) => h.hasOnset());
+  check('Take code: a note that crosses a bar line stays one note', tieEv.length === 2 && Math.abs(tieEv[0].whole.begin.valueOf() - 3.5 / 4) < 1e-9 && Math.abs(tieEv[0].whole.end.valueOf() - 5.5 / 4) < 1e-9);
+  const chord = one([{ t: 0, d: 1, n: 60, v: 0.8 }, { t: 0, d: 1, n: 64, v: 0.8 }, { t: 0, d: 1, n: 67, v: 0.8 }]);
+  check('Take code: notes that start together and last the same time are written as one chord', /\[c4,e4,g4\]/.test(chord.code) && chord.lanes === 1 && chord.steps === 1);
+  const small = one([{ t: 0, d: 1.1, n: 60 }, { t: 1, d: 1, n: 62 }]), big = one([{ t: 0, d: 3, n: 60 }, { t: 1, d: 1, n: 62 }]);
+  check('Take code: a small overlap stays in one lane (the earlier note ends where the next begins), a big one gets its own lane', small.lanes === 1 && small.shortened === 1 && big.lanes === 2);
+  const grid4 = one([{ t: 0.07, d: 0.2, n: 60 }, { t: 0.55, d: 0.2, n: 62 }], { grid: 4 });
+  const g4ev = (await evaluate(grid4.code, false)).queryArc(0, 1).filter((h) => h.hasOnset()).map((h) => h.whole.begin.valueOf());
+  check('Take code: a 16th-note grid snaps notes to sixteenths of a bar', g4ev.length === 2 && g4ev.every((x) => Math.abs(x * 16 - Math.round(x * 16)) < 1e-9));
+  const cut = takeToCode({ bpm: 120, beatsPerBar: 4, events: Array.from({ length: 40 }, (_, i) => ({ t: i * 2, d: i === 11 ? 40 : 1.5, n: 60 + (i % 7), v: 0.7 })) }, { grid: 24, maxChars: 60, sound: 'sine' });
+  const cutEv = (await evaluate(cut.code, false)).queryArc(0, cut.bars).filter((h) => h.hasOnset());
+  check('Take code: a take cut into several sections still plays every note, and a note running past the end of a section is cut there and counted', cut.sections > 3 && cutEv.length === 40 && cut.truncated >= 1);
+  const bad = takeToPattern({ bpm: 120, events: [{ t: 0, d: 1, n: 60 }, { t: -1, d: 1, n: 60 }, { t: 0, d: 1, n: 200 }, { t: 'x', d: 1, n: 60 }] });
+  check('Take code: events that are not valid notes are left out and counted, not written', bad.notes === 1 && bad.dropped === 3);
+  check('Take code: note names match Strudel (60 is c4, 61 is c#4, 48 is c3)', noteName(60) === 'c4' && noteName(61) === 'c#4' && noteName(48) === 'c3' && noteName(21) === 'a0');
+}
+// Hit Pattern: a rhythm written as text, into a Sample or an Instrument.
+{
+  const { importStrudel: impH } = await import('../src/importer.js');
+  const { emptyGraph: eg3, makeNode: mn3 } = await import('../src/graph.js');
+  const evs = async (code, n = 2) => (await evaluate(code, false)).queryArc(0, n).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(6)} ${h.whole.end.valueOf().toFixed(6)} ${h.value.s ?? ''} ${h.value.note ?? ''}`).sort();
+  const build = (rhythmType, rhythmText, sink) => { const g3 = eg3(), N3 = (ty, p = {}) => { const nn = mn3(ty, 0, 0, p); g3.nodes.push(nn); return nn; }; const w3 = (a, b, port) => g3.wires.push({ id: 'w' + g3.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } }); const h = N3('hitpattern', { text: rhythmText }), o = N3('output'); if (sink === 'sample') { const s3 = N3('sample', { name: 'bd' }); w3(h, s3, 'in'); w3(s3, o, 'in'); } else { const m3 = N3('melody', { steps: 4, scale: 'off', cells: [{ n: ['c3'], len: 1, vel: 1 }, { n: ['e3'], len: 1, vel: 1 }, { n: ['g3'], len: 1, vel: 1 }, { n: ['c4'], len: 1, vel: 1 }] }), sy = N3('synth', { wave: 'sawtooth' }); w3(m3, sy, 'in'); w3(h, sy, 'rhythm'); w3(sy, o, 'in'); } return compile(g3); };
+  const smp = build('hit', 'x ~ x*2 [x x]', 'sample');
+  check('Hit Pattern: into a Sample it writes .struct("…") with the text as it is, and the engine plays exactly that rhythm', /\.struct\("x ~ x\*2 \[x x\]"\)/.test(smp.code) && smp.issues.length === 0 && JSON.stringify(await evs(smp.code, 1)) === JSON.stringify(await evs('setcpm(120/4)\n$: s("bd").struct("x ~ x*2 [x x]")', 1)));
+  const inst = build('hit', 'x ~ x*2 [x x]', 'synth');
+  const instEv = (await evaluate(inst.code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
+  check('Hit Pattern: into an Instrument it puts that rhythm on the melody: .struct("…") sits between the notes and .s(…), and the notes are picked at each hit', /\.struct\("x ~ x\*2 \[x x\]"\)\s*\.s\("sawtooth"\)/.test(inst.code) && inst.issues.length === 0 && instEv.length === 5 && instEv.every((h) => /^[a-g]#?\d$/.test(String(h.value.note))));
+  const oldBack = impH('setcpm(120/4)\n\n$: s("bd").struct("x ~ x x")');
+  check('Hit Pattern: a rhythm that fits the Rhythm Sequencer still becomes one (nothing changes for short patterns)', oldBack.report.skipped.length === 0 && oldBack.graph.nodes.some((n) => n.type === 'rhythm') && !oldBack.graph.nodes.some((n) => n.type === 'hitpattern'));
+  const longR = 'x ~ x*2 [x x] ~@3 x x ~ [x x x] x ~ x x ~@2 x [x x] ~ x x ~ x ~ x x x ~ x';
+  const longSmp = impH(`setcpm(120/4)\n\n$: s("hh").struct("${longR}")`);
+  const hpn = longSmp.graph?.nodes.find((n) => n.type === 'hitpattern');
+  check('Hit Pattern: a long rhythm on a Sample imports as a Hit Pattern with its text kept exactly, nothing skipped, and plays the same hits', !longSmp.error && longSmp.report.skipped.length === 0 && hpn && hpn.params.text === longR && JSON.stringify(await evs(compile(longSmp.graph).code, 2)) === JSON.stringify(await evs(`setcpm(120/4)\n$: s("hh").struct("${longR}")`, 2)));
+  const notesImp = impH('setcpm(120/4)\n\n$: note("c3 e3 g3 c4").struct("x ~ x x").s("sawtooth")');
+  check('Hit Pattern: a short rhythm on a melody imports as a Rhythm Sequencer wired into the Instrument, and plays the same notes', notesImp.report.skipped.length === 0 && notesImp.graph.nodes.some((n) => n.type === 'rhythm') && JSON.stringify(await evs(compile(notesImp.graph).code, 2)) === JSON.stringify(await evs('setcpm(120/4)\n$: note("c3 e3 g3 c4").struct("x ~ x x").s("sawtooth")', 2)));
+  const notesLong = impH(`setcpm(120/4)\n\n$: note("c3 e3 g3 c4").struct("${longR}").s("sawtooth")`);
+  check('Hit Pattern: a long rhythm on a melody imports as a Hit Pattern into the Instrument, and plays the same notes', notesLong.report.skipped.length === 0 && notesLong.graph.nodes.some((n) => n.type === 'hitpattern') && JSON.stringify(await evs(compile(notesLong.graph).code, 2)) === JSON.stringify(await evs(`setcpm(120/4)\n$: note("c3 e3 g3 c4").struct("${longR}").s("sawtooth")`, 2)));
+  const euclidNotes = impH('setcpm(120/4)\n\n$: note("c3 e3 g3 c4").struct("x(3,8)").s("sawtooth")');
+  check('Hit Pattern: a euclidean rhythm on a melody is kept as written too', euclidNotes.report.skipped.length === 0 && euclidNotes.graph.nodes.some((n) => n.type === 'hitpattern' && n.params.text === 'x(3,8)'));
+}
+// The piano roll and hit strip: the numbers behind them.
+{
+  const { periodOf, rollLayout, hitLayout, pxPerCycle } = await import('../src/rollview.js');
+  const { queryPatch } = await import('../src/snapshot.js');
+  check('Piano roll: a plain pattern is one cycle, a <a b c> group runs three, two groups of 2 and 3 run six, and nested groups count too', periodOf('c3 e3 g3') === 1 && periodOf('<c3 e3 g3>') === 3 && periodOf('<a b> <c d e>') === 6 && periodOf('[<a b> c]@2 d') === 2 && periodOf('<[a b] c [d e f]>') === 3 && periodOf('') === 1);
+  check('Piano roll: a long cycle count is capped at 64, and groups inside brackets and weights are read correctly', periodOf('<a b c d e f g h i j> <a b c d e f g h i j k>') === 64 && periodOf('<a@3 b> c') === 2 && periodOf('<[a,b]@2 c>') === 2);
+  const ev = [{ start: 0, end: 0.5, note: 'c4', velocity: 1 }, { start: 0.5, end: 1, note: 'g4', velocity: 0.5 }, { start: 1, end: 2.5, note: 'c4' }];
+  const lay = rollLayout(ev, { cycles: 2, ppc: 100 });
+  check('Piano roll: notes sit at their time and pitch, longer notes are wider, a higher note is higher up, and loudness is kept', lay.notes.length === 3 && Math.abs(lay.notes[0].x) < 1e-9 && Math.abs(lay.notes[1].x - 50) < 1e-9 && lay.notes[1].y < lay.notes[0].y && lay.notes[2].w > lay.notes[0].w && lay.notes[1].v === 0.5 && lay.notes[2].v === 0.8);
+  check('Piano roll: it is always at least an octave tall (a few notes do not look huge), and a note running past the end is cut at the end', lay.hi - lay.lo >= 11 && Math.abs(lay.notes[2].x + lay.notes[2].w - 200) < 2);
+  const { timeScaleOf } = await import('../src/rollview.js');
+  const tg = { nodes: [{ id: 'a', type: 'notetext', params: {} }, { id: 'b', type: 'synth', params: {} }, { id: 'c', type: 'stack', params: {} }, { id: 'd', type: 'slow', params: { n: 61 } }, { id: 'e', type: 'fast', params: { n: 2 } }, { id: 'o', type: 'output', params: {} }], wires: [{ from: { node: 'a' }, to: { node: 'b' } }, { from: { node: 'b' }, to: { node: 'c' } }, { from: { node: 'c' }, to: { node: 'd' } }, { from: { node: 'd' }, to: { node: 'e' } }, { from: { node: 'e' }, to: { node: 'o' } }] };
+  check('Piano roll: a Slow or Fast module further along the wire changes how many bars the pattern spans (61 slow and 2 fast is 30.5), and nothing there means 1', Math.abs(timeScaleOf(tg, 'a') - 30.5) < 1e-9 && timeScaleOf({ nodes: [{ id: 'a', type: 'notetext', params: {} }], wires: [] }, 'a') === 1);
+  const hl = hitLayout([{ start: 0, end: 0.25 }, { start: 0.5, end: 0.75 }], { cycles: 1, ppc: 200 });
+  check('Hit strip: hits are placed by their time across the cycle', hl.hits.length === 2 && Math.abs(hl.hits[1].x - 100) < 1e-9 && hl.width === 200);
+  check('Piano roll: a long pattern is shown at a readable size and scrolls, or is fitted into the box', pxPerCycle(60, 260, false) === 44 && Math.abs(pxPerCycle(60, 260, true) * 60 - 260) < 1e-6 && pxPerCycle(1, 260, false) === 150);
+  const qe = await queryPatch('$: note("c3@3 e3")', 1), qh = await queryPatch('$: note("c3").struct("x ~ x*2")', 1);
+  check('Piano roll and hit strip: the real engine gives back the notes and hits the picture draws (and a held note is longer)', qe.length === 2 && (qe[0].end - qe[0].start) > (qe[1].end - qe[1].start) && qh.length === 3);
 }
 process.exit(failures ? 1 : 0);

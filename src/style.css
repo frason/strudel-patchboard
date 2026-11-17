@@ -1008,3 +1008,11 @@ html, body { overscroll-behavior: none; }
 
 /* Each picture is fenced off from the rest of the page: its changes never make the browser lay out the whole board again */
 .fxpicwrap, .pulsewrap, .fmpicwrap { contain: layout paint; }
+
+/* Piano roll and hit strip */
+.rollwrap { margin-bottom: 6px; background: #0b0f13; border: 1px solid #27313b; border-radius: 6px; contain: layout paint; }
+.rollscroll { overflow-x: auto; overflow-y: hidden; border-radius: 6px 6px 0 0; }
+.rollcanvas { display: block; }
+.rollfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 8px 4px; border-top: 1px solid #1b242d; }
+.rollinfo { font: 600 9px var(--mono, monospace); color: #7fa6a2; }
+.rollfit { font: 600 9px var(--mono, monospace); color: #a9c7c4; background: #11202a; border: 1px solid #3c8f8a; border-radius: 4px; padding: 1px 7px; cursor: pointer; }

@@ -98,6 +98,19 @@ export const MODULES = {
     ],
     data: { cells: true },
   },
+  hitpattern: {
+    title: 'Hit Pattern', cat: 'sequencer', out: 'trigger', data: { hitstrip: true },
+    blurb: 'A rhythm written as text, for patterns too long or detailed for the Rhythm Sequencer: x is a hit and ~ a rest, with weights, repeats and brackets ("x ~ x*2 [x x] ~@3", or "<x [x x]>" to alternate by cycle). It has no pitch and no sound: plug it into the rhythm input of a Sample, or of an Instrument to put the rhythm on a melody. Code that spells out a long rhythm lands here when it does not fit the Rhythm Sequencer.',
+    params: [{ key: 'text', label: 'hits', kind: 'text', def: 'x ~ x x' }],
+  },
+  notetext: {
+    title: 'Note Pattern', cat: 'sequencer', out: 'notes', data: { noteroll: true },
+    blurb: 'A melody written as text, for tunes too long or too detailed for the step grid: note("c4@3 e4 ~ [g3,b3]@2"). Each word is a step, @3 holds a note for 3 steps, ~ is a rest and [a,b,c] plays a chord. The loudness box takes a pattern with exactly the same steps ("0.8@3 0.5 ~ 0.7@2"). Code that spells out a long melody lands here when it does not fit the Melody Sequencer.',
+    params: [
+      { key: 'text', label: 'notes', kind: 'text', def: 'c3 e3 g3 c4' },
+      { key: 'vel', label: 'loudness', kind: 'text', def: '', tip: 'optional: a pattern of 0 to 1 with the same steps as the notes' },
+    ],
+  },
   randnotes: {
     title: 'Random Notes', cat: 'sequencer', out: 'notes',
     inputs: [{ id: 'key', type: 'key', label: 'key', required: false }],
@@ -172,7 +185,7 @@ export const MODULES = {
   synth: {
     title: 'Instrument', cat: 'source', out: 'sound', data: { envelope: true },
     blurb: 'Plays notes with an instrument: a synth wave, a recorded piano, or one of 125 General MIDI instruments (guitar, strings, flute...). Whatever you pick is just the sound name in s("..."). Then shape it with the envelope and filter.',
-    inputs: [{ id: 'in', type: 'notes', label: 'notes', required: true }],
+    inputs: [{ id: 'in', type: 'notes', label: 'notes', required: true }, { id: 'rhythm', type: 'trigger', label: 'rhythm', required: false }],
     params: [
       { key: 'wave', label: 'sound', kind: 'instrument', def: 'sawtooth', call: 's', str: true, always: true },
       ...ADSR().map((p) => ({ ...p, fold: true })),
@@ -814,7 +827,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
-  ...['melody', 'rhythm', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
+  ...['melody', 'notetext', 'rhythm', 'hitpattern', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
   ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
 ]);
 

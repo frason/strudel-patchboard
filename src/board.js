@@ -9,6 +9,8 @@ import { INSTRUMENTS, CATEGORIES as INST_CATS, instrumentOf } from './instrument
 import { buildFmDiagram } from './fmdiagram.js';
 import { buildPulseDiagram } from './pulsediagram.js';
 import { FXPICS } from './fxpics.js';
+import { ROLLS } from './rollview.js';
+const PICS = { ...FXPICS, ...ROLLS };   // every small picture a module can show, by the flag it sets in its data
 import { soundIconSvg, hasSoundIcon, soundGlyph } from './soundicons.js';
 import { icon } from './icons.js';
 import { buildFxRack } from './fxrack.js';
@@ -1323,7 +1325,7 @@ export function createBoard(root, store, hooks) {
     if (def.data?.envelope && !isCol(node)) { ctl.envEl = buildEnvelope(node, ctl, def); body.prepend(ctl.envEl); }
     if (def.data?.fmdiagram && !isCol(node)) body.prepend(buildFmDiagram(node, ctl, { store, hooks, h, relayout: () => setTimeout(drawCables, 0) }));
     if (def.data?.pulsepic && !isCol(node)) body.prepend(buildPulseDiagram(node, ctl, { store, h }));
-    for (const [flag, build] of Object.entries(FXPICS)) if (def.data?.[flag] && !isCol(node)) body.prepend(build(node, ctl, { store, h }));
+    for (const [flag, build] of Object.entries(PICS)) if (def.data?.[flag] && !isCol(node)) body.prepend(build(node, ctl, { store, h }));
     if (def.data?.chords && !isCol(node)) body.prepend(buildChords(node, ctl));
     else if (def.data?.cells && !isCol(node)) body.prepend(buildSequencer(node, ctl));
     if (def.data?.tracks && !isCol(node)) body.prepend(buildDrums(node, ctl));
@@ -1883,7 +1885,7 @@ export function createBoard(root, store, hooks) {
     v.ctl.arrange?.draw(node.params);
     v.ctl.fmdiagram?.draw(node.params);
     v.ctl.pulsepic?.draw(node.params);
-    for (const flag of Object.keys(FXPICS)) v.ctl[flag]?.draw(node.params);
+    for (const flag of Object.keys(PICS)) v.ctl[flag]?.draw(node.params);
     v.ctl.fxrack?.draw(node.params);
     v.ctl.mixer?.draw(node.params);
     v.ctl.envelope?.draw(node.params);

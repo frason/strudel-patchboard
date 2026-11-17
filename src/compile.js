@@ -206,6 +206,14 @@ export function compile(g) {
         }
         return chain(base, calls, depth, inline);
       }
+      case 'hitpattern': return [S(q(String(p.text || 'x').trim() || 'x'), { ...m, role: 'mini', note: 'a rhythm in mini-notation: x is a hit, ~ a rest, @3 holds for 3 steps, *2 repeats, [x x] squeezes two hits into one step.' })];
+      case 'notetext': {   // a melody written as text: note("…") with an optional matching .velocity("…")
+        const m2 = { ...m, role: 'mini' };
+        const base = [S('note(', { ...m, role: 'fn', note: 'note("…") is the melody written out as text. Each word is a step; @3 holds a note for 3 steps; ~ is a rest; [c3,e3,g3] plays several notes at once.' }), S(q(String(p.text || '~').trim() || '~'), m2), S(')', m)];
+        const calls = [];
+        if (String(p.vel || '').trim()) calls.push([S('.velocity(', { ...m, role: 'fn', note: 'velocity("…") sets how hard each step is played (0 to 1). It needs the same steps as the notes.' }), S(q(String(p.vel).trim()), m2), S(')', m)]);
+        return chain(base, calls, depth, inline);
+      }
       case 'chords': {
         const key = effectiveKey(g, n);
         const meta = { ...m, role: 'mini' };
@@ -301,7 +309,11 @@ export function compile(g) {
       case 'synth': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'notes');
-        const calls = paramCalls(n, depth);
+        const trig = input(n, 'rhythm', depth, true);
+        if (!trig && wiresInto(g, n.id, 'rhythm').length) return silent(n, 'rhythm');
+        const calls = [];
+        if (trig) calls.push([S('.struct(', { ...m, role: 'fn', note: 'struct("x ~ x") puts the rhythm from the wire on the notes: x = hit, ~ = silence. Each hit plays the note that sits at that point of the cycle.' }), ...trig, S(')', m)]);
+        calls.push(...paramCalls(n, depth));
         return chain(up, calls, depth, inline);
       }
       case 'sample': {

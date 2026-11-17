@@ -9,6 +9,7 @@ import { parseChord, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
 class Skip extends Error {}
 
 const pwGiven = new WeakMap();
+const implicitSynths = new WeakSet();   // instruments the importer made only because a note pattern needs one: a later .s() on the whole stack can set their sound
 // effects the code can name that the audio engine bundled with Patchboard has no code to play: skipped with a reason, never turned into a module that is silent
 const NO_BROWSER_FX = { chorus: 'a chorus', ring: 'ring modulation', ringf: 'ring modulation', ringdf: 'ring modulation', leslie: 'a rotating-speaker effect', lrate: 'a rotating-speaker effect', lsize: 'a rotating-speaker effect' };
 const SIGNALS = { sine: 'sine', saw: 'saw', tri: 'tri', square: 'square', rand: 'rand' };
@@ -349,6 +350,12 @@ export function importStrudel(code, { sounds = null } = {}) {
         const co = coarsen(items, 'melody');
         if (co) { coarse = co; cells = cellsFromItems(co.items, 'melody', conv); }
       }
+      if (cells.length > 16 && !deg && name === 'note' && mode0 === 'steps' && text.length <= 8000) {   // too long or too fine for the step grid: keep it exactly as written, as a Note Pattern
+        S.melody = add('notetext', { text, vel: '' }, stmt);
+        S.root = S.melody;
+        S.kind = 'notes';
+        report.notes.push(`line ${root.loc.start.line}: this pattern has ${cells.length} steps, more than the Melody Sequencer holds, so it was kept as written in a Note Pattern module.`);
+      } else {
       if (cells.length < 1 || cells.length > 16) throw new Skip(`${cells.length} steps (1 to 16 are supported${cells.length > 16 ? ', and no grid of 16 steps or fewer fits where these notes start and how long they last' : ''})`);
       cells.forEach((c) => { c.vel = 1; });
       const mode = paceMode(slow, mode0, cells.length);
@@ -360,7 +367,9 @@ export function importStrudel(code, { sounds = null } = {}) {
         if (coarse.clip !== null) S.pre.push({ type: 'clip', params: { n: coarse.clip } });
         report.notes.push(`line ${root.loc.start.line}: this pattern spells out ${coarse.from} steps, but every note starts on a coarser grid, so it was written as ${coarse.to} steps${coarse.clip !== null ? ` plus a Note length of ${coarse.clip}` : ''}. The notes and their timing are the same.`);
       }
+      }
       S.instrument = add('synth', { wave: 'triangle' }, stmt);
+      implicitSynths.add(S.instrument);
       S.sources.push(S.instrument);
     } else if (name === 'chord') {
       const text = str(root.arguments?.[0]);
@@ -427,9 +436,19 @@ export function importStrudel(code, { sounds = null } = {}) {
         catch (e) { if (e instanceof Skip) skip(a, e.message, where); else throw e; }
       }
       if (!secs.length) throw new Skip('nothing inside could be read');
-      if (secs.length > 6) { skip(root, `${secs.length - 6} arrange() sections past the sixth (a module holds up to 6)`, 'arrange(…)'); secs.length = 6; }
-      const an = add('arrange', { n: Math.max(2, secs.length), lens: [4, 4, 4, 4, 4, 4].map((d, i) => secs[i]?.len ?? d) }, stmt);
-      secs.forEach((s2, j) => wire(s2.kid.head, an, 'in' + (j + 1)));
+      // a module holds six sections: more than six are nested, six at a time (an arrange of arranges plays the same song)
+      const arrangeNode = (grp) => {
+        const node = add('arrange', { n: Math.max(2, grp.length), lens: [4, 4, 4, 4, 4, 4].map((d, i) => Math.min(9999, grp[i]?.len ?? d)) }, stmt);
+        grp.forEach((g, j) => wire(g.head, node, 'in' + (j + 1)));
+        return node;
+      };
+      let cur = secs.map((s2) => ({ len: s2.len, head: s2.kid.head }));
+      while (cur.length > 6) {
+        const next = [];
+        for (let i = 0; i < cur.length; i += 6) { const grp = cur.slice(i, i + 6); next.push(grp.length === 1 ? grp[0] : { len: grp.reduce((t, g) => t + g.len, 0), head: arrangeNode(grp) }); }
+        cur = next;
+      }
+      const an = arrangeNode(cur);
       S.root = an; S.sources = secs.flatMap((s2) => s2.kid.sources);
       S.extraHeads = [];
     } else if (name === 'silence') {
@@ -448,13 +467,20 @@ export function importStrudel(code, { sounds = null } = {}) {
     }
     // velocity pattern lines up with the melody's steps
     for (const v of velocity) {
+      if (S.melody.type === 'notetext') { S.melody.params.vel = v.text.slice(0, 8000); continue; }   // a Note Pattern keeps its loudness pattern as text
       try {
         const { items } = readSteps(v.text, 'melody', (l) => l);
-        const vs = expand(items);
         const cells = S.melody.params.cells;
-        const idx = cells.map((_, i) => i).filter((i) => !(i > 0 && cells.some((c, j) => j < i && (c.len || 1) > i - j && ((c.n && c.n.length) || (c.d && c.d.length) || c.sub))));
-        if (vs.length !== idx.length) throw new Skip('the velocity pattern does not line up with the notes');
-        vs.forEach((it, k) => { const w = it.t === 'word' ? Number(it.v) : 1; cells[idx[k]].vel = Number.isFinite(w) ? w : 1; });
+        // each loudness item covers as many steps as its weight (@n) or its long repeat, so match them to the notes by where they start
+        const at = []; let pos = 0;
+        for (const it of expand(items)) {
+          const w = it.rep > 4 && (it.len || 1) === 1 ? it.rep : (it.len || 1);
+          const val = it.t === 'word' ? Number(it.v) : (it.rest || it.t === 'rest') ? null : 1;
+          for (let k = 0; k < w; k++) at[pos + k] = val;
+          pos += w;
+        }
+        if (pos !== cells.length) throw new Skip('the velocity pattern does not line up with the notes');
+        cells.forEach((c, i) => { if (at[i] !== null && at[i] !== undefined && Number.isFinite(at[i])) c.vel = Math.min(1, Math.max(0, at[i])); });
       } catch (e) { if (e instanceof Skip) report.skipped.push({ line: v.line, text: '.velocity(…)', reason: e.message }); else if (e instanceof Unsupported) report.skipped.push({ line: v.line, text: '.velocity(…)', reason: e.message }); else throw e; }
     }
 
@@ -520,14 +546,23 @@ export function importStrudel(code, { sounds = null } = {}) {
     if (n === 's' || n === 'sound') {
       const t = str(a[0]);
       if (t === null) throw new Skip('a sound name that is not a plain string');
-      if (S.kind === 'notes' && S.instrument) { if (/[\s,<>\[\]*~!@]/.test(t.trim())) throw new Skip('a sound pattern (several sounds)'); S.instrument.params.wave = t.trim(); return; }
+      if (S.kind === 'notes' && S.instrument) { if (/[\s,<>\[\]*~!@]/.test(t.trim())) throw new Skip('a sound pattern (several sounds)'); S.instrument.params.wave = t.trim(); implicitSynths.delete(S.instrument); return; }
+      const plain = src.filter((x) => x.type === 'synth' && implicitSynths.has(x));
+      if (plain.length) {   // stack(a, b, c).s("sawtooth"): the sound applies to every lane that was not given one
+        if (/[\s,<>\[\]*~!@]/.test(t.trim())) throw new Skip('a sound pattern (several sounds)');
+        plain.forEach((x) => { x.params.wave = t.trim(); implicitSynths.delete(x); });
+        return;
+      }
       throw new Skip('a second .s() on this pattern');
     }
     if (n === 'bank') { const t = str(a[0]); if (t === null) throw new Skip('bank with something other than a name'); const targets = src.filter((s) => s.type === 'sample'); if (!targets.length) throw new Skip('bank() needs a sample'); targets.forEach((s) => { s.params.bank = t; }); return; }
     if (n === 'fit') { src.filter((s) => s.type === 'sample').forEach((s) => { s.params.fit = 'on'; }); return; }
     if (n === 'struct') {
       const root = S.root;
-      if (!root || root.type !== 'sample') throw new Skip('struct() only on a single sample');
+      // a rhythm goes on a single sample (its rhythm input) or on a melody (the Instrument's rhythm input)
+      const onNotes = !!(root && S.kind === 'notes' && S.instrument && ['melody', 'notetext', 'randnotes'].includes(root.type));
+      if (!root || (root.type !== 'sample' && !onNotes)) throw new Skip('struct() only on a single sample or a melody');
+      const target = onNotes ? S.instrument : root, port = onNotes ? 'rhythm' : 'in';
       // "x*8?0.4" (with an optional .ribbon(n, 1)): what a Random Rhythm module writes
       {
         let sa = a[0], loop = 0;
@@ -537,15 +572,25 @@ export function importStrudel(code, { sounds = null } = {}) {
           const steps = Number(mm[1]), drop = mm[2] === undefined ? 0 : Number(mm[2]);
           if (steps >= 1 && steps <= 16 && drop >= 0 && drop <= 0.95 && Number.isInteger(loop) && loop >= 0 && loop <= 99) {
             const rr = add('randrhythm', { steps, density: +(1 - drop).toFixed(4), loop }, S.stmt);
-            wire(rr, root, 'in');
+            wire(rr, target, port);
             return;
           }
         }
       }
       const t = str(a[0]);
       if (t === null) throw new Skip('struct() with something other than a pattern string');
-      const { items, mode: mode0, fast, slow } = readSteps(t, 'rhythm', (l) => l, { euclid: true });
-      if (items.length === 1 && items[0].euclid) {
+      let parsed = null;
+      try { const rs = readSteps(t, 'rhythm', (l) => l, { euclid: true }); parsed = { ...rs, cells: rs.items.length === 1 && rs.items[0].euclid ? null : cellsFromItems(rs.items, 'rhythm', (l) => l) }; }
+      catch (e) { if (!(e instanceof Skip)) throw e; parsed = { err: e.message }; }
+      if (parsed.err || (parsed.cells && (parsed.cells.length < 1 || parsed.cells.length > 16)) || (onNotes && parsed.cells === null)) {   // too long or too fine for the Rhythm Sequencer: keep it exactly as written, as a Hit Pattern
+        if (t.length > 8000) throw new Skip(parsed.err || `${parsed.cells.length} steps (1 to 16 are supported)`);
+        const hp = add('hitpattern', { text: t }, S.stmt);
+        wire(hp, target, port);
+        report.notes.push(`line ${S.stmt?.loc?.start?.line ?? c.prop.loc.start.line}: this rhythm is more than the Rhythm Sequencer holds${parsed.err ? ` (${parsed.err})` : ` (${parsed.cells ? parsed.cells.length + ' steps' : 'a euclidean rhythm'})`}, so it was kept as written in a Hit Pattern module.`);
+        return;
+      }
+      const { items, mode: mode0, fast, slow } = parsed;
+      if (items.length === 1 && items[0].euclid && !onNotes) {
         const e = items[0].euclid;
         const rh = add('rhythm', { steps: 1, mode, cells: [{ on: true, len: 1 }] }, S.stmt);
         wire(rh, root, 'in');
@@ -555,11 +600,10 @@ export function importStrudel(code, { sounds = null } = {}) {
         void fast;
         return;
       }
-      const cells = cellsFromItems(items, 'rhythm', (l) => l);
-      if (cells.length < 1 || cells.length > 16) throw new Skip(`${cells.length} steps (1 to 16 are supported)`);
+      const cells = parsed.cells || cellsFromItems(items, 'rhythm', (l) => l);
       const mode = paceMode(slow, mode0, cells.length);
       const rh = add('rhythm', { steps: cells.length, mode, cells }, S.stmt);
-      wire(rh, root, 'in');
+      wire(rh, target, port);
       if (fast !== 1) S.pre.push({ type: 'fast', params: { n: fast } });
       return;
     }
