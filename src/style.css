@@ -949,3 +949,10 @@ html, body { overscroll-behavior: none; }
 .snap-wrap { overflow-x: auto; margin-top: 10px; }
 .snap-wrap .snap-canvas { margin-top: 0; }
 @media (max-width: 700px) { .snap-wrap .snap-canvas { width: 900px; max-width: none; } }
+
+/* Pulse width picture */
+.pulsewrap { margin-bottom: 6px; background: #0b0f13; border: 1px solid #27313b; border-radius: 6px; }
+.pulsepic { display: block; width: 100%; height: auto; pointer-events: none; user-select: none; }
+.pp-wave { stroke: #b48cff; stroke-width: 2; stroke-linejoin: miter; }
+.pp-glow { stroke: #b48cff; stroke-width: 6; opacity: .18; }
+.pp-axis { stroke: #27313b; stroke-width: 1; stroke-dasharray: 3 3; }

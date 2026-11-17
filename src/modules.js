@@ -381,7 +381,7 @@ export const MODULES = {
     ],
   },
   pulsewidth: {
-    title: 'Pulse width', cat: 'effect', out: 'sound',
+    title: 'Pulse width', cat: 'effect', out: 'sound', data: { pulsepic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
     blurb: 'Shapes the Pulse wave: how wide each pulse is, and how much that width swings back and forth. A swinging width gives the swirling, nasal buzz of old home-computer chips (the SID in the Commodore 64). It only works on an Instrument set to the pulse wave.',
     params: [
