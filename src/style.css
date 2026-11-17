@@ -956,3 +956,33 @@ html, body { overscroll-behavior: none; }
 .pp-wave { stroke: #b48cff; stroke-width: 2; stroke-linejoin: miter; }
 .pp-glow { stroke: #b48cff; stroke-width: 6; opacity: .18; }
 .pp-axis { stroke: #27313b; stroke-width: 1; stroke-dasharray: 3 3; }
+
+/* FM picture */
+.fmpicwrap { border-bottom: 1px solid #1b242d; }
+.fmpic { display: block; width: 100%; height: auto; touch-action: none; user-select: none; }
+.fp-axis { stroke: #27313b; stroke-width: 1; stroke-dasharray: 3 4; }
+.fp-bar { stroke: var(--c, #3c8f8a); stroke-width: 2; stroke-linecap: round; pointer-events: none; }
+.fp-note { stroke: var(--c, #52c7c0); }
+.fp-hit { stroke: transparent; stroke-width: 14; cursor: pointer; }
+.fp-ring { fill: #11202a; stroke: var(--c, #52c7c0); stroke-width: 1.6; }
+.fp-grab { cursor: grab; }
+.fp-grab:hover { stroke-width: 2.4; }
+.fp-ring.fp-sel { stroke: #fff; stroke-width: 2; }
+.fp-arm { stroke: var(--c, #52c7c0); stroke-width: 1.4; opacity: .85; stroke-linejoin: round; pointer-events: none; }
+.fp-fb { fill: none; stroke: #ffb454; stroke-width: 1.4; opacity: .85; }
+.fp-fb.fp-zero { stroke-dasharray: 2 3; opacity: .35; }
+.fp-wave { stroke: var(--c, #b48cff); opacity: .6; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+.fp-glow { stroke-width: 5; opacity: .08; }
+.fp-tip { fill: var(--c, #b48cff); pointer-events: none; }
+.fp-txt { fill: #a9c7c4; font: 600 9px var(--mono, monospace); pointer-events: none; }
+.fp-dim { fill: #5f7b79; font-weight: 400; }
+.fp-envfill { fill: var(--c, #52c7c0); opacity: .14; pointer-events: none; }
+.fp-envline { stroke: var(--c, #52c7c0); stroke-width: 1.6; stroke-linejoin: round; pointer-events: none; }
+.fp-opbtn rect { fill: #11202a; stroke: var(--c, #3c8f8a); stroke-width: 1; cursor: pointer; }
+.fp-opbtn text { fill: var(--c, #a9c7c4); font: 600 10px var(--mono, monospace); pointer-events: none; }
+.fp-opbtn.on rect { fill: color-mix(in srgb, var(--c) 30%, #11202a); stroke: var(--c); stroke-width: 1.6; }
+.fp-opbtn.off { opacity: .45; }
+.fp-lab { paint-order: stroke; stroke: #0b0f13; stroke-width: 3px; stroke-linejoin: round; fill: var(--c, #a9c7c4); font: 600 8.5px var(--mono, monospace); pointer-events: none; }
+.fp-mid { fill: var(--c, #d6efec); }
+.fp-orange { fill: #ffb454; }
+.fmpicwrap .fm-legend { padding: 6px 8px 8px; }

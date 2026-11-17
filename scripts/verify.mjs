@@ -1038,4 +1038,27 @@ $: s("[hh ~@4 hh ~@14]*2")
   check('Pulse width: on a sawtooth it warns that only the pulse wave has a width', saw.issues.some((i) => /only shapes the pulse wave/.test(i.msg)));
   check('Pulse width: pulse is a listed Instrument sound', isInstrument('pulse'));
 }
+// FM animation: each shaker follows its own attack, decay and sustain.
+{
+  const { fmEnv, fmHold, fmStructure, fmSignals } = await import('../src/fmsignals.js');
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  const bell = { attack: 0, decay: 0.3, sustain: 0 };
+  check('FM animation: with no attack the shaker starts at full strength, falls over its decay to the sustain level, and a sustain of 0 goes silent', near(fmEnv(bell, 1, 0, 2), 1) && near(fmEnv(bell, 1, 0.15, 2), 0.5) && near(fmEnv(bell, 1, 0.3, 2), 0) && near(fmEnv(bell, 1, 1.5, 2), 0));
+  const slow = { attack: 0.5, decay: 0.5, sustain: 0.6 };
+  check('FM animation: a slow attack fades the shaker in, then it settles at the sustain level', near(fmEnv(slow, 1, 0, 2), 0) && near(fmEnv(slow, 1, 0.25, 2), 0.5) && near(fmEnv(slow, 1, 0.5, 2), 1) && near(fmEnv(slow, 1, 1.5, 2), 0.6));
+  check('FM animation: the shaker is let go at the end of the note', near(fmEnv(slow, 1, 2.1, 2), 0.3) && near(fmEnv(slow, 1, 2.3, 2), 0));
+  check('FM animation: modulators 2 to 4 read their own envelope (attack2, decay2, sustain2)', near(fmEnv({ attack2: 0, decay2: 0.2, sustain2: 0.5 }, 2, 0.1, 2), 0.75) && near(fmEnv({ attack: 9, decay: 9, sustain: 0 }, 2, 0, 2), 1));
+  check('FM animation: a longer attack plus decay makes a longer note, and it stays between 1.6 and 4.5 seconds', fmHold({ attack: 0, decay: 0.05 }, [1]) === 1.6 && fmHold({ attack: 1, decay: 1 }, [1]) === 2.9 && fmHold({ attack: 2, decay: 2 }, [1]) === 4.5);
+  const { fmShape } = await import('../src/modules.js');
+  const base = { index: 2, harm: 2, index2: 0, harm2: 1, decay: 0.4, sustain: 0.4 };
+  const S1 = fmStructure(base), sim = fmSignals(base, S1, () => 1, 0, 1024, 2);
+  const ref = fmShape(base, 'sine', 512, 2);
+  let maxDiff = 0; for (let k = 0; k < 1024; k++) maxDiff = Math.max(maxDiff, Math.abs(sim.note[k] - ref[k]));
+  check('FM animation: the wave under the note bar is the same wave as the "wave of one note" picture (worked out by the same sums)', maxDiff < 0.05);
+  const calm = fmSignals(base, S1, () => 0, 0, 256).note, sine = Array.from({ length: 256 }, (_, k) => Math.sin(2 * Math.PI * k / 256));
+  check('FM animation: when the shaker has faded away (envelope 0) the note is a plain sine', calm.every((v, k) => Math.abs(v - sine[k]) < 1e-3));
+  check('FM animation: a stronger shaker gives a different, richer wave', fmSignals({ ...base, index: 6 }, fmStructure({ ...base, index: 6 }), () => 1, 0, 256).note.some((v, k) => Math.abs(v - fmSignals(base, S1, () => 1, 0, 256).note[k]) > 0.2));
+  const st = fmStructure({ index: 1.5, index2: 1, harm: 1, harm2: 2 });
+  check('FM animation: a two-in-a-row patch draws operator 2 on top, then 1, then the note', st.rows.join() === '2,1,0');
+}
 process.exit(failures ? 1 : 0);

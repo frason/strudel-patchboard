@@ -4,6 +4,7 @@
 //   routes:  the four discs in a square. Drag from one disc to another (or to the note) to connect them; drag the dot on an arrow
 //            up or down to change how hard it shakes (down to 0 removes it); tap a dot to remove it; tap a disc to switch its feedback on or off.
 // Every handle also works from the keyboard (Tab to it, then the arrow keys), and a number grid under the routes picture does the same.
+import { buildFmPicture } from './fmpicture.js';
 import { FM_PRESETS, FM_ALGORITHMS, fmAlgorithmOf, FM_WAVE_NAMES, OWAVE, fmWaveFn, fmShape } from './modules.js';
 const NS = 'http://www.w3.org/2000/svg';
 const W = 240;
@@ -254,9 +255,9 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
   })();
 
   // ======================= tabs =======================
-  let view = viewMemory.get(node.id) || 'tune';
+  let view = viewMemory.get(node.id) || 'bars';
   const tabs = h('div', { class: 'fm-tabs', role: 'tablist' },
-    ...[['tune', 'tune'], ['routes', 'routes']].map(([v, label]) => h('button', { class: 'fm-tab' + (v === view ? ' on' : ''), role: 'tab', 'aria-selected': String(v === view), dataset: { v }, onclick: () => show(v) }, label)));
+    ...[['bars', 'bars'], ['tune', 'tune'], ['routes', 'routes']].map(([v, label]) => h('button', { class: 'fm-tab' + (v === view ? ' on' : ''), role: 'tab', 'aria-selected': String(v === view), dataset: { v }, onclick: () => show(v) }, label)));
   tabs.addEventListener('pointerdown', (e) => e.stopPropagation());
   // presets: pick one and every FM knob is set to it (all the others go back to their defaults first)
   const pick = h('select', { class: 'sel fm-presets', 'aria-label': 'FM preset', title: 'Load a ready-made FM sound. It replaces the FM settings; the Instrument above keeps its own.' },
@@ -322,9 +323,15 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
     for (let x = 0; x < W2; x++) { const v = s[Math.floor((x * s.length) / W2)]; const y = H2 / 2 - v * (H2 / 2 - 5); if (x) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
     ctx.stroke();
   };
-  const wrap = h('div', { class: 'fmwrap' }, h('div', { class: 'fm-pickrow' }, pick, algoBtn), tabs, tune.svg, routes.svg, grid.el, shapeLab, shapeCv, legendTune, legendRoutes);
+  const picture = buildFmPicture(node, ctl, { store, hooks, h, relayout });
+  const wrap = h('div', { class: 'fmwrap' }, h('div', { class: 'fm-pickrow' }, pick, algoBtn), tabs, picture.el, tune.svg, routes.svg, grid.el, shapeLab, shapeCv, legendTune, legendRoutes);
   function show(v) {
     view = v; viewMemory.set(node.id, v);
+    const pic = v === 'bars';
+    picture.setView(pic);   // bars: the bars and the envelope under them; tune and routes: just the envelope part, placed under the picture
+    (pic ? tabs : legendRoutes).after(picture.el);
+    if (ctl.envEl) ctl.envEl.style.display = 'none';   // the picture's own envelope strip and wave buttons replace the old block everywhere
+    shapeLab.style.display = shapeCv.style.display = pic ? 'none' : '';
     tune.svg.style.display = v === 'tune' ? '' : 'none';
     routes.svg.style.display = v === 'routes' ? '' : 'none';
     grid.el.style.display = v === 'routes' ? '' : 'none';
@@ -333,7 +340,7 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
     relayout?.();
   }
   show(view);
-  ctl.fmdiagram = { draw(p) { tune.draw(p); routes.draw(p); grid.draw(p); drawShape(p); } };
+  ctl.fmdiagram = { draw(p) { picture.draw(p); tune.draw(p); routes.draw(p); grid.draw(p); drawShape(p); } };
   ctl.fmdiagram.draw(node.params);
   return wrap;
 }
