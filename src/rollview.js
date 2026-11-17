@@ -1,7 +1,10 @@
 // A look at a pattern written as text: a piano roll for the Note Pattern module, a strip of hits for the Hit Pattern module.
 // The text is evaluated offline by the real engine (the same code check as playback; nothing sounds), so what is drawn is exactly what would play.
-// Read-only for now: you see the notes and hits, laid out over the pattern's own cycles, and can scroll along a long one or fit it all in.
+// You see the notes and hits laid out over the pattern's own cycles, and can scroll along a long one or fit it all in.
+// A plain one-cycle sequence can also be edited by clicking (see rolledit.js): click an empty spot to add, click a note to remove it, drag a note up or down to change its pitch, drag its right edge or drag out a new note to set its length.
 import { queryPatch, midiOf, noteName } from './snapshot.js';
+import { parseHitTree, writeHitTree, layoutHitTree, toggleAt, splitAt, mergeAt } from './hittree.js';
+import { parseEditable, writeEditable, stepAt, addAt, notesOf, addPitch, removePitch, movePitch, resizeAt } from './rolledit.js';
 
 const NOTE_COLOR = '#f2b134', HIT_COLOR = '#f0625f', GRID = '#27313b', BEAT = '#1c252d';
 const gcd = (a, b) => { while (b) [a, b] = [b, a % b]; return a; };
@@ -82,7 +85,13 @@ export function drawHits(canvas, lay) {
   const ctx = setup(canvas, Math.max(40, lay.width), lay.height);
   grid(ctx, lay);
   ctx.strokeStyle = GRID; ctx.beginPath(); ctx.moveTo(0, lay.top + lay.plot + 0.5); ctx.lineTo(lay.width, lay.top + lay.plot + 0.5); ctx.stroke();
-  for (const hit of lay.hits) { ctx.fillStyle = HIT_COLOR; ctx.globalAlpha = 0.45 + 0.55 * Math.min(1, hit.v); ctx.fillRect(hit.x, lay.top, hit.w, lay.plot); }
+  if (lay.cells) for (const c of lay.cells) {   // an editable strip: every step is a box, so what you click is what you see
+    if (c.rest) { ctx.strokeStyle = 'rgba(240,98,95,0.22)'; ctx.strokeRect(c.x + 1.5, lay.top + 1.5, Math.max(1, c.w - 3), lay.plot - 3); }
+    else { ctx.fillStyle = HIT_COLOR; ctx.globalAlpha = 0.9; ctx.fillRect(c.x + 1, lay.top + 1, Math.max(1, c.w - 2), lay.plot - 2); ctx.globalAlpha = 1; }
+  }
+  if (lay.groups) for (const g of lay.groups) { ctx.strokeStyle = 'rgba(240,98,95,0.55)'; ctx.beginPath(); ctx.moveTo(g.x + 1.5, lay.top + lay.plot + 2.5 + g.depth * 2); ctx.lineTo(g.x + g.w - 1.5, lay.top + lay.plot + 2.5 + g.depth * 2); ctx.stroke(); }
+  if (lay.cells) void 0;
+  else for (const hit of lay.hits) { ctx.fillStyle = HIT_COLOR; ctx.globalAlpha = 0.45 + 0.55 * Math.min(1, hit.v); ctx.fillRect(hit.x, lay.top, hit.w, lay.plot); }
   ctx.globalAlpha = 1;
 }
 
@@ -101,7 +110,7 @@ export function timeScaleOf(graph, nodeId) {
 }
 
 // ---- the views on the board ----
-function view(node, ctl, { store, h }, kind) {
+function view(node, ctl, { store, hooks, h }, kind) {
   const paramsOf = () => (store.graph.nodes.find((x) => x.id === node.id) || node).params;
   const canvas = h('canvas', { class: 'rollcanvas', role: 'img', 'aria-label': kind === 'notes' ? 'The notes of this pattern as a piano roll' : 'The hits of this pattern as a strip' });
   const scroll = h('div', { class: 'rollscroll' }, canvas);
@@ -109,20 +118,27 @@ function view(node, ctl, { store, h }, kind) {
   const fitBtn = h('button', { type: 'button', class: 'rollfit', title: 'Fit the whole pattern in the box, or show it at a readable size and scroll along it' }, 'fit');
   const foot = h('div', { class: 'rollfoot' }, info, fitBtn);
   const wrap = h('div', { class: 'rollwrap' }, scroll, foot);
-  let fit = false, events = null, cycles = 1, scale = 1, key = '', timer = 0, seq = 0, error = '';
+  let fit = false, events = null, cycles = 1, scale = 1, key = '', timer = 0, seq = 0, error = '', lastLay = null, selfEdit = false;
+  const editState = () => { const P = paramsOf(); return cycles === 1 && lastLay && hooks ? (kind === 'hits' ? (parseHitTree(P.text) ? { tree: true } : null) : parseEditable(P.text, P.vel, kind)) : null; };
   const paint = () => {
     if (!events) return;
     scale = timeScaleOf(store.graph, node.id);
     const bars = Math.max(1, Math.round(cycles * scale)), boxW = Math.max(160, scroll.clientWidth || 260), ppb = pxPerCycle(bars, boxW, fit || bars * pxPerCycle(bars, boxW, false) <= boxW), ppc = ppb * scale;
     const span = scale === 1 ? `${cycles} cycle${cycles === 1 ? '' : 's'}` : `${bars} bar${bars === 1 ? '' : 's'}`;
     if (kind === 'notes') {
-      const lay = rollLayout(events, { cycles, ppc, scale }); drawRoll(canvas, lay);
+      const lay = rollLayout(events, { cycles, ppc, scale }); lastLay = lay; drawRoll(canvas, lay);
       const ms = lay.notes.map((n) => n.m);
       info.textContent = events.length ? `${events.length} note${events.length === 1 ? '' : 's'} · ${span} · ${noteName(Math.min(...ms))} to ${noteName(Math.max(...ms))}` : error || 'no notes';
     } else {
-      drawHits(canvas, hitLayout(events, { cycles, ppc, scale }));
+      lastLay = hitLayout(events, { cycles, ppc, scale });
+      const tree = cycles === 1 ? parseHitTree(paramsOf().text) : null;
+      if (tree) { const L = layoutHitTree(tree), W = lastLay.ppc; lastLay.cells = L.leaves.map((l) => ({ x: l.a * W, w: (l.b - l.a) * W, rest: l.rest, path: l.path, wt: l.w })); lastLay.groups = L.groups.map((g) => ({ x: g.a * W, w: (g.b - g.a) * W, depth: g.depth })); lastLay.tree = tree; }
+      drawHits(canvas, lastLay);
       info.textContent = events.length ? `${events.length} hit${events.length === 1 ? '' : 's'} · ${span}` : error || 'no hits';
     }
+    const can = !!editState(); if (!can && events && events.length && hooks) info.textContent += kind === 'notes' ? ' · read-only: edit the text (click editing reads plain notes, chords like [c3,e3], ~ and @ only)' : ' · read-only: edit the text (click editing reads x, ~, [ ] groups, * and @ only)';
+    canvas.style.cursor = can ? 'crosshair' : 'default';
+    canvas.title = can ? (kind === 'notes' ? 'Click an empty spot to add a note, click a note to remove it, click another pitch inside a note to make a chord, drag a note up or down to change its pitch, drag its right edge to change its length' : 'Click a rest to add a hit, click a hit to remove it. Shift-click a step to cut it in two, Alt-click to fold a group back into one step') : '';
     fitBtn.style.display = canvas.offsetWidth > boxW + 2 || fit ? '' : 'none';
     fitBtn.textContent = fit ? 'detail' : 'fit';
   };
@@ -130,6 +146,61 @@ function view(node, ctl, { store, h }, kind) {
   fitBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
   scroll.addEventListener('pointerdown', (e) => e.stopPropagation());
   scroll.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+
+  // ---- editing by clicks ----
+  canvas.addEventListener('pointerdown', (e) => {
+    const ed = e.button ? null : editState(); if (!ed) return;
+    e.preventDefault();
+    if (kind === 'hits') {
+      const rect = canvas.getBoundingClientRect(), k = rect.width / (canvas.offsetWidth || rect.width) || 1, x = (e.clientX - rect.left) / k, W = lastLay.ppc;
+      const cell = (lastLay.cells || []).find((c) => x >= c.x && x < c.x + c.w); if (!cell) return;
+      const unit = Math.floor(((x - cell.x) / cell.w) * cell.wt);
+      const next = e.shiftKey ? splitAt(lastLay.tree, cell.path) : e.altKey ? mergeAt(lastLay.tree, cell.path) : toggleAt(lastLay.tree, cell.path, unit);
+      if (next) { selfEdit = true; hooks.setParam(node.id, 'text', writeHitTree(next)); selfEdit = false; }
+      return;
+    }
+    const rect = canvas.getBoundingClientRect(), k = rect.width / (canvas.offsetWidth || rect.width) || 1;   // the board may be zoomed: work in the picture's own pixels
+    const x = (e.clientX - rect.left) / k, y = (e.clientY - rect.top) / k, unitPx = lastLay.ppc / ed.total;
+    const at = stepAt(ed.steps, Math.floor(x / unitPx)); if (!at) return;
+    const rowH = lastLay.rowH || (lastLay.height - lastLay.top - 4) / 12, P0 = paramsOf();
+    const commit = (res) => {
+      const out = writeEditable(res.steps, ed.hasVel); selfEdit = true;
+      if (out.text !== paramsOf().text) hooks.setParam(node.id, 'text', out.text);
+      if (kind === 'notes' && out.vel !== (paramsOf().vel || '')) hooks.setParam(node.id, 'vel', out.vel);
+      selfEdit = false;
+    };
+    let base = ed.steps, idx = at.i, mode = 'none', startM = 0, moved = false;
+    const step = ed.steps[at.i], startPx = at.start * unitPx;
+    if (step.n === '~') {
+      let word = 'x';
+      if (kind === 'notes') { const lo = lastLay.lo ?? 60, hi = lastLay.hi ?? 71, m = Math.max(lo, Math.min(hi, hi - Math.floor((y - lastLay.top) / rowH))); word = noteName(m); }
+      const added = addAt(ed.steps, at.start + (Math.floor(x / unitPx) - at.start), word, ed.hasVel ? '0.8' : ''); if (!added) return;
+      base = added.steps; idx = added.index; commit(added);
+      if (kind !== 'notes') return;
+      mode = 'size'; moved = true; base = added.steps;
+    } else if (kind === 'notes') {
+      const endPx = (at.start + step.w) * unitPx;
+      const lo = lastLay.lo ?? 60, hi = lastLay.hi ?? 71, clickM = Math.max(lo, Math.min(hi, hi - Math.floor((y - lastLay.top) / rowH))), pitches = notesOf(step.n).map(midiOf);
+      if (!pitches.includes(clickM) && endPx - x > 6) { const r = addPitch(ed.steps, at.i, noteName(clickM)); if (r) commit(r); return; }   // another pitch inside a note's step makes a chord
+      mode = endPx - x <= 6 ? 'size' : 'pitch'; startM = pitches.includes(clickM) ? clickM : pitches[0] ?? 60;
+    }
+    const startY = y; let last = '';
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const move = (ev) => {
+      const px = (ev.clientX - rect.left) / k, py = (ev.clientY - rect.top) / k;
+      if (Math.abs(py - startY) > 3 || Math.abs(px - x) > 3) moved = true;
+      let res = null;
+      if (mode === 'size') res = resizeAt(base, idx, Math.max(1, Math.floor((px - (base === ed.steps ? startPx : stepStartPx(base, idx, unitPx))) / unitPx) + 1));
+      else if (mode === 'pitch' && moved) { const m = Math.max(0, Math.min(127, startM + Math.round((startY - py) / rowH))); res = movePitch(base, idx, noteName(startM), noteName(m)); }
+      if (res) { const sig = JSON.stringify(res.steps); if (sig !== last) { last = sig; commit(res); } }
+    };
+    const up = (ev) => {
+      canvas.removeEventListener('pointermove', move); canvas.removeEventListener('pointerup', up); canvas.removeEventListener('pointercancel', up);
+      try { canvas.releasePointerCapture(ev.pointerId); } catch { /* ignore */ }
+      if (mode === 'pitch' && !moved) { const r = removePitch(ed.steps, at.i, noteName(startM)); if (r) commit(r); }
+    };
+    canvas.addEventListener('pointermove', move); canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+  });
   const code = (p) => {
     const text = JSON.stringify(String(p.text || '').trim() || '~');
     if (kind === 'notes') { const vel = String(p.vel || '').trim(); return `$: note(${text})${vel ? `.velocity(${JSON.stringify(vel)})` : ''}`; }
@@ -148,12 +219,13 @@ function view(node, ctl, { store, h }, kind) {
     const k = `${p.text}|${p.vel || ''}|${timeScaleOf(store.graph, node.id)}`;
     if (k === key) return;
     key = k; clearTimeout(timer);
-    timer = setTimeout(() => compute(p), events ? 250 : 0);   // while you type, wait for a pause
+    timer = setTimeout(() => compute(p), events && !selfEdit ? 250 : 0);   // while you type, wait for a pause
   };
   ctl[kind === 'notes' ? 'noteroll' : 'hitstrip'] = { draw };
   draw(node.params);
   return wrap;
 }
+const stepStartPx = (steps, i, unitPx) => steps.slice(0, i).reduce((t, x) => t + x.w, 0) * unitPx;
 export const buildNoteRoll = (node, ctl, deps) => view(node, ctl, deps, 'notes');
 export const buildHitStrip = (node, ctl, deps) => view(node, ctl, deps, 'hits');
 export const ROLLS = { noteroll: buildNoteRoll, hitstrip: buildHitStrip };

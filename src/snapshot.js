@@ -4,7 +4,7 @@
 //  drawSnapshot    paints a layout on a canvas
 import { guardCode } from './guard.js';
 
-let offline = null;
+let offline = null, queue = Promise.resolve();
 // Evaluate compiled code without sound. Only code that passes the same guard as playback is ever run.
 export async function queryPatch(code, cycles) {
   const refused = guardCode(code);
@@ -16,9 +16,10 @@ export async function queryPatch(code, cycles) {
       return core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } });
     })();
   }
-  const { evaluate } = await offline;
-  const pat = await evaluate(code, false);
-  return pat.queryArc(0, cycles).filter((h) => h.hasOnset()).map((h) => {
+  // one at a time: the engine keeps the pattern it just evaluated in one shared place, so two pictures asking together could be handed each other's notes
+  const turn = queue.then(async () => { const { evaluate } = await offline; return (await evaluate(code, false)).queryArc(0, cycles); });
+  queue = turn.catch(() => {});
+  return (await turn).filter((h) => h.hasOnset()).map((h) => {
     const v = h.value || {}, begin = h.whole.begin.valueOf(), dur = h.duration.valueOf();
     return { start: begin, end: begin + dur, s: v.s, note: v.note, n: v.n, bank: v.bank, gain: v.gain, velocity: v.velocity };
   });

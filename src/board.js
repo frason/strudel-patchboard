@@ -1325,7 +1325,7 @@ export function createBoard(root, store, hooks) {
     if (def.data?.envelope && !isCol(node)) { ctl.envEl = buildEnvelope(node, ctl, def); body.prepend(ctl.envEl); }
     if (def.data?.fmdiagram && !isCol(node)) body.prepend(buildFmDiagram(node, ctl, { store, hooks, h, relayout: () => setTimeout(drawCables, 0) }));
     if (def.data?.pulsepic && !isCol(node)) body.prepend(buildPulseDiagram(node, ctl, { store, h }));
-    for (const [flag, build] of Object.entries(PICS)) if (def.data?.[flag] && !isCol(node)) body.prepend(build(node, ctl, { store, h }));
+    for (const [flag, build] of Object.entries(PICS)) if (def.data?.[flag] && !isCol(node)) body.prepend(build(node, ctl, { store, hooks, h }));
     if (def.data?.chords && !isCol(node)) body.prepend(buildChords(node, ctl));
     else if (def.data?.cells && !isCol(node)) body.prepend(buildSequencer(node, ctl));
     if (def.data?.tracks && !isCol(node)) body.prepend(buildDrums(node, ctl));

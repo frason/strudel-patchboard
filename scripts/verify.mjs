@@ -1222,5 +1222,34 @@ $: s("[hh ~@4 hh ~@14]*2")
   check('Piano roll: a long pattern is shown at a readable size and scrolls, or is fitted into the box', pxPerCycle(60, 260, false) === 44 && Math.abs(pxPerCycle(60, 260, true) * 60 - 260) < 1e-6 && pxPerCycle(1, 260, false) === 150);
   const qe = await queryPatch('$: note("c3@3 e3")', 1), qh = await queryPatch('$: note("c3").struct("x ~ x*2")', 1);
   check('Piano roll and hit strip: the real engine gives back the notes and hits the picture draws (and a held note is longer)', qe.length === 2 && (qe[0].end - qe[0].start) > (qe[1].end - qe[1].start) && qh.length === 3);
+
+  const E = await import('../src/rolledit.js');
+  const pe = E.parseEditable('c4@3 ~ e4 ~@2', '0.8@3 ~ 0.5 ~@2', 'notes');
+  check('Click editing: a flat note sequence with matching loudness is read, and written back exactly', pe && pe.total === 7 && E.writeEditable(pe.steps, true).text === 'c4@3 ~ e4 ~@2' && E.writeEditable(pe.steps, true).vel === '0.8@3 ~ 0.5 ~@2');
+  check('Click editing: brackets, groups, repeats, loudness with other steps, and odd words are not editable from the picture', ['[c3 e3] g3', '[c3]', '<c3 e3>', 'c3*2', 'c3!2 e3', 'hello'].every((t) => !E.parseEditable(t, '', 'notes')) && !E.parseEditable('c4 e4', '0.8', 'notes') && !E.parseEditable('x*2', '', 'hits'));
+  const r1 = E.addAt(pe.steps, 5, 'g4', '0.8');
+  check('Click editing: clicking inside a rest splits it around a new note and the total length does not change', r1 && E.writeEditable(r1.steps, true).text === 'c4@3 ~ e4 g4 ~' && r1.index === 3 && r1.steps.reduce((t, x) => t + x.w, 0) === 7 && E.addAt(pe.steps, 0, 'g4') === null);
+  check('Click editing: removing a note leaves a rest, and rests that meet are joined', E.writeEditable(E.removeAt(pe.steps, 2).steps, true).text === 'c4@3 ~@4' && E.writeEditable(E.removeAt(pe.steps, 2).steps, true).vel === '0.8@3 ~@4');
+  check('Click editing: dragging a note longer takes from the rest after it, shorter gives one back, and it never runs into the next note', E.writeEditable(E.resizeAt(pe.steps, 2, 3).steps, true).text === 'c4@3 ~ e4@3' && E.writeEditable(E.resizeAt(pe.steps, 0, 2).steps, true).text === 'c4@2 ~@2 e4 ~@2' && E.resizeAt(pe.steps, 0, 5) === null && E.resizeAt(pe.steps, 2, 4) === null);
+  check('Click editing: a pitch change keeps the steps, and a hit strip toggles hits and rests', E.writeEditable(E.setWord(pe.steps, 2, 'f4').steps, true).text === 'c4@3 ~ f4 ~@2' && (() => { const h = E.parseEditable('x ~ x x', '', 'hits'); const a = E.addAt(h.steps, 1, 'x', ''); return E.writeEditable(a.steps, false).text === 'x x x x' && E.writeEditable(E.removeAt(h.steps, 0).steps, false).text === '~@2 x x'; })());
+
+  const HT = await import('../src/hittree.js');
+  const t1 = HT.parseHitTree('x ~ [x x] x@2');
+  check('Hit tree: steps, groups and weights are read and written back unchanged', t1 && t1.length === 4 && t1[2].kids.length === 2 && t1[3].w === 2 && HT.writeHitTree(t1) === 'x ~ [x x] x@2');
+  check('Hit tree: repeats are opened out so they can be edited (x*2, [x ~]*2, x!2)', HT.writeHitTree(HT.parseHitTree('x*2 ~')) === '[x x] ~' && HT.writeHitTree(HT.parseHitTree('[x ~]*2')) === '[[x ~] [x ~]]' && HT.writeHitTree(HT.parseHitTree('x!2 ~')) === 'x x ~' && HT.writeHitTree(HT.parseHitTree('x*2@3')) === '[x x]@3');
+  check('Hit tree: alternation, stacks, chance, euclid and other words are not read', ['<x x>', '[x,x]', 'x?', 'x(3,8)', 'hh x', '[x x', 'x x]', ''].every((t) => HT.parseHitTree(t) === null));
+  const L1 = HT.layoutHitTree(t1), near = (a, b) => Math.abs(a - b) < 1e-9;
+  check('Hit tree: a group squeezes into one step, and a weighted step is wider', L1.leaves.length === 5 && near(L1.leaves[2].a, 0.25 * 1) === false && near(L1.leaves[2].a, 2 / 5) && near(L1.leaves[3].b - L1.leaves[3].a, (1 / 5) / 2) && L1.groups.length === 1);
+  const toggled = HT.toggleAt(t1, [0]), wide = HT.parseHitTree('x ~@4 x');
+  check('Hit tree: clicking flips a hit and a rest, and a wide rest is split around the new hit', HT.writeHitTree(toggled) === '~ ~ [x x] x@2' && HT.writeHitTree(HT.toggleAt(wide, [1], 2)) === 'x ~@2 x ~ x' && HT.writeHitTree(HT.toggleAt(t1, [2, 1])) === 'x ~ [x ~] x@2');
+  check('Hit tree: shift-click cuts a step in two and alt-click folds a group back', HT.writeHitTree(HT.splitAt(t1, [0])) === '[x x] ~ [x x] x@2' && HT.writeHitTree(HT.splitAt(t1, [1])) === 'x [~ ~] [x x] x@2' && HT.writeHitTree(HT.mergeAt(t1, [2, 0])) === 'x ~ x x@2' && HT.mergeAt(t1, [0]) === null);
+  const eng = await queryPatch('$: note("c3").struct("' + HT.writeHitTree(HT.parseHitTree('x*2 ~ [x ~ x]@2 x')) + '")', 1), expectLeaves = HT.layoutHitTree(HT.parseHitTree('x*2 ~ [x ~ x]@2 x')).leaves.filter((l) => !l.rest);
+  check('Hit tree: the real engine plays the hits where the picture puts them', eng.length === expectLeaves.length && eng.every((e, i) => Math.abs(e.start - expectLeaves[i].a) < 1e-6));
+
+  const [qa, qb, qc] = await Promise.all([queryPatch('$: note("c3 f3 g#3 ~ e4 f4")', 1), queryPatch('$: note("c3 f3 g#3 c4")', 1), queryPatch('$: note("a3 ~ ~ b3")', 1)]);
+  check('Piano roll: pictures asking at the same moment each get their own notes (5, 4 and 2 here)', qa.length === 5 && qb.length === 4 && qc.length === 2);
+
+  const ch = E.parseEditable('c3 f3 [g#3,f3] ~ c4', '', 'notes');
+  check('Click editing: chords like [g#3,f3] are read, a pitch can be added, removed or moved inside one, and a chord of one note is written as a single note', ch && ch.steps[2].n === '[g#3,f3]' && E.writeEditable(E.addPitch(ch.steps, 0, 'e3').steps, false).text === '[c3,e3] f3 [g#3,f3] ~ c4' && E.writeEditable(E.removePitch(ch.steps, 2, 'g#3').steps, false).text === 'c3 f3 f3 ~ c4' && E.writeEditable(E.movePitch(ch.steps, 2, 'f3', 'c4').steps, false).text === 'c3 f3 [g#3,c4] ~ c4' && E.addPitch(ch.steps, 0, 'c3') === null && E.writeEditable(E.removePitch(ch.steps, 4, 'c4').steps, false).text === 'c3 f3 [g#3,f3] ~@2');
 }
 process.exit(failures ? 1 : 0);
