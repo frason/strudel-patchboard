@@ -380,6 +380,16 @@ export const MODULES = {
       { key: 'depth', label: 'depth', kind: 'knob', min: 0, max: 4, step: 0.05, def: 0.5, call: 'vibmod', unit: 'st', always: true, wire: true, tip: 'how far the pitch moves, in semitones' },
     ],
   },
+  pulsewidth: {
+    title: 'Pulse width', cat: 'effect', out: 'sound',
+    inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
+    blurb: 'Shapes the Pulse wave: how wide each pulse is, and how much that width swings back and forth. A swinging width gives the swirling, nasal buzz of old home-computer chips (the SID in the Commodore 64). It only works on an Instrument set to the pulse wave.',
+    params: [
+      { key: 'width', label: 'width', kind: 'knob', min: 0.05, max: 0.95, step: 0.01, def: 0.5, call: 'pw', always: true, wire: true, tip: 'how wide the pulse is: 0.5 is a square wave, small numbers sound thin and nasal (pw)' },
+      { key: 'rate', label: 'sweep speed', kind: 'knob', min: 0.1, max: 20, step: 0.1, def: 1, call: 'pwrate', unit: 'Hz', log: true, always: true, wire: true, tip: 'how many times a second the width swings (pwrate)' },
+      { key: 'depth', label: 'sweep depth', kind: 'knob', min: 0, max: 0.45, step: 0.01, def: 0.3, call: 'pwsweep', always: true, wire: true, tip: 'how far the width swings either side of its middle: 0 holds it still (pwsweep)' },
+    ],
+  },
   ring: {
     title: 'Ring mod', cat: 'effect', out: 'sound',
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
@@ -833,7 +843,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
   ...['melody', 'rhythm', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
-  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'ring', 'vowel', 'djf', 'leslie', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'chorus', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
+  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'ring', 'vowel', 'djf', 'leslie', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'chorus', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
 ]);
 
 // FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.

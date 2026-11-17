@@ -26,6 +26,7 @@ export function labelOf(id) {
 const SYNTH = [
   ['sine', 'Sine wave: pure and smooth'], ['sawtooth', 'Sawtooth: bright and buzzy'], ['square', 'Square wave: hollow, retro'],
   ['triangle', 'Triangle wave: soft and mellow'], ['supersaw', 'Supersaw: several detuned saws, big trance lead'],
+  ['pulse', 'Pulse wave: nasal and buzzy, like an old home-computer chip (shape it with Pulse width)'],
 ];
 
 export const INSTRUMENTS = [

@@ -11,7 +11,7 @@ const METHODS = new Set(`acidenv analyze arp attack bank bpf bpq chord chorus co
 clip euclid every fast fit late legato swingBy fm fm11 fm12 fm13 fm14 fm2 fm20 fm22 fm23 fm24 fm3 fm30 fm31 fm33 fm34 fm4 fm40 fm41 fm42 fm44 fmattack fmattack2 fmattack3 fmattack4 fmdecay fmdecay2 fmdecay3 fmdecay4
 fmh fmh2 fmh3 fmh4 fmsustain fmsustain2 fmsustain3 fmsustain4 fmwave fmwave2 fmwave3 fmwave4 ftype gain hpf hpq leslie lpa lpd lpenv lpf lpq lps lrate lsize mode mul orbit pan phaser phasercenter
 phaserdepth phasersweep ply postgain pow pattack pdecay penv range release repeat rev ribbon ring ringf room roomsize round s scale scramble segment shape shuffle slow sometimesBy speed squiz
-struct sustain tremolo tremolosync tremolodepth tremoloshape transpose velocity vib vibmod voicing vowel _scope _pianoroll _punchcard _spiral _pitchwheel`.split(/\s+/).filter(Boolean));
+struct sustain pw pwrate pwsweep tremolo tremolosync tremolodepth tremoloshape transpose velocity vib vibmod voicing vowel _scope _pianoroll _punchcard _spiral _pitchwheel`.split(/\s+/).filter(Boolean));
 // helper definitions the compiler writes word for word (nothing in them depends on the patch): allowed only when they match exactly
 const FIXED = new Set(["register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9).lps(.2).lpd(.12))"]);
 const MAX_CHARS = 600_000, MAX_NODES = 60_000;

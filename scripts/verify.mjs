@@ -301,7 +301,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
 
 {
   const { INSTRUMENTS, instrumentOf, searchInstruments, categoryOf, labelOf } = await import('../src/instruments.js');
-  check('instrument list: 5 synths, recorded piano, 125 General MIDI, unique ids', INSTRUMENTS.length === 131 && new Set(INSTRUMENTS.map((i) => i.id)).size === 131);
+  check('instrument list: 6 synths, recorded piano, 125 General MIDI, unique ids', INSTRUMENTS.length === 132 && new Set(INSTRUMENTS.map((i) => i.id)).size === 132);
   check('instruments are categorised', instrumentOf('gm_flute').cat === 'Winds' && instrumentOf('gm_violin').cat === 'Strings' && instrumentOf('gm_acoustic_guitar_nylon').cat === 'Guitar' && instrumentOf('gm_trumpet').cat === 'Brass' && instrumentOf('sawtooth').cat === 'Synth' && instrumentOf('piano').kind === 'sample');
   check('search finds by plain words', searchInstruments('guitar').length === 9 && searchInstruments('flute', 'Winds').some((i) => i.id === 'gm_flute') && searchInstruments('flute', 'Brass').length === 0);
   check('labels read as words', labelOf('gm_acoustic_guitar_nylon') === 'Acoustic guitar nylon' && labelOf('gm_epiano1') === 'Electric piano 1');
@@ -1018,5 +1018,24 @@ $: s("[hh ~@4 hh ~@14]*2")
   let refused = false; try { await queryPatch('globalThis.__pwn = 1;\n$: s("bd")', 1); } catch (e) { refused = /Not drawn/.test(e.message) && globalThis.__pwn === undefined; }
   check('Snapshot: code that playback would refuse is refused here too, and never run', refused);
   check('Snapshot: note names and numbers become MIDI notes', midiOf('c3') === 48 && midiOf('eb2') === 39 && midiOf('bb1') === 34 && midiOf(60) === 60 && midiOf('xx') === null);
+}
+// Pulse width: the pulse wave and its width sweep. Checked against real Strudel.
+{
+  const { importStrudel } = await import('../src/importer.js');
+  const { isInstrument } = await import('../src/instruments.js');
+  const events = async (code) => (await evaluate(code, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => h.whole.begin.toFraction() + ' ' + JSON.stringify(h.value, Object.keys(h.value).sort())).sort();
+  const src = 'setcpm(110/4)\n\n$: note("a2 c3").s("pulse").pw(0.3).pwrate(2).pwsweep(0.2)';
+  const r = importStrudel(src);
+  const pwn = r.graph.nodes.find((n) => n.type === 'pulsewidth');
+  check('Pulse width: pw, pwrate and pwsweep on a pulse wave import into one Pulse width module with nothing skipped', !r.error && !r.report.skipped.length && pwn && pwn.params.width === 0.3 && pwn.params.rate === 2 && pwn.params.depth === 0.2);
+  const back = compile(r.graph).code;
+  check('Pulse width: the module writes the same three calls back and plays the same events', /\.pw\(0\.3\)\s*\.pwrate\(2\)\s*\.pwsweep\(0\.2\)/.test(back) && JSON.stringify(await events(back)) === JSON.stringify(await events(src)));
+  const only = importStrudel('$: note("a2").s("pulse").pw(0.3)').graph.nodes.find((n) => n.type === 'pulsewidth');
+  check('Pulse width: pw alone means no sweep (Strudel sweeps only when pwrate or pwsweep is given), so depth reads as 0', only.params.depth === 0 && only.params.width === 0.3);
+  const rate = importStrudel('$: note("a2").s("pulse").pwrate(4)').graph.nodes.find((n) => n.type === 'pulsewidth');
+  check('Pulse width: pwrate alone sweeps by Strudel\'s own 0.3', rate.params.rate === 4 && rate.params.depth === 0.3);
+  const saw = compile(importStrudel('$: note("a2").s("sawtooth").pw(0.3)').graph);
+  check('Pulse width: on a sawtooth it warns that only the pulse wave has a width', saw.issues.some((i) => /only shapes the pulse wave/.test(i.msg)));
+  check('Pulse width: pulse is a listed Instrument sound', isInstrument('pulse'));
 }
 process.exit(failures ? 1 : 0);

@@ -309,7 +309,7 @@ export function buildFmDiagram(node, ctl, { store, hooks, h, relayout }) {
     for (let k = 0; k < 8; k++) {
       const w = g.wires.find((x) => x.to.node === cur && !x.to.port.startsWith('p:')), u = w && g.nodes.find((n) => n.id === w.from.node);
       if (!u) return 'sine';
-      if (u.type === 'synth') { const wv = String(u.params.wave); return FM_WAVE_NAMES.includes(wv) ? wv : wv === 'supersaw' || wv === 'saw' ? 'sawtooth' : wv === 'sqr' ? 'square' : wv === 'tri' ? 'triangle' : 'sine'; }
+      if (u.type === 'synth') { const wv = String(u.params.wave); return FM_WAVE_NAMES.includes(wv) ? wv : wv === 'supersaw' || wv === 'saw' ? 'sawtooth' : wv === 'sqr' || wv === 'pulse' ? 'square' : wv === 'tri' ? 'triangle' : 'sine'; }
       cur = u.id;
     }
     return 'sine';

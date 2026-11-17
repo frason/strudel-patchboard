@@ -400,6 +400,19 @@ export const LESSONS = [
     learned: 'Four parts play together: a vibraphone melody (the "Melody" group), a sitar that writes a new tune every four cycles, supersaw chords and a drum beat made from three Sample and Rhythm pairs. It brings in things that have not come up yet. Euclid spreads 5 hits as evenly as it can over 8 steps, so the vibraphone gets a lopsided groove without drawing it. Ring modulation multiplies a sound by a tone (here 1376 Hz), which turns it metallic and bell-like. Vibrato wobbles the pitch of the chords, and the filter\'s env knob lets the filter open and close over each note, a quick wah on every chord. Try muting a part, or turn Euclid to 8 and hear the groove go square. It is a busy patch with long releases and a big reverb: if your computer struggles, shorten a release or turn Animations off in Settings.',
     graph: () => JSON.parse(JSON.stringify(WHOLE_SONG_GRAPH)),
   },
+  {
+    id: 'pulse-organ', section: 'Sound design', title: '32 · Pulse width: a buzzy chip organ',
+    learned: 'The pulse wave is a square wave whose width you can change. At width 0.5 it is an ordinary square, and the thinner the pulse, the more nasal and buzzy it sounds. The Pulse width module also swings the width back and forth (sweep speed and depth), and that slow swirl is the sound of old home-computer sound chips, like the SID in the Commodore 64. Here a short riff plays on a pulse wave with a hard attack and a long sustain, like an organ key, then a little vibrato, some distortion for grit and a dark, roomy reverb. Try sweep depth 0 to hear the width held still, then raise it. Try width 0.1 for a thin reed, or a faster sweep (8 Hz or more) for a chirpy tremble. The Pulse width module only works on an Instrument set to pulse: put it after a sawtooth and the board warns you.',
+    graph: () => build([
+      ['m', 'melody', 40, 60, mel(['a2', 'a2', 'c3', 'e3', 'a2', 'a2', 'g2', 'e3'])],
+      ['sy', 'synth', 400, 60, { wave: 'pulse', attack: 0.002, decay: 0.12, sustain: 0.8, release: 0.05, lpf: 2400, lpq: 6, gain: 0.5 }],
+      ['pw', 'pulsewidth', 700, 60, { width: 0.35, rate: 3, depth: 0.25 }],
+      ['vb', 'vibrato', 1000, 60, { rate: 6, depth: 0.15 }],
+      ['di', 'distortion', 1280, 60, { amount: 1.5 }],
+      ['rv', 'reverb', 1560, 60, { room: 0.35, size: 4 }],
+      ['o', 'output', 1840, 140, { bpm: 110 }],
+    ], [['m', 'sy'], ['sy', 'pw'], ['pw', 'vb'], ['vb', 'di'], ['di', 'rv'], ['rv', 'o']]),
+  },
 ];
 
 export const lessonGraph = (id) => LESSONS.find((l) => l.id === id)?.graph();

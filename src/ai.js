@@ -35,7 +35,7 @@ export function clearAI() { mem.key = ''; lsDel(KEY_STORE); lsDel(LEGACY); }
 
 const SUBSET = `The editor can only read a small part of Strudel back into modules, so stay inside it:
 - First line: setcpm(BPM/4). Then each part on its own line starting with "$:".
-- Sounds: s("bd sd hh") with .bank("RolandTR909") (banks: RolandTR808, RolandTR909, RolandTR707, LinnDrum, AkaiLinn, CasioRZ1, KorgM1); drums bd sd hh oh cp rim. Synth waves for s(): sine sawtooth square triangle supersaw. Instruments: gm_ names such as gm_acoustic_bass, gm_electric_piano_1, gm_vibraphone, gm_string_ensemble_1, gm_flute, gm_sitar; also piano.
+- Sounds: s("bd sd hh") with .bank("RolandTR909") (banks: RolandTR808, RolandTR909, RolandTR707, LinnDrum, AkaiLinn, CasioRZ1, KorgM1); drums bd sd hh oh cp rim. Synth waves for s(): sine sawtooth square triangle supersaw pulse (shape it with .pw .pwrate .pwsweep). Instruments: gm_ names such as gm_acoustic_bass, gm_electric_piano_1, gm_vibraphone, gm_string_ensemble_1, gm_flute, gm_sitar; also piano.
 - Notes: note("c3 e3 g3") or n("0 2 4").scale("C3:minor"); chords: chord("<Am F C G>").mode("above:c3").voicing(). Mini-notation: ~ rest, [a b] squeeze, a*2 repeat, <a b> one per cycle, @2 hold.
 - Rhythm: s("bd").struct("x ~ x ~"). Combine: stack(a, b), cat(a, b).
 - Transforms: .fast(n) .slow(n) .late(0.02) (nudge later, in cycles; negative = earlier) .clip(0.5) (note length as a multiple of the step; legato is the same) .swingBy(1/3, 4) (swing feel) .rev() .euclid(5,8) .every(4, x=>x.transpose(12)) .sometimesBy(0.3, rev) .shuffle(4) .degrade()

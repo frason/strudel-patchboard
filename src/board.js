@@ -493,6 +493,7 @@ const WAVE_ICONS = [
   ['sine', 'M1 7 C4.5 -2, 8.5 -2, 12 7 S19.5 16, 23 7'], ['triangle', 'M1 7 L6 2 L12 12 L18 2 L23 7'],
   ['sawtooth', 'M1 12 L9 2 L9 12 L17 2 L17 12 L23 6'], ['square', 'M1 12 V2 H8 V12 H15 V2 H22 V12'],
   ['supersaw', 'M1 12 L9 2 L9 12 L17 2 L17 12 L23 6 M1 9 L9 4 M9 9 L17 4'],
+  ['pulse', 'M1 12 V2 H6 V12 H13 V2 H18 V12 H23'],
 ];
 // the sound names inside a pattern like "bd*2 [bd:3 sd]": bd, sd (numbers and symbols are not names)
 const soundNames = (t) => [...new Set(String(t || '').split(/[\s\[\]<>*!@?,~(){}.|]+/).filter((x) => /^(?=.*[a-z_])[a-z0-9_]\w*(:\d+)?$/i.test(x)).map((x) => x.split(':')[0]))];

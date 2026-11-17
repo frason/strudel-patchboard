@@ -8,6 +8,7 @@ import { parseChord, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
 
 class Skip extends Error {}
 
+const pwGiven = new WeakMap();
 const SIGNALS = { sine: 'sine', saw: 'saw', tri: 'tri', square: 'square', rand: 'rand' };
 const FLAT = { db: 'c#', eb: 'd#', gb: 'f#', ab: 'g#', bb: 'a#', cb: 'b', fb: 'e' };
 
@@ -256,6 +257,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     chorus: ['chorus', 'amount'],
     tremolo: ['tremolo', 'rate'], trem: ['tremolo', 'rate'], tremolosync: ['tremolo', 'rate', { sync: 'sync' }], tremolodepth: ['tremolo', 'depth'], tremoloshape: ['tremolo', 'shape'],
     phaser: ['phaser', 'rate'], ph: ['phaser', 'rate'], phaserdepth: ['phaser', 'depth'], phasercenter: ['phaser', 'center'], phasersweep: ['phaser', 'sweep'],
+    pw: ['pulsewidth', 'width'], pwrate: ['pulsewidth', 'rate'], pwsweep: ['pulsewidth', 'depth'],
     vib: ['vibrato', 'rate'], vibrato: ['vibrato', 'rate'], vibmod: ['vibrato', 'depth'],
     ring: ['ring', 'mix'], ringf: ['ring', 'freq'], vowel: ['vowel', 'vowel'], djf: ['djf', 'amount'],
     leslie: ['leslie', 'wet'], lrate: ['leslie', 'rate'], lsize: ['leslie', 'size'], coarse: ['lofi', 'coarse'], squiz: ['lofi', 'squiz'],
@@ -613,6 +615,16 @@ export function importStrudel(code, { sounds = null } = {}) {
     if (fx) {
       const [type, key, fixed] = fx;
       const f = fxFor(type);
+      if (type === 'pulsewidth') {   // Strudel sweeps only when pwrate or pwsweep is given: pwrate alone sweeps by 0.3, pwsweep alone swings at 1 Hz
+        const g = pwGiven.get(f) || pwGiven.set(f, new Set()).get(f);
+        g.add(n);
+        const v = num(a[0]);
+        if (v !== null) f.params[key] = v;
+        else { const sig = signalArg(a[0]); if (sig) f.signals.push([key, sig]); else throw new Skip(`${n} with something other than a plain number, slider or signal`); }
+        if (!g.has('pwsweep')) f.params.depth = g.has('pwrate') ? 0.3 : 0;
+        if (!g.has('pwrate')) f.params.rate = 1;
+        return;
+      }
       Object.assign(f.params, fixed || {});
       if (['lpenv', 'lpattack', 'lpa', 'lpdecay', 'lpd', 'lpsustain', 'lps', 'ftype', 'hpq', 'bpq'].includes(n)) S.filterTouched = true;
       if (type === 'compressor') return;

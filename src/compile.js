@@ -506,9 +506,25 @@ export function compile(g) {
         const off = def.params.filter((s) => s.call && !p[s.key + '_on']).map((s) => s.key);
         return chain(up, paramCalls(n, depth, off), depth, inline);
       }
-      case 'delay': case 'reverb': case 'distortion': case 'chorus': case 'pan': case 'vibrato': case 'ring': case 'vowel': case 'djf': case 'leslie': case 'lofi': case 'pitchenv': case 'fm': {
+      case 'delay': case 'reverb': case 'distortion': case 'chorus': case 'pan': case 'vibrato': case 'pulsewidth': case 'ring': case 'vowel': case 'djf': case 'leslie': case 'lofi': case 'pitchenv': case 'fm': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'sound');
+        if (n.type === 'pulsewidth') {   // the width only exists on the pulse oscillator
+          const seen = new Set(), todo = [n.id], other = [];
+          while (todo.length) {
+            const id = todo.pop();
+            for (const w of g.wires) {
+              if (w.to.node !== id || w.to.port.startsWith('p:') || seen.has(w.from.node)) continue;
+              seen.add(w.from.node);
+              const u = nodeById(g, w.from.node);
+              if (!u) continue;
+              if (u.type === 'synth') { if (String(u.params.wave) !== 'pulse') other.push(`the Instrument "${u.params.wave}"`); }
+              else if (u.type === 'sample' || u.type === 'drums') other.push(u.type === 'drums' ? 'the Drum Machine' : 'a Sample');
+              else todo.push(u.id);
+            }
+          }
+          if (other.length) issues.push({ node: n.id, msg: `Pulse width has no effect on ${[...new Set(other)].join(' and ')}: it only shapes the pulse wave. Set the Instrument's sound to pulse.` });
+        }
         if (n.type === 'fm') {   // FM shakes an oscillator, so it does nothing on a recorded sound (a sample, a drum, a gm_ instrument or the piano)
           const seen = new Set(), todo = [n.id], bad = [], bright = [];
           while (todo.length) {
@@ -625,6 +641,9 @@ const SAY = {
   detune: (v) => `detune(${fmt(v)}) spreads the supersaw voices apart.`,
   gain: (v) => `gain(${fmt(v)}) sets the volume (1 is normal).`,
   vib: (v) => `vib(${fmt(v)}) wobbles the pitch ${fmt(v)} times per second.`,
+  pw: (v) => `pw(${fmt(v)}) is how wide each pulse is (0.5 is a square wave; smaller sounds thinner and more nasal). It only affects the pulse wave.`,
+  pwrate: (v) => `pwrate(${fmt(v)}) swings the pulse width ${fmt(v)} times per second.`,
+  pwsweep: (v) => `pwsweep(${fmt(v)}) is how far the width swings either side of its middle.`,
   vibmod: (v) => `vibmod(${fmt(v)}) is how far the pitch moves, in semitones.`,
   ring: (v) => `ring(${fmt(v)}) is how much ring modulation is mixed in.`,
   ringf: (v) => `ringf(${fmt(v)}) is the frequency of the ring-mod tone, in Hz.`,
