@@ -1061,4 +1061,15 @@ $: s("[hh ~@4 hh ~@14]*2")
   const st = fmStructure({ index: 1.5, index2: 1, harm: 1, harm2: 2 });
   check('FM animation: a two-in-a-row patch draws operator 2 on top, then 1, then the note', st.rows.join() === '2,1,0');
 }
+// Delay and Reverb pictures: the numbers behind them.
+{
+  const { delayBars, reverbShape } = await import('../src/fxpics.js');
+  const bars = delayBars({ mix: 0.5, time: 0.25, feedback: 0.5 });
+  check('Delay picture: the hit comes first, then echoes one delay time apart, each as tall as mix times feedback to the power of its number minus one', bars[0].dry && bars.length > 3 && Math.abs((bars[2].x - bars[1].x) - (bars[1].x - bars[0].x)) < 1e-9 && Math.abs(bars[1].h - 0.5) < 1e-9 && Math.abs(bars[2].h - 0.25) < 1e-9);
+  check('Delay picture: no feedback gives one echo, and no mix gives no echoes at all', delayBars({ mix: 0.5, time: 0.25, feedback: 0 }).length === 2 && delayBars({ mix: 0, time: 0.25, feedback: 0.5 }).length === 1);
+  const slow = delayBars({ mix: 0.5, time: 0.25, feedback: 0.5 }, 2.4), fast = delayBars({ mix: 0.5, time: 0.25, feedback: 0.5 }, 1);
+  check('Delay picture: the time is in seconds, so on a longer cycle (slower tempo) the same echo sits closer to the hit', slow[1].x - slow[0].x < fast[1].x - fast[0].x && Math.abs((slow[1].x - slow[0].x) * 2.4 - (fast[1].x - fast[0].x) * 1) < 1e-6);
+  check('Delay picture: a longer time spreads the echoes out, so fewer fit', delayBars({ mix: 0.8, time: 0.9, feedback: 0.9 }).length < delayBars({ mix: 0.8, time: 0.1, feedback: 0.9 }).length);
+  check('Reverb picture: a bigger size makes a longer tail and a bigger room level a taller one, both within the picture', reverbShape({ size: 8, room: 0.5 }).len > reverbShape({ size: 1, room: 0.5 }).len && reverbShape({ size: 2, room: 0.9 }).top > reverbShape({ size: 2, room: 0.2 }).top && reverbShape({ size: 10, room: 1 }).len <= 200);
+}
 process.exit(failures ? 1 : 0);

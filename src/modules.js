@@ -342,17 +342,17 @@ export const MODULES = {
     ],
   },
   delay: {
-    title: 'Delay', cat: 'effect', out: 'sound',
+    title: 'Delay', cat: 'effect', out: 'sound', data: { delaypic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
     blurb: 'Echoes: delay is how loud, delaytime how far apart, delayfeedback how many repeats.',
     params: [
       { key: 'mix', label: 'mix', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.4, call: 'delay', always: true, wire: true },
-      { key: 'time', label: 'time', kind: 'knob', min: 0.01, max: 1, step: 0.01, def: 0.25, call: 'delaytime', unit: 'cyc', wire: true },
+      { key: 'time', label: 'time', kind: 'knob', min: 0.01, max: 1, step: 0.01, def: 0.25, call: 'delaytime', unit: 's', wire: true },
       { key: 'feedback', label: 'feedback', kind: 'knob', min: 0, max: 0.95, step: 0.01, def: 0.5, call: 'delayfeedback', wire: true },
     ],
   },
   reverb: {
-    title: 'Reverb', cat: 'effect', out: 'sound',
+    title: 'Reverb', cat: 'effect', out: 'sound', data: { reverbpic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
     blurb: 'Adds a room around the sound: room is how much, roomsize how big.',
     params: [

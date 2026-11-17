@@ -986,3 +986,15 @@ html, body { overscroll-behavior: none; }
 .fp-mid { fill: var(--c, #d6efec); }
 .fp-orange { fill: #ffb454; }
 .fmpicwrap .fm-legend { padding: 6px 8px 8px; }
+
+/* Delay and Reverb pictures */
+.fxpicwrap { margin-bottom: 6px; background: #0b0f13; border: 1px solid #27313b; border-radius: 6px; }
+.fxpic { display: block; width: 100%; height: auto; pointer-events: none; user-select: none; }
+.fx-base { stroke: #27313b; stroke-width: 1; }
+.fx-bar { fill: #b48cff; }
+.fx-bar.fx-dry { fill: #52c7c0; }
+.fx-tail { stroke: #b48cff; stroke-width: 2.4; stroke-linecap: round; }
+.fx-sweep { stroke: #9ff2ea; stroke-width: 1; stroke-dasharray: 3 3; opacity: .55; }
+.fx-ghost { fill: none; stroke: #52c7c0; stroke-width: 1.2; stroke-dasharray: 3 3; }
+.fx-tick { stroke: #3c8f8a; stroke-width: 1; }
+.fx-txt { fill: #7fa6a2; font: 600 8.5px var(--mono, monospace); pointer-events: none; }
