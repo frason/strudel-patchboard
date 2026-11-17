@@ -506,7 +506,7 @@ export function compile(g) {
         const off = def.params.filter((s) => s.call && !p[s.key + '_on']).map((s) => s.key);
         return chain(up, paramCalls(n, depth, off), depth, inline);
       }
-      case 'delay': case 'reverb': case 'distortion': case 'chorus': case 'pan': case 'vibrato': case 'pulsewidth': case 'ring': case 'vowel': case 'djf': case 'leslie': case 'lofi': case 'pitchenv': case 'fm': {
+      case 'delay': case 'reverb': case 'distortion': case 'pan': case 'vibrato': case 'pulsewidth': case 'vowel': case 'djf': case 'lofi': case 'pitchenv': case 'fm': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'sound');
         if (n.type === 'pulsewidth') {   // the width only exists on the pulse oscillator
@@ -599,7 +599,6 @@ export function compile(g) {
     else if (o.params.mvol !== 1) masterCalls.push(S(`.postgain(${fmt(o.params.mvol)})`, { node: o.id, role: 'knob', key: 'mvol', note: `postgain(${fmt(o.params.mvol)}) is the master volume: it scales everything after all effects, so every part keeps its balance (1 = unchanged).` }));
     mk('mphaser', 'phaser', (v) => `phaser(${fmt(v)}) on everything: all() applies it to every pattern.`);
     mk('mtrem', 'tremolo', (v) => `tremolo(${fmt(v)}) on everything.`);
-    mk('mchorus', 'chorus', (v) => `chorus(${fmt(v)}) on everything.`);
     if (acidNode && !parts.some((x) => x.acidHeader)) parts.push(NL(0), NL(0), { ...S("register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9).lps(.2).lpd(.12))", { node: acidNode.id, role: 'fn', note: 'register() teaches Strudel a new method: acidenv(x) = a 100 Hz low-pass whose cutoff opens by x × 9 on each note (lpenv), holds at 20% (lps) and falls over 0.12 s (lpd).' }), acidHeader: true });
     if (masterCalls.length) parts.push(NL(0), NL(0), S('all(x => x', { node: o.id, role: 'fn', note: 'all(x => x.effect()) applies an effect to every pattern at once: a global effect.' }), ...masterCalls, S(')', { node: o.id }));
     for (const b of blocks) parts.push(NL(0), NL(0), ...b);
@@ -645,15 +644,9 @@ const SAY = {
   pwrate: (v) => `pwrate(${fmt(v)}) swings the pulse width ${fmt(v)} times per second.`,
   pwsweep: (v) => `pwsweep(${fmt(v)}) is how far the width swings either side of its middle.`,
   vibmod: (v) => `vibmod(${fmt(v)}) is how far the pitch moves, in semitones.`,
-  ring: (v) => `ring(${fmt(v)}) is how much ring modulation is mixed in.`,
-  ringf: (v) => `ringf(${fmt(v)}) is the frequency of the ring-mod tone, in Hz.`,
   vowel: (v) => `vowel("${v}") shapes the sound like the vowel "${v}".`,
   djf: (v) => `djf(${fmt(v)}): below 0.5 is a low-pass, above 0.5 a high-pass.`,
-  leslie: (v) => `leslie(${fmt(v)}) is how much of the rotating-speaker sound is mixed in.`,
-  lrate: (v) => `lrate(${fmt(v)}) is how fast the speakers rotate.`,
-  lsize: (v) => `lsize(${fmt(v)}) is the cabinet size, which changes the doppler warble.`,
   coarse: (v) => `coarse(${fmt(v)}) divides the sample rate by ${fmt(v)}: gritty lo-fi.`,
-  squiz: (v) => `squiz(${fmt(v)}) pinches the sound.`,
   shape: (v) => `shape(${fmt(v)}) is wave-shaping distortion (it can get loud).`,
   penv: (v) => `penv(${fmt(v)}) bends the pitch by ${fmt(v)} semitones at the start of each note, then it settles.`,
   pattack: (v) => `pattack(${fmt(v)}) is how long the pitch takes to reach its bend.`,
@@ -667,7 +660,6 @@ const SAY = {
   fmh2: (v) => `fmh2(${fmt(v)}) is the second modulator's pitch relative to the note.`,
   fmdecay: (v) => `fmdecay(${fmt(v)}) is how fast the FM brightness dies away.`,
   pan: (v) => `pan(${fmt(v)}) places the sound in stereo: 0 left, 0.5 middle, 1 right.`,
-  chorus: (v) => `chorus(${fmt(v)}) mixes in detuned, delayed copies for a thicker sound.`,
   tremolodepth: (v) => `tremolodepth(${fmt(v)}) is how deep the volume dips go.`,
   tremoloshape: (v) => `tremoloshape("${v}") is the wobble's waveform.`,
   phaserdepth: (v) => `phaserdepth(${fmt(v)}) is how strong the phaser effect is.`,

@@ -9,6 +9,8 @@ import { parseChord, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
 class Skip extends Error {}
 
 const pwGiven = new WeakMap();
+// effects the code can name that the audio engine bundled with Patchboard has no code to play: skipped with a reason, never turned into a module that is silent
+const NO_BROWSER_FX = { chorus: 'a chorus', ring: 'ring modulation', ringf: 'ring modulation', ringdf: 'ring modulation', leslie: 'a rotating-speaker effect', lrate: 'a rotating-speaker effect', lsize: 'a rotating-speaker effect' };
 const SIGNALS = { sine: 'sine', saw: 'saw', tri: 'tri', square: 'square', rand: 'rand' };
 const FLAT = { db: 'c#', eb: 'd#', gb: 'f#', ab: 'g#', bb: 'a#', cb: 'b', fb: 'e' };
 
@@ -254,13 +256,12 @@ export function importStrudel(code, { sounds = null } = {}) {
     delay: ['delay', 'mix'], delaytime: ['delay', 'time'], delayfeedback: ['delay', 'feedback'], delayfb: ['delay', 'feedback'],
     room: ['reverb', 'room'], roomsize: ['reverb', 'size'], size: ['reverb', 'size'], sz: ['reverb', 'size'], rsize: ['reverb', 'size'],
     distort: ['distortion', 'amount'], dist: ['distortion', 'amount'], crush: ['distortion', 'crush'], shape: ['distortion', 'shape'],
-    chorus: ['chorus', 'amount'],
     tremolo: ['tremolo', 'rate'], trem: ['tremolo', 'rate'], tremolosync: ['tremolo', 'rate', { sync: 'sync' }], tremolodepth: ['tremolo', 'depth'], tremoloshape: ['tremolo', 'shape'],
     phaser: ['phaser', 'rate'], ph: ['phaser', 'rate'], phaserdepth: ['phaser', 'depth'], phasercenter: ['phaser', 'center'], phasersweep: ['phaser', 'sweep'],
     pw: ['pulsewidth', 'width'], pwrate: ['pulsewidth', 'rate'], pwsweep: ['pulsewidth', 'depth'],
     vib: ['vibrato', 'rate'], vibrato: ['vibrato', 'rate'], vibmod: ['vibrato', 'depth'],
-    ring: ['ring', 'mix'], ringf: ['ring', 'freq'], vowel: ['vowel', 'vowel'], djf: ['djf', 'amount'],
-    leslie: ['leslie', 'wet'], lrate: ['leslie', 'rate'], lsize: ['leslie', 'size'], coarse: ['lofi', 'coarse'], squiz: ['lofi', 'squiz'],
+    vowel: ['vowel', 'vowel'], djf: ['djf', 'amount'],
+    coarse: ['lofi', 'coarse'],
     penv: ['pitchenv', 'amount'], pattack: ['pitchenv', 'attack'], pdecay: ['pitchenv', 'decay'],
     fmwave: ['fm', 'owave'], fmwave2: ['fm', 'owave2'], fmwave3: ['fm', 'owave3'], fmwave4: ['fm', 'owave4'], fmattack: ['fm', 'attack'], fmatt: ['fm', 'attack'], fmattack2: ['fm', 'attack2'], fmattack3: ['fm', 'attack3'], fmattack4: ['fm', 'attack4'], fmatt2: ['fm', 'attack2'], fmatt3: ['fm', 'attack3'], fmatt4: ['fm', 'attack4'], fmdecay2: ['fm', 'decay2'], fmdecay3: ['fm', 'decay3'], fmdecay4: ['fm', 'decay4'], fmdec2: ['fm', 'decay2'], fmdec3: ['fm', 'decay3'], fmdec4: ['fm', 'decay4'], fmsustain2: ['fm', 'sustain2'], fmsustain3: ['fm', 'sustain3'], fmsustain4: ['fm', 'sustain4'], fmsus2: ['fm', 'sustain2'], fmsus3: ['fm', 'sustain3'], fmsus4: ['fm', 'sustain4'], fmdec: ['fm', 'decay'], fmsus: ['fm', 'sustain'],
     fm: ['fm', 'index'], fmh: ['fm', 'harm'], fmdecay: ['fm', 'decay'], fmsustain: ['fm', 'sustain'], fms: ['fm', 'sustain'], fm2: ['fm', 'index2'], fm11: ['fm', 'fb1'], fm22: ['fm', 'fb2'], fmh2: ['fm', 'harm2'], acidenv: ['acid', 'amount'],
@@ -610,6 +611,8 @@ export function importStrudel(code, { sounds = null } = {}) {
       targets.forEach((t) => setParam(t, (t.type === 'synth' ? SYNTH_P : SAMP_P)[n], a[0], S.stmt));
       return;
     }
+    if (NO_BROWSER_FX[n]) throw new Skip(`${n}() is ${NO_BROWSER_FX[n]}: Strudel's browser player has no code for it, so Patchboard has no module for it`);
+    if (n === 'squiz') throw new Skip('squiz() only works when the code is sent to SuperDirt: the browser player does not play it, so Patchboard has no module for it');
     // everything else becomes an effect module
     const fx = FX[n];
     if (fx) {
@@ -725,7 +728,7 @@ export function importStrudel(code, { sounds = null } = {}) {
           if (!(root.type === 'Identifier')) throw new Skip('all() with something other than x => x.effect()');
           for (const c of calls) {
             const v = num(c.args[0]);
-            const key = { phaser: 'mphaser', tremolo: 'mtrem', chorus: 'mchorus', postgain: 'mvol' }[c.name];
+            const key = { phaser: 'mphaser', tremolo: 'mtrem', postgain: 'mvol' }[c.name];
             if (key && v !== null) out.master[key] = v;
             else if (key === 'mvol' && signalArg(c.args[0])) out.masterSig.mvol = { sig: signalArg(c.args[0]), stmt: st };   // a slider or wave riding the master volume
             else if (c.name === 'scope' || c.name === '_scope') report.notes.push('all(x => x.scope()) shows a scope: add a Scope module to see one');

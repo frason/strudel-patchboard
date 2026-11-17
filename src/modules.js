@@ -45,7 +45,6 @@ export const ROUTES = [1, 2, 3, 4].flatMap((i) => [0, 1, 2, 3, 4].filter((j) => 
 export const FX_TILES = [
   { key: 'reverb', label: 'reverb', call: 'room', min: 0, max: 1, step: 0.01, def: 0.4, tip: 'how much room is mixed in (room)' },
   { key: 'delay', label: 'delay', call: 'delay', min: 0, max: 1, step: 0.01, def: 0.35, tip: 'how loud the echoes are (delay)' },
-  { key: 'chorus', label: 'chorus', call: 'chorus', min: 0, max: 1, step: 0.01, def: 0.5, tip: 'how much detuned copy is mixed in (chorus)' },
   { key: 'distort', label: 'distortion', call: 'distort', min: 0, max: 10, step: 0.1, def: 2, tip: 'how hard the sound is overdriven (distort)' },
   { key: 'phaser', label: 'phaser', call: 'phaser', min: 0.05, max: 12, step: 0.05, def: 1, log: true, unit: 'Hz', tip: 'sweeps per second (phaser)' },
   { key: 'tremolo', label: 'tremolo', call: 'tremolo', min: 0.25, max: 32, step: 0.25, def: 4, log: true, unit: 'Hz', tip: 'volume wobbles per second (tremolo)' },
@@ -234,19 +233,19 @@ export const MODULES = {
     params: [{ key: 'n', label: 'times', kind: 'knob', min: 1, max: 8, step: 1, def: 2, call: 'ply', always: true, wire: true }],
   },
   late: {
-    title: 'Late', cat: 'transform', out: 'through',
+    title: 'Late', cat: 'transform', out: 'through', data: { latepic: true },
     inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
     blurb: 'Nudges a pattern later in time, as a fraction of a cycle: late(0.02) lays everything back a hair, like a drummer who sits behind the beat. A negative number pushes it earlier. At 120 BPM with 4 beats per cycle a cycle lasts 2 seconds, so 0.01 is 20 milliseconds.',
     params: [{ key: 'n', label: 'cycles', kind: 'knob', min: -0.5, max: 0.5, step: 0.001, def: 0.02, call: 'late', always: true, wire: true, unit: 'cyc', tip: 'a fraction of a cycle; negative is earlier' }],
   },
   clip: {
-    title: 'Note length', cat: 'transform', out: 'through',
+    title: 'Note length', cat: 'transform', out: 'through', data: { clippic: true },
     inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
     blurb: 'Sets how long each note or hit lasts compared with its step: clip(1) is exactly the step, below 1 is short and detached (staccato), above 1 the notes ring on into the next step (legato). A sample is cut off when the time is up. legato(x) is another name for clip(x), and either is read from code.',
     params: [{ key: 'n', label: 'length', kind: 'knob', min: 0, max: 4, step: 0.05, def: 0.5, call: 'clip', always: true, wire: true, tip: 'multiplies the length of each note; 1 = the whole step' }],
   },
   swing: {
-    title: 'Swing', cat: 'transform', out: 'through',
+    title: 'Swing', cat: 'transform', out: 'through', data: { swingpic: true },
     inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
     blurb: 'Gives the pattern a swing or shuffle feel: swingBy(1/3, 4) cuts each cycle into 4 slices and delays the second half of every slice. The swing knob is how far, as a fraction of that half: 0 does nothing, about 0.33 is a classic triplet swing. Choose the slices so a half-slice is the note length you want to swing (4 slices swings eighth notes in a 4-beat cycle).',
     params: [
@@ -361,9 +360,9 @@ export const MODULES = {
     ],
   },
   distortion: {
-    title: 'Distortion', cat: 'effect', out: 'sound',
+    title: 'Distortion', cat: 'effect', out: 'sound', data: { distortionpic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'Crunch: distort overdrives the sound, crush lowers its bit depth.',
+    blurb: 'Crunch: distort overdrives the sound, crush lowers its bit depth. Shape bends the wave the same way as distort but more gently: its top setting is about the same as distort 3.7, while distort keeps going up to a hard clip.',
     params: [
       { key: 'amount', label: 'distort', kind: 'knob', min: 0, max: 10, step: 0.1, def: 2, call: 'distort', always: true, wire: true },
       { key: 'crush', label: 'crush', kind: 'knob', min: 1, max: 16, step: 1, def: 16, call: 'crush', tip: 'bit depth (16 = clean)' },
@@ -372,7 +371,7 @@ export const MODULES = {
   },
 
   vibrato: {
-    title: 'Vibrato', cat: 'effect', out: 'sound',
+    title: 'Vibrato', cat: 'effect', out: 'sound', data: { vibratopic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
     blurb: 'Wobbles the pitch up and down, like a singer or a violinist.',
     params: [
@@ -390,15 +389,6 @@ export const MODULES = {
       { key: 'depth', label: 'sweep depth', kind: 'knob', min: 0, max: 0.45, step: 0.01, def: 0.3, call: 'pwsweep', always: true, wire: true, tip: 'how far the width swings either side of its middle: 0 holds it still (pwsweep)' },
     ],
   },
-  ring: {
-    title: 'Ring mod', cat: 'effect', out: 'sound',
-    inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'Ring modulation: multiplies the sound by a tone, giving metallic, bell-like, robotic timbres.',
-    params: [
-      { key: 'mix', label: 'mix', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.5, call: 'ring', always: true, wire: true },
-      { key: 'freq', label: 'freq', kind: 'knob', min: 20, max: 4000, step: 1, def: 220, call: 'ringf', unit: 'Hz', log: true, always: true, wire: true },
-    ],
-  },
   vowel: {
     title: 'Vowel', cat: 'effect', out: 'sound',
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
@@ -411,23 +401,12 @@ export const MODULES = {
     blurb: 'One knob, like a DJ mixer: turn left of the middle for a low-pass, right of it for a high-pass.',
     params: [{ key: 'amount', label: 'filter', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.5, call: 'djf', always: true, wire: true, tip: 'below 0.5 low-pass, above 0.5 high-pass' }],
   },
-  leslie: {
-    title: 'Leslie', cat: 'effect', out: 'sound',
-    inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'Emulates a rotating speaker cabinet: a swirling, shimmering movement, great on organs.',
-    params: [
-      { key: 'wet', label: 'mix', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.7, call: 'leslie', always: true, wire: true },
-      { key: 'rate', label: 'speed', kind: 'knob', min: 0.5, max: 7, step: 0.1, def: 2, call: 'lrate', always: true, tip: '0.7 slow, 6.7 fast' },
-      { key: 'size', label: 'size', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.5, call: 'lsize', always: true, tip: 'cabinet size: more doppler warble' },
-    ],
-  },
   lofi: {
-    title: 'Lo-fi', cat: 'effect', out: 'sound',
+    title: 'Lo-fi', cat: 'effect', out: 'sound', data: { lofipic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'Fake-resampling for a gritty, low-sample-rate sound (coarse), and a squeezed, pinched tone (squiz). Add bit-crushing with Distortion.',
+    blurb: 'Fake-resampling for a gritty, low-sample-rate sound (coarse): it keeps one sample in every few and holds it. Add bit-crushing with Distortion.',
     params: [
       { key: 'coarse', label: 'coarse', kind: 'knob', min: 1, max: 32, step: 1, def: 1, call: 'coarse', wire: true, tip: '1 = original, 2 = half the sample rate, ...' },
-      { key: 'squiz', label: 'squiz', kind: 'knob', min: 1, max: 16, step: 1, def: 1, call: 'squiz', wire: true, tip: 'try 2, 4, 8' },
     ],
   },
   pitchenv: {
@@ -492,7 +471,7 @@ export const MODULES = {
   fx: {
     title: 'Effects', cat: 'effect', out: 'sound', data: { fxrack: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'A rack of effects in one module: reverb, delay, chorus, distortion, phaser and tremolo. Tap a tile to switch it on or off, drag across it to set how much. Only the tiles that are on appear in the code.',
+    blurb: 'A rack of effects in one module: reverb, delay, distortion, phaser and tremolo. Tap a tile to switch it on or off, drag across it to set how much. Only the tiles that are on appear in the code.',
     params: FX_TILES.flatMap((t) => [
       { key: t.key, label: t.label, kind: 'knob', hide: true, min: t.min, max: t.max, step: t.step, def: t.def, call: t.call, always: true, ...(t.log ? { log: true } : {}), tip: t.tip },
       { key: t.key + '_on', label: t.label + ' on', kind: 'toggle', hide: true, def: false },
@@ -505,7 +484,7 @@ export const MODULES = {
     params: [{ key: 'n', label: 'orbit', kind: 'select', def: 2, options: [1, 2, 3, 4, 5, 6, 7, 8], num: true }],
   },
   tremolo: {
-    title: 'Tremolo', cat: 'effect', out: 'sound',
+    title: 'Tremolo', cat: 'effect', out: 'sound', data: { tremolopic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
     blurb: 'Amplitude modulation: the volume wobbles up and down. Set the speed in Hz, or lock it to the tempo.',
     params: [
@@ -516,7 +495,7 @@ export const MODULES = {
     ],
   },
   phaser: {
-    title: 'Phaser', cat: 'effect', out: 'sound',
+    title: 'Phaser', cat: 'effect', out: 'sound', data: { phaserpic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
     blurb: 'A swirling, sweeping sound made by moving notches through the frequencies.',
     params: [
@@ -526,14 +505,8 @@ export const MODULES = {
       { key: 'sweep', label: 'sweep', kind: 'knob', min: 0, max: 4000, step: 10, def: 2000, call: 'phasersweep', tip: 'how far the sweep travels' },
     ],
   },
-  chorus: {
-    title: 'Chorus', cat: 'effect', out: 'sound',
-    inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'Thickens the sound with slightly detuned, delayed copies of itself.',
-    params: [{ key: 'amount', label: 'mix', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.5, call: 'chorus', always: true, wire: true }],
-  },
   compressor: {
-    title: 'Compressor', cat: 'effect', out: 'sound',
+    title: 'Compressor', cat: 'effect', out: 'sound', data: { compressorpic: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
     blurb: 'Evens out the volume: anything louder than the threshold is turned down by the ratio. Written as compressor("threshold:ratio:knee:attack:release").',
     params: [
@@ -655,7 +628,6 @@ export const MODULES = {
       { key: 'beats', label: 'beats / cycle', kind: 'select', def: 4, options: [2, 3, 4, 5, 6, 8], num: true, fold: true },
       { key: 'mphaser', label: 'phaser', kind: 'knob', min: 0, max: 8, step: 0.1, def: 0, master: true, tip: 'master phaser on everything (0 = off)', fold: true },
       { key: 'mtrem', label: 'tremolo', kind: 'knob', min: 0, max: 20, step: 0.25, def: 0, master: true, tip: 'master tremolo on everything (0 = off)', fold: true },
-      { key: 'mchorus', label: 'chorus', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0, master: true, tip: 'master chorus on everything (0 = off)', fold: true },
     ],
     single: true,
   },
@@ -843,7 +815,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
   ...['melody', 'rhythm', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
-  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'ring', 'vowel', 'djf', 'leslie', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'chorus', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
+  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
 ]);
 
 // FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.

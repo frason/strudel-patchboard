@@ -97,10 +97,24 @@ export function cleanParams(type, raw) {
 
 // Rebuild a whole patch. Throws for something that is not a patch or is too large; fixes or drops everything else. Removed Hydra modules are
 // listed on the (non-enumerable) `dropped` property so the caller can tell the person their code was not run.
+const REMOVED_FX = new Set(['ring', 'leslie', 'chorus']);
 export function cleanGraph(g) {
   if (!g || typeof g !== 'object' || !Array.isArray(g.nodes) || !Array.isArray(g.wires)) throw new Error('not a patch');
   if (g.nodes.length > LIMITS.nodes) throw new Error(`too many modules (${g.nodes.length}; the limit is ${LIMITS.nodes})`);
   if (g.wires.length > LIMITS.wires) throw new Error(`too many cables (${g.wires.length}; the limit is ${LIMITS.wires})`);
+  // Chorus, Ring mod and Leslie were taken out: the audio engine in the browser has no code to play them. An old patch that has them keeps working: the module is
+  // left out and the cables on either side of it are joined up. The names are listed on the (non-enumerable) `removedFx` property.
+  const removedFx = [];
+  if (g.nodes.some((n) => n && REMOVED_FX.has(n.type))) {
+    const gone = new Set(g.nodes.filter((n) => n && REMOVED_FX.has(n.type)).map((n) => n.id));
+    removedFx.push(...new Set(g.nodes.filter((n) => n && REMOVED_FX.has(n.type)).map((n) => n.type)));
+    const all = g.wires.filter((w) => w && w.from && w.to);
+    // what feeds a removed module (looking through any removed modules in a row)
+    const sources = (id, seen = new Set()) => (seen.has(id) ? [] : (seen.add(id), all.filter((w) => w.to.node === id && w.to.port === 'in').flatMap((w) => (gone.has(w.from.node) ? sources(w.from.node, seen) : [w.from]))));
+    const kept = all.filter((w) => !gone.has(w.from.node) && !gone.has(w.to.node));
+    const bridged = all.filter((w) => gone.has(w.from.node) && !gone.has(w.to.node)).flatMap((w) => sources(w.from.node).map((f) => ({ id: null, from: f, to: w.to })));
+    g = { ...g, nodes: g.nodes.filter((n) => !(n && gone.has(n.id))), wires: [...kept, ...bridged] };
+  }
   const dropped = [], ids = new Set(), nodes = [];
   for (const n of g.nodes) {
     if (!n || typeof n !== 'object') continue;
@@ -133,6 +147,7 @@ export function cleanGraph(g) {
     if (!out.groups.length) delete out.groups;
   }
   Object.defineProperty(out, 'dropped', { value: dropped, enumerable: false });
+  Object.defineProperty(out, 'removedFx', { value: removedFx, enumerable: false });
   return out;
 }
 

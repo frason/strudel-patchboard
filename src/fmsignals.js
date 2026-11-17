@@ -1,7 +1,7 @@
 // The numbers behind the live FM picture: which operators are in the sound, how strongly each one is shaking at a moment in a note
 // (its attack, decay and sustain), and the wave of every operator and of the note, worked out with the same sums as fmShape in modules.js.
 import { fmLinks, fmWaveFn } from './modules.js';
-const SAMPLES = 192;
+const SAMPLES = 150;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const harmOf = (p, i) => Number(p[i === 1 ? 'harm' : 'harm' + i]) || 1;
 
@@ -37,8 +37,8 @@ export function fmSignals(p, S, scaleOf, shift = 0, N = SAMPLES, cycles = 1, car
   const harm = [0, 1, 2, 3, 4].map((i) => (i ? harmOf(p, i) : 1));
   const fb = [0, 1, 2, 3, 4].map((i) => (i ? clamp(Number(p['fb' + i]) || 0, 0, 1) : 0));
   const wave = [0, 1, 2, 3, 4].map((i) => (i ? p['owave' + (i === 1 ? '' : i)] || 'sine' : 'sine'));
-  const phase = [0, 0, 0, 0, 0], out = [0, 0, 0, 0, 0];
-  for (const k of ops) phase[k] = shift * harm[k];
+  const phase = [0, 0, 0, 0, 0], out = [0, 0, 0, 0, 0], strength = [0, 0, 0, 0, 0];
+  for (const k of ops) { phase[k] = shift * harm[k]; strength[k] = scaleOf(k); }   // each shaker's envelope level, once for the whole run
   let cph = shift;
   const res = { ops: {}, note: new Float32Array(N) };
   for (const k of ops) res.ops[k] = new Float32Array(N);
@@ -46,7 +46,7 @@ export function fmSignals(p, S, scaleOf, shift = 0, N = SAMPLES, cycles = 1, car
     const freq = [0, 0, 0, 0, 0];
     for (const k of ops) freq[k] = harm[k] + fb[k] * out[k] * harm[k];
     let cf = 1;
-    for (const [i, j, v] of links) { const dv = out[i] * v * scaleOf(i) * harm[i]; if (j === 0) cf += dv; else freq[j] += dv; }
+    for (const [i, j, v] of links) { const dv = out[i] * v * strength[i] * harm[i]; if (j === 0) cf += dv; else freq[j] += dv; }
     res.note[n] = fmWaveFn(carrier, cph);
     for (const k of ops) res.ops[k][n] = out[k];
     cph += (cf * cycles) / N;

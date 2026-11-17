@@ -1,3 +1,4 @@
+import { wake as wakeAnims } from './anim.js';
 import './style.css';
 if (import.meta.env.DEV) import('./capture.js');   // developer-only audio capture; stripped from the build
 import { createStore, storage } from './store.js';
@@ -935,7 +936,7 @@ function openSettings() {
     h('div', { class: 'menu-empty about' }, 'An unofficial visual editor for ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ', not made or endorsed by the Strudel team. Built on Strudel (AGPL-3.0).', SOURCE_URL ? [' ', h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code')] : null)));
 }
 settingsBtn.addEventListener('click', openSettings);
-const applyPrefs = () => { syncOutScope(); app.classList.toggle('colourful', !!getPrefs().colourful); app.classList.toggle('desc-shown', getPrefs().descriptions === 'shown'); app.classList.toggle('no-anim', getPrefs().animations === false); app.classList.toggle('jack-help', getPrefs().jackHelp !== false); board.clearPulses?.(); views?.dirty?.(); setTimeout(() => board.drawCables(), 0); };
+const applyPrefs = () => { wakeAnims(); syncOutScope(); app.classList.toggle('colourful', !!getPrefs().colourful); app.classList.toggle('desc-shown', getPrefs().descriptions === 'shown'); app.classList.toggle('no-anim', getPrefs().animations === false); app.classList.toggle('jack-help', getPrefs().jackHelp !== false); board.clearPulses?.(); views?.dirty?.(); setTimeout(() => board.drawCables(), 0); };
 onPrefs(applyPrefs);
 applyPrefs();
 
@@ -980,6 +981,7 @@ learnBtn.addEventListener('click', () => {
 function fmtTime(t) { return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
 // A Hydra module in a saved or imported patch is not run here: tell the person, and keep its code reachable
 function noteDropped(g) {
+  if (g && g.removedFx && g.removedFx.length) toast(`This patch used ${g.removedFx.map((t) => ({ chorus: 'Chorus', ring: 'Ring mod', leslie: 'Leslie' }[t] || t)).join(', ')}, which Patchboard no longer has because the browser player cannot play it. It was taken out and the cables joined up.`, [], 9000);
   const d = g && g.dropped;
   if (!d || !d.length) return;
   const code = d.map((x) => x.code).filter(Boolean).join('\n\n');

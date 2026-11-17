@@ -6,6 +6,7 @@
 npm install
 npm run dev      # http://127.0.0.1:5174
 npm test         # evaluates every starter in real Strudel, checks graph rules, import/export
+npm run perf     # after `npm run build`: what the animated pictures cost, and that off-screen ones stop (needs Chrome)
 ```
 
 ## Decisions (stated, then built)
@@ -35,7 +36,7 @@ npm test         # evaluates every starter in real Strudel, checks graph rules, 
 - **FM**: up to four modulators, with a *tune* view (chain, harmonic scale, index and feedback gauges) and a *routes* view
   (drag disc to disc; the full 4x4 FM matrix, written as `fm13`, `fm20` ... ). A number grid sets any route by keyboard.
 - **Drawn envelopes** on Instrument, Sample, FM and Filter: drag the corners of the shape.
-- **Effects** (rack): reverb, delay, chorus, distortion, phaser and tremolo as tiles with an on/off and an amount.
+- **Effects** (rack): reverb, delay, distortion, phaser and tremolo as tiles with an on/off and an amount.
 - **Mixer**: a Stack with a fader (`.postgain()`), pan, mute and solo per input.
 - **Macro**: one 0 to 1 number for many knobs. *Sweep* maps it across each knob's range (`.range(lo, hi)`), *multiply* scales each
   knob's own setting (`.mul(setting)`).

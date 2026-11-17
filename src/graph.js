@@ -131,6 +131,7 @@ export function validateShape(g) {
   g.wires.forEach((w) => (w.id = w.id || uid('w')));
   g.v = 1;
   Object.defineProperty(g, 'dropped', { value: c.dropped, enumerable: false, configurable: true, writable: true });
+  Object.defineProperty(g, 'removedFx', { value: c.removedFx, enumerable: false, configurable: true, writable: true });
   return g;
 }
 

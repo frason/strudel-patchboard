@@ -337,11 +337,11 @@ export const LESSONS = [
   // ---------- mixing and control ----------
   {
     id: 'fx-rack', section: 'Mixing and control', title: '26 · The effects rack',
-    learned: 'The Effects module is a rack: reverb, delay, chorus, distortion, phaser and tremolo in one place. Tap a tile\'s name to switch it on or off, and drag across its bar for how much. Only the tiles that are on write code, in the order the rack lists them (.room(), .delay() ...). Here a music box gets a big reverb, an echo and a little chorus. Switch the tiles off one at a time to hear what each adds, then try the tremolo and the phaser.',
+    learned: 'The Effects module is a rack: reverb, delay, distortion, phaser and tremolo in one place. Tap a tile\'s name to switch it on or off, and drag across its bar for how much. Only the tiles that are on write code, in the order the rack lists them (.room(), .delay() ...). Here a music box gets a big reverb, an echo and a slow phaser. Switch the tiles off one at a time to hear what each adds, then try the tremolo and the distortion.',
     graph: () => build([
       ['m', 'melody', 40, 60, mel(['e4', 'g4', 'a4', 'b4', 'a4', 'g4', 'e4', 'd4'], { vel: [1, 0.7, 0.8, 1, 0.7, 0.8, 0.9, 0.7] })],
       ['sy', 'synth', 400, 60, { wave: 'gm_music_box', release: 0.6, gain: 0.8 }],
-      ['fx', 'fx', 700, 60, { reverb_on: true, reverb: 0.6, delay_on: true, delay: 0.35, chorus_on: true }],
+      ['fx', 'fx', 700, 60, { reverb_on: true, reverb: 0.6, delay_on: true, delay: 0.35, phaser_on: true, phaser: 0.4 }],
       ['o', 'output', 1100, 140, { bpm: 96 }],
     ], [['m', 'sy'], ['sy', 'fx'], ['fx', 'o']]),
   },
@@ -397,7 +397,7 @@ export const LESSONS = [
   },
   {
     id: 'whole-song', section: 'A whole song', title: '31 · A whole song, with four new tricks',
-    learned: 'Four parts play together: a vibraphone melody (the "Melody" group), a sitar that writes a new tune every four cycles, supersaw chords and a drum beat made from three Sample and Rhythm pairs. It brings in things that have not come up yet. Euclid spreads 5 hits as evenly as it can over 8 steps, so the vibraphone gets a lopsided groove without drawing it. Ring modulation multiplies a sound by a tone (here 1376 Hz), which turns it metallic and bell-like. Vibrato wobbles the pitch of the chords, and the filter\'s env knob lets the filter open and close over each note, a quick wah on every chord. Try muting a part, or turn Euclid to 8 and hear the groove go square. It is a busy patch with long releases and a big reverb: if your computer struggles, shorten a release or turn Animations off in Settings.',
+    learned: 'Four parts play together: a vibraphone melody (the "Melody" group), a sitar that writes a new tune every four cycles, supersaw chords and a drum beat made from three Sample and Rhythm pairs. It brings in things that have not come up yet. Euclid spreads 5 hits as evenly as it can over 8 steps, so the vibraphone gets a lopsided groove without drawing it. Vibrato wobbles the pitch of the chords, and the filter\'s env knob lets the filter open and close over each note, a quick wah on every chord. Try muting a part, or turn Euclid to 8 and hear the groove go square. It is a busy patch with long releases and a big reverb: if your computer struggles, shorten a release or turn Animations off in Settings.',
     graph: () => JSON.parse(JSON.stringify(WHOLE_SONG_GRAPH)),
   },
   {

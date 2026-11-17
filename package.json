@@ -10,7 +10,8 @@
     "preview": "vite preview --port 4173",
     "test:import": "node --import ./scripts/stub-loader.mjs scripts/import-test.mjs",
     "test:reconcile": "node --import ./scripts/stub-loader.mjs scripts/reconcile-test.mjs",
-    "test:guard": "node --import ./scripts/stub-loader.mjs scripts/guard-sweep.mjs"
+    "test:guard": "node --import ./scripts/stub-loader.mjs scripts/guard-sweep.mjs",
+    "perf": "node --import ./scripts/stub-loader.mjs scripts/perf.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

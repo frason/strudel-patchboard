@@ -3,6 +3,7 @@
 //   a ring on a bar's end: that shaker's pitch (its harmonic, longer = higher). A ring on an arm's elbow: how hard it shakes (its index, wider = harder).
 //   the orange ring on a bar: its feedback. Tap a bar (or a number) to pick the shaker whose envelope shows underneath: drag the first dot for the attack,
 //   the second for the decay and sustain. A dot shows where the note is now. Each handle shows its value while you drag it.
+import { animate, put, putStyle, putText } from './anim.js';
 import { fmStructure, fmEnv, fmHold, fmSignals } from './fmsignals.js';
 import { fmLinkKey, OWAVE, FM_WAVE_NAMES, fmWaveFn } from './modules.js';
 const NS = 'http://www.w3.org/2000/svg';
@@ -102,19 +103,19 @@ export function buildFmPicture(node, ctl, { store, hooks, h, relayout }) {
   const placeBars = () => {
     for (const op of S.rows) {
       const R = rowRefs[op], L = halfLen(op ? harmOf(op) : 1), e = envOf(op);
-      R.line.setAttribute('x1', CX - L); R.line.setAttribute('x2', CX + L); if (R.hit) { R.hit.setAttribute('x1', CX - L); R.hit.setAttribute('x2', CX + L); }
-      R.line.style.opacity = String(0.3 + 0.7 * e); R.line.style.strokeWidth = String(op ? 1.2 + 2 * e + (op === sel ? 0.8 : 0) : 2.6);
-      R.lab.textContent = op ? `${op}  ×${harmOf(op)}` : 'note'; R.lab.setAttribute('x', CX - L); R.lab.setAttribute('y', R.y - 7);
-      R.rings.forEach((ring, k) => { ring.setAttribute('cx', CX + (k ? 1 : -1) * L); ring.setAttribute('cy', R.y); ring.classList.toggle('fp-sel', op === sel); });
-      if (R.fb) { const fb = clamp(Number(P['fb' + op]) || 0, 0, 1); R.fb.setAttribute('r', 5 + 8 * fb); R.fb.classList.toggle('fp-zero', fb === 0); R.fbl.textContent = fb > 0 ? `fb ${fb}` : ''; R.fbl.setAttribute('x', CX + 5 + 8 * fb + 3); R.fbl.setAttribute('y', R.y - 3); }
+      put(R.line, 'x1', CX - L); put(R.line, 'x2', CX + L); if (R.hit) { put(R.hit, 'x1', CX - L); put(R.hit, 'x2', CX + L); }
+      putStyle(R.line, 'opacity', String(0.3 + 0.7 * e)); putStyle(R.line, 'strokeWidth', String(op ? 1.2 + 2 * e + (op === sel ? 0.8 : 0) : 2.6));
+      putText(R.lab, op ? `${op}  ×${harmOf(op)}` : 'note'); put(R.lab, 'x', CX - L); put(R.lab, 'y', R.y - 7);
+      R.rings.forEach((ring, k) => { put(ring, 'cx', CX + (k ? 1 : -1) * L); put(ring, 'cy', R.y); ring.classList.toggle('fp-sel', op === sel); });
+      if (R.fb) { const fb = clamp(Number(P['fb' + op]) || 0, 0, 1); put(R.fb, 'r', 5 + 8 * fb); R.fb.classList.toggle('fp-zero', fb === 0); putText(R.fbl, fb > 0 ? `fb ${fb}` : ''); put(R.fbl, 'x', CX + 5 + 8 * fb + 3); put(R.fbl, 'y', R.y - 3); }
     }
     for (const k of linkRefs) {
       const idx = Number(P[k.key]) || 0, L1 = halfLen(harmOf(k.op)), L2 = halfLen(k.j === 0 ? 1 : harmOf(k.j)), y1 = ys[k.r], y2 = ys[k.r2], bulge = bulgeOf(idx), ym = (y1 + y2) / 2, Lm = Math.max(L1, L2);
-      k.left.setAttribute('points', `${CX - L1},${y1} ${CX - Lm - bulge},${ym} ${CX - L2},${y2}`);
-      k.right.setAttribute('points', `${CX + L1},${y1} ${CX + Lm + bulge},${ym} ${CX + L2},${y2}`);
-      k.handle.setAttribute('cx', CX + Lm + bulge); k.handle.setAttribute('cy', ym);
-      k.ilab.textContent = idx.toFixed(1); k.ilab.setAttribute('x', Math.min(W - 12, CX + Lm + bulge)); k.ilab.setAttribute('y', ym - 8); k.ilab.style.display = idx > 0 ? '' : 'none';
-      k.left.style.display = k.right.style.display = k.handle.style.display = idx > 0 ? '' : 'none';
+      put(k.left, 'points', `${CX - L1},${y1} ${CX - Lm - bulge},${ym} ${CX - L2},${y2}`);
+      put(k.right, 'points', `${CX + L1},${y1} ${CX + Lm + bulge},${ym} ${CX + L2},${y2}`);
+      put(k.handle, 'cx', CX + Lm + bulge); put(k.handle, 'cy', ym);
+      putText(k.ilab, idx.toFixed(1)); put(k.ilab, 'x', Math.min(W - 12, CX + Lm + bulge)); put(k.ilab, 'y', ym - 8); putStyle(k.ilab, 'display', idx > 0 ? '' : 'none');
+      putStyle(k.left, 'display', k.right.style.display = k.handle.style.display = idx > 0 ? '' : 'none');
     }
   };
   const paintBars = () => {
@@ -129,7 +130,7 @@ export function buildFmPicture(node, ctl, { store, hooks, h, relayout }) {
       let wide = 1;
       if (r < n - 1) { const op = S.rows[r], sent = S.out(op).reduce((t, o) => t + o[2], 0); wide = clamp(0.15 + (sent * envOf(op)) / 3, 0.15, 1.5); }
       const d = r < n - 1 ? seg(ys[r], ys[r + 1], sim.ops[S.rows[r]] || sim.note, false, wide) : seg(ys[n - 1], ys[n - 1] + STEP, sim.note, true);
-      segRefs[r].wave.setAttribute('d', d); segRefs[r].glow.setAttribute('d', d);
+      put(segRefs[r].wave, 'd', d); put(segRefs[r].glow, 'd', d);
     }
     placeBars();
   };
@@ -164,13 +165,13 @@ export function buildFmPicture(node, ctl, { store, hooks, h, relayout }) {
     const v = envVals(), ta = v.a, td = v.a + v.d, hd = clamp(hold, td + 0.2, TMAX);
     const pts = [[0, 0], [ta, 1], [td, v.s], [hd, v.s], [hd + 0.2, 0]];
     const d = 'M' + pts.map(([t, e]) => `${tX(t).toFixed(1)} ${vY(e).toFixed(1)}`).join('L');
-    envLine.setAttribute('d', d); envArea.setAttribute('d', d + `L${tX(0)} ${ENV_Y1}Z`);
-    hA.setAttribute('cx', tX(ta)); hA.setAttribute('cy', vY(1)); hD.setAttribute('cx', tX(td)); hD.setAttribute('cy', vY(v.s));
-    holdLine.setAttribute('x1', tX(hd)); holdLine.setAttribute('x2', tX(hd));
+    put(envLine, 'd', d); put(envArea, 'd', d + `L${tX(0)} ${ENV_Y1}Z`);
+    put(hA, 'cx', tX(ta)); put(hA, 'cy', vY(1)); put(hD, 'cx', tX(td)); put(hD, 'cy', vY(v.s));
+    put(holdLine, 'x1', tX(hd)); put(holdLine, 'x2', tX(hd));
     const e = animated() ? fmEnv(P, sel, noteT, hold) : v.s;
-    play.setAttribute('cx', tX(animated() ? noteT : td)); play.setAttribute('cy', vY(e));
-    envLab.textContent = `shaker ${sel}: drag the dots`;
-    envRead.textContent = `attack ${v.a.toFixed(2)} s · decay ${v.d.toFixed(2)} s · sustain ${Math.round(v.s * 100)}%`;
+    put(play, 'cx', tX(animated() ? noteT : td)); put(play, 'cy', vY(e));
+    putText(envLab, `shaker ${sel}: drag the dots`);
+    putText(envRead, `attack ${v.a.toFixed(2)} s · decay ${v.d.toFixed(2)} s · sustain ${Math.round(v.s * 100)}%`);
   };
   function setSel() { btn.forEach((b) => { b.g.classList.toggle('on', b.op === sel); b.g.classList.toggle('off', !S.rows.includes(b.op)); }); paintAll(); }
 
@@ -183,15 +184,12 @@ export function buildFmPicture(node, ctl, { store, hooks, h, relayout }) {
     svg.setAttribute('viewBox', isBars ? `0 0 ${W} ${lastHn}` : `0 ${vbY} ${W} 96`);
   };
   const paintAll = () => { if (isBars) paintBars(); paintEnv(); };
-  const frame = (now) => {
-    raf = 0;
-    if (!svg.isConnected) return;
-    if (svg.style.display === 'none' || svg.parentElement?.style.display === 'none') { last = 0; return; }
-    const dt = last ? Math.min(0.1, (now - last) / 1000) : 0; last = now;
-    if (animated()) { noteT = (noteT + dt) % (hold + 0.35); phase += 2 * Math.PI * 0.6 * dt; paintAll(); raf = requestAnimationFrame(frame); }
-    else { last = 0; paintAll(); }
-  };
-  const kick = () => { if (!raf && animated() && svg.isConnected && svg.parentElement?.style.display !== 'none') { last = 0; raf = requestAnimationFrame(frame); } };
+  // runs on the shared clock, only while the picture is on screen
+  const anim = animate(svg, (now, dt, off) => {
+    if (off) { paintAll(); return; }
+    noteT = (noteT + dt) % (hold + 0.35); phase += 2 * Math.PI * 0.6 * dt;
+    paintAll();
+  }, { fps: 30 });
   const draw = (p) => {
     P = p || paramsOf();
     const s0 = fmStructure(P);
@@ -200,7 +198,7 @@ export function buildFmPicture(node, ctl, { store, hooks, h, relayout }) {
     if (s !== sig) { sig = s; rebuild(); if (!s0.rows.includes(sel) && s0.rows.length > 1) sel = s0.rows[0]; }
     S = s0;   // the route strengths change without a rebuild, so the wave must always be worked out from the latest ones
     btn.forEach((b) => { b.g.classList.toggle('on', b.op === sel); b.g.classList.toggle('off', !S.rows.includes(b.op)); });
-    paintAll(); kick();
+    paintAll(); anim.kick();
   };
   ctl.fmpicture = { draw };
   const legend = h('div', { class: 'fm-legend' }, h('b', {}, 'Bars'), ': one per shaker, the note you hear at the bottom. Drag a ring on a bar sideways for that shaker\'s ', h('b', {}, 'pitch'), ' (longer is higher). Drag the ring on an arm sideways for ', h('b', {}, 'how hard'), ' it shakes the one below. The ', h('b', { style: 'color:#ffb454' }, 'orange ring'), ' is feedback. The coloured line is the wave, pinched through each bar and coloured like the shaker it belongs to (green is the note you hear). Under a shaker it is what that shaker sends down, so a bigger index makes it wider. Below it, the ', h('b', {}, 'envelope'), ' of the picked shaker: drag the first dot for attack, the second for decay and sustain.');

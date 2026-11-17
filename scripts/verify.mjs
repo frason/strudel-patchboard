@@ -326,19 +326,19 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
 {
   const N = (t, p = {}) => makeNode(t, 0, 0, p);
   const mk = (fxList) => {
-    const sm = N('sample', { name: 'bd', pan: 0.2 }), out = N('output', { mphaser: 0.5, mtrem: 4, mchorus: 0.3 });
+    const sm = N('sample', { name: 'bd', pan: 0.2 }), out = N('output', { mphaser: 0.5, mtrem: 4 });
     let prev = sm; const nodes = [sm, ...fxList, out], wires = [];
     for (const fx of fxList) { wires.push({ id: 'w' + wires.length, from: { node: prev.id, port: 'out' }, to: { node: fx.id, port: 'in' } }); prev = fx; }
     wires.push({ id: 'wz', from: { node: prev.id, port: 'out' }, to: { node: out.id, port: 'in' } });
     return { v: 1, nodes, wires };
   };
-  const g = mk([N('tremolo', { sync: 'sync', rate: 8, depth: 0.7, shape: 'square' }), N('phaser', { rate: 0.5, depth: 0.9, center: 800 }), N('chorus', { amount: 0.4 }), N('compressor', { threshold: -24, ratio: 6 }), N('pan', { pan: 0.8 })]);
+  const g = mk([N('tremolo', { sync: 'sync', rate: 8, depth: 0.7, shape: 'square' }), N('phaser', { rate: 0.5, depth: 0.9, center: 800 }), N('compressor', { threshold: -24, ratio: 6 }), N('pan', { pan: 0.8 })]);
   const r = compile(g);
   console.log(r.code);
   const ev = (await evaluate(r.code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
   const v = ev[0]?.value || {};
-  check('new effects reach the event (tremolosync, depth, shape, phaser, chorus, compressor, pan)', v.tremolosync === 8 && v.tremolodepth === 0.7 && v.tremoloshape === 'square' && v.phaserrate === 0.5 && v.phaserdepth === 0.9 && v.phasercenter === 800 && v.chorus === 0.3 && v.compressor === -24 && v.compressorRatio === 6 && v.pan === 0.8);
-  check('master knobs write one all(...) line that applies to everything', /all\(x => x\.phaser\(0\.5\)\.tremolo\(4\)\.chorus\(0\.3\)\)/.test(r.code) && ev.every((h) => h.value.phaserrate !== undefined));
+  check('new effects reach the event (tremolosync, depth, shape, phaser, compressor, pan)', v.tremolosync === 8 && v.tremolodepth === 0.7 && v.tremoloshape === 'square' && v.phaserrate === 0.5 && v.phaserdepth === 0.9 && v.phasercenter === 800 && v.compressor === -24 && v.compressorRatio === 6 && v.pan === 0.8);
+  check('master knobs write one all(...) line that applies to everything', /all\(x => x\.phaser\(0\.5\)\.tremolo\(4\)\)/.test(r.code) && ev.every((h) => h.value.phaserrate !== undefined));
   check('pan knob on a sound writes .pan() only when moved from the middle', compile(mk([])).code.includes('.pan(0.2)') && !compile({ v: 1, nodes: [N('sample', { name: 'bd' }), N('output')], wires: [] }).code.includes('.pan('));
 }
 
@@ -351,8 +351,8 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
     return { v: 1, nodes, wires };
   };
   const g = chainOf(N('sample', { name: 'bd' }), [
-    N('vibrato', { rate: 6, depth: 1 }), N('ring', { mix: 0.4, freq: 300 }), N('vowel', { vowel: 'ae' }), N('djf', { amount: 0.3 }),
-    N('leslie', { wet: 0.8, rate: 5, size: 0.3 }), N('lofi', { coarse: 4, squiz: 2 }), N('distortion', { amount: 2, shape: 0.4 }),
+    N('vibrato', { rate: 6, depth: 1 }), N('vowel', { vowel: 'ae' }), N('djf', { amount: 0.3 }),
+    N('lofi', { coarse: 4 }), N('distortion', { amount: 2, shape: 0.4 }),
     N('pitchenv', { amount: -12, attack: 0.02, decay: 0.3 }), N('fm', { index: 5, harm: 2, decay: 0.45 }),
     N('filter', { type: 'lpf', cutoff: 500, ftype: 'ladder', env: 4, fa: 0.02, fd: 0.2, fs: 0.1 }),
   ]);
@@ -363,7 +363,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
     const ev = (await evaluate(r.code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
     v = ev[0]?.value || {};
   } catch (e) { check('all new effects evaluate: ' + e.message, false); }
-  const want = { vib: 6, vibmod: 1, ring: 0.4, ringf: 300, vowel: 'ae', djf: 0.3, leslie: 0.8, lrate: 5, lsize: 0.3, coarse: 4, squiz: 2, shape: 0.4, penv: -12, pattack: 0.02, pdecay: 0.3, fmi: 5, fmh: 2, fmdecay: 0.45, ftype: 'ladder', lpenv: 4, lpattack: 0.02, lpdecay: 0.2, lpsustain: 0.1 };
+  const want = { vib: 6, vibmod: 1, vowel: 'ae', djf: 0.3, coarse: 4, shape: 0.4, penv: -12, pattack: 0.02, pdecay: 0.3, fmi: 5, fmh: 2, fmdecay: 0.45, ftype: 'ladder', lpenv: 4, lpattack: 0.02, lpdecay: 0.2, lpsustain: 0.1 };
   const bad = Object.entries(want).filter(([k, x]) => v[k] !== x).map(([k, x]) => k + ' expected ' + x + ' got ' + v[k]);
   check('every new effect reaches the event with its value' + (bad.length ? ' [' + bad.join('; ') + ']' : ''), bad.length === 0);
 }
@@ -1071,5 +1071,49 @@ $: s("[hh ~@4 hh ~@14]*2")
   check('Delay picture: the time is in seconds, so on a longer cycle (slower tempo) the same echo sits closer to the hit', slow[1].x - slow[0].x < fast[1].x - fast[0].x && Math.abs((slow[1].x - slow[0].x) * 2.4 - (fast[1].x - fast[0].x) * 1) < 1e-6);
   check('Delay picture: a longer time spreads the echoes out, so fewer fit', delayBars({ mix: 0.8, time: 0.9, feedback: 0.9 }).length < delayBars({ mix: 0.8, time: 0.1, feedback: 0.9 }).length);
   check('Reverb picture: a bigger size makes a longer tail and a bigger room level a taller one, both within the picture', reverbShape({ size: 8, room: 0.5 }).len > reverbShape({ size: 1, room: 0.5 }).len && reverbShape({ size: 2, room: 0.9 }).top > reverbShape({ size: 2, room: 0.2 }).top && reverbShape({ size: 10, room: 1 }).len <= 200);
+}
+// Distortion, Lo-fi and Compressor pictures: the maths behind them.
+{
+  const { distortSample, coarseSamples, compressDb, compressRun } = await import('../src/fxpics.js');
+  const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
+  check('Distortion picture: with no distortion a sample passes through unchanged, and a lot of it pushes a quiet sample almost to full', near(distortSample({ amount: 0, shape: 0, crush: 16 }, 0.4), 0.4) && distortSample({ amount: 10, shape: 0, crush: 16 }, 0.4) > 0.99 && near(distortSample({ amount: 10, shape: 0, crush: 16 }, -0.4), -distortSample({ amount: 10, shape: 0, crush: 16 }, 0.4)));
+  check('Distortion picture: crush to 2 bits snaps samples to steps of a half, as the crush processor does', near(distortSample({ amount: 0, shape: 0, crush: 2 }, 0.3), 0.5) && near(distortSample({ amount: 0, shape: 0, crush: 2 }, 0.2), 0) && near(distortSample({ amount: 0, shape: 0, crush: 2 }, -0.8), -1));
+  check('Distortion picture: shape and distort are the same curve with different amounts: shape 0.95 equals distort 3.66, so shape is the gentler of the two', near(distortSample({ amount: 0, shape: 0.95, crush: 16 }, 0.3), distortSample({ amount: Math.log(39), shape: 0, crush: 16 }, 0.3), 1e-9) && distortSample({ amount: 10, shape: 0, crush: 16 }, 0.3) > distortSample({ amount: 0, shape: 0.95, crush: 16 }, 0.3));
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const sq = imp('setcpm(120/4)\n\n$: s("bd").coarse(4).squiz(4)');
+  check('Lo-fi: squiz is no longer a knob; importing .squiz() keeps coarse and skips squiz with the reason (the browser player does not play it)', !sq.error && sq.graph.nodes.find((n) => n.type === 'lofi')?.params.coarse === 4 && !('squiz' in sq.graph.nodes.find((n) => n.type === 'lofi').params) && sq.report.skipped.some((x) => /squiz/.test(x.text) && /SuperDirt/.test(x.reason)));
+  const held = coarseSamples(Float32Array.from([1, 2, 3, 4, 5, 6, 7]), 3);
+  check('Lo-fi picture: coarse 3 keeps every third sample and holds it, like the coarse processor', Array.from(held).join() === '1,1,1,4,4,4,7' && Array.from(coarseSamples(Float32Array.from([1, 2, 3]), 1)).join() === '1,2,3');
+  check('Compressor picture: below the threshold nothing changes, above it the level rises 1 dB per ratio dB, and a soft knee eases in', compressDb(-40, -20, 4, 0) === -40 && near(compressDb(-8, -20, 4, 0), -17) && compressDb(-20, -20, 4, 10) < -20 && compressDb(-20, -20, 4, 10) > -20 - 5);
+  const fastRel = compressRun({ threshold: -20, ratio: 8, knee: 0, attack: 0.001, release: 0.01 }, 1.3), slowRel = compressRun({ threshold: -20, ratio: 8, knee: 0, attack: 0.001, release: 0.5 }, 1.3);
+  const quietEnd = (run) => run.filter((r) => r.t > 0.5 && r.t < 0.62).map((r) => r.outDb - r.inDb);
+  check('Compressor picture: a slow release keeps turning the level down after the hit has passed, a fast one lets go', Math.min(...quietEnd(slowRel)) < Math.min(...quietEnd(fastRel)) - 1);
+}
+// Vibrato, Tremolo, Phaser, Late, Swing and Note length pictures: the numbers behind them.
+{
+  const { lfo01, tremoloGain, notchGain, phaserNotchHz, gridEvents } = await import('../src/fxpics.js');
+  const near = (a, b, e = 1e-9) => Math.abs(a - b) < e;
+  check('Tremolo picture: full depth dips to silence and zero depth never moves; the quietest point of a wobble is at 1 minus depth', near(tremoloGain({ depth: 1, shape: 'sine' }, 0.75), 0, 1e-9) && near(tremoloGain({ depth: 0, shape: 'sine' }, 0.3), 1) && near(tremoloGain({ depth: 0.4, shape: 'square' }, 0.75), 0.6) && near(tremoloGain({ depth: 0.4, shape: 'sine' }, 0.25), 1));
+  check('Tremolo picture: the four shapes are a sine, a triangle, a square and a ramp from 0 to 1', near(lfo01('sine', 0.25), 1) && near(lfo01('triangle', 0.5), 1) && lfo01('square', 0.25) === 1 && lfo01('square', 0.75) === 0 && near(lfo01('sawtooth', 0.4), 0.4));
+  check('Phaser picture: the notch removes its own frequency and lets far-away ones through; more depth makes it wider', notchGain(1000, 1000, 0.5) < 1e-9 && notchGain(100, 1000, 0.5) > 0.95 && notchGain(1300, 1000, 1) < notchGain(1300, 1000, 0.1));
+  check('Phaser picture: the notch sits at the centre plus 282 Hz, and a sweep of 1200 cents carries it up an octave', near(phaserNotchHz({ center: 1000, sweep: 2000 }, 0), 1282) && near(phaserNotchHz({ center: 1000, sweep: 1200 }, 1), 2564, 1e-6));
+  const late = gridEvents('late', { n: 0.05 }), swing = gridEvents('swing', { amount: 0.33, slices: 4 }), clip = gridEvents('clip', { n: 0.5 });
+  check('Late picture: every step shifts by the same fraction of a cycle', late.length === 8 && late.every((e) => near(e.shift, 0.05)));
+  check('Swing picture: only the second half of each slice moves, by amount times half a slice (4 slices: every other eighth note)', swing.map((e) => e.shift > 0 ? 1 : 0).join('') === '01010101' && near(swing[1].shift, 0.33 * 0.25 / 2));
+  check('Note length picture: each note is the step times the length setting', clip.every((e) => e.mul === 0.5) && gridEvents('clip', { n: 2 })[0].mul === 2);
+}
+// Chorus, Ring mod and Leslie were removed (the browser player has no code to play them).
+{
+  const { MODULES: MODS, FX_TILES: TILES } = await import('../src/modules.js');
+  const { importStrudel: imp2 } = await import('../src/importer.js');
+  const { cleanGraph } = await import('../src/validate.js');
+  check('Chorus, Ring mod and Leslie are gone: no modules, no rack tile, no master chorus knob', !('chorus' in MODS) && !('ring' in MODS) && !('leslie' in MODS) && !TILES.some((x) => x.key === 'chorus') && !MODS.output.params.some((x) => x.key === 'mchorus'));
+  const ri = imp2('setcpm(120/4)\n\n$: s("bd").ring(0.5).chorus(0.3).leslie(1).phaser(0.5)');
+  check('Importing .ring(), .chorus() and .leslie() skips each with the reason, and keeps the effects that do play', !ri.error && ri.report.skipped.length === 3 && ri.report.skipped.every((x) => /no code for it/.test(x.reason)) && ri.graph.nodes.some((n) => n.type === 'phaser'));
+  check('Importing all(x => x.chorus(0.3)) skips it with a reason', imp2('setcpm(120/4)\n\n$: s("bd")\n\nall(x => x.chorus(0.3))').report.skipped.length === 1);
+  const old = { v: 1, nodes: [{ id: 'a', type: 'sample', x: 0, y: 0, params: { name: 'bd' } }, { id: 'r', type: 'ring', x: 0, y: 0, params: {} }, { id: 'c', type: 'chorus', x: 0, y: 0, params: {} }, { id: 'o', type: 'output', x: 0, y: 0, params: {} }],
+    wires: [{ id: 'w1', from: { node: 'a', port: 'out' }, to: { node: 'r', port: 'in' } }, { id: 'w2', from: { node: 'r', port: 'out' }, to: { node: 'c', port: 'in' } }, { id: 'w3', from: { node: 'c', port: 'out' }, to: { node: 'o', port: 'in' } }] };
+  const fixed = cleanGraph(old);
+  check('An old patch with Ring mod and Chorus in a row still loads: they are taken out and the cables joined up, and the names are listed', fixed.nodes.map((n) => n.type).join() === 'sample,output' && fixed.wires.length === 1 && fixed.wires[0].from.node === 'a' && fixed.wires[0].to.node === 'o' && fixed.removedFx.slice().sort().join() === 'chorus,ring');
 }
 process.exit(failures ? 1 : 0);

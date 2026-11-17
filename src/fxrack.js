@@ -5,7 +5,6 @@ import { FX_TILES } from './modules.js';
 const ICONS = {
   reverb: '<circle cx="14" cy="9" r="2.2"/><circle cx="14" cy="9" r="5.5" opacity=".7"/><circle cx="14" cy="9" r="8.5" opacity=".4"/>',
   delay: '<circle cx="4" cy="9" r="3.2"/><circle cx="11" cy="9" r="2.6" opacity=".8"/><circle cx="17" cy="9" r="2" opacity=".6"/><circle cx="22.5" cy="9" r="1.4" opacity=".4"/>',
-  chorus: '<path d="M1 7 Q5 1 9 7 T17 7 T25 7" fill="none"/><path d="M1 12 Q5 6 9 12 T17 12 T25 12" fill="none" opacity=".6"/>',
   distort: '<path d="M1 9 L5 3 H9 L13 15 H17 L21 3 H25" fill="none"/>',
   phaser: '<path d="M3 15 V9 M8 15 V5 M13 15 V3 M18 15 V6 M23 15 V10" fill="none" stroke-linecap="round"/>',
   tremolo: '<path d="M1 9 Q4 2 7 9 T13 9 T18 9 T22 9 T25 9" fill="none" stroke-width="1.6"/><path d="M1 9 Q4 16 7 9 T13 9 T18 9" fill="none" opacity=".4"/>',

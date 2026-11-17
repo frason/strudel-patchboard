@@ -8,7 +8,7 @@ import { ROOT_NAMES, CHORD_QUALITIES, EXTENSIONS, chordSymbol, romanName, degree
 import { INSTRUMENTS, CATEGORIES as INST_CATS, instrumentOf } from './instruments.js';
 import { buildFmDiagram } from './fmdiagram.js';
 import { buildPulseDiagram } from './pulsediagram.js';
-import { buildDelayPic, buildReverbPic } from './fxpics.js';
+import { FXPICS } from './fxpics.js';
 import { soundIconSvg, hasSoundIcon, soundGlyph } from './soundicons.js';
 import { icon } from './icons.js';
 import { buildFxRack } from './fxrack.js';
@@ -535,7 +535,7 @@ function foldSummary(node, g) {
     case 'filter': return `${p.ftype} · envelope ${p.env > 0 ? fmt(p.env) : 'off'}`;
     case 'fm': { const ops = 1 + [p.index2, p.index3, p.index4].filter((v) => v > 0).length; const routes = Object.keys(p).filter((k) => /^r\d\d$/.test(k) && p[k] > 0).length; return `decay ${fmt(p.decay)} · sustain ${fmt(p.sustain)} · ${ops} modulator${ops > 1 ? 's' : ''}${routes ? ' · ' + routes + ' extra route' + (routes > 1 ? 's' : '') : ''}${[p.fb1, p.fb2, p.fb3, p.fb4].some((v) => v > 0) ? ' · feedback' : ''}`; }
     case 'compressor': return `knee ${fmt(p.knee)} · attack ${fmt(p.attack)} · release ${fmt(p.release)}`;
-    case 'output': return `${p.mvol !== 1 ? 'volume ' + fmt(p.mvol) + ' · ' : ''}${p.beats} beats · master effects ${p.mphaser > 0 || p.mtrem > 0 || p.mchorus > 0 ? 'on' : 'off'}`;
+    case 'output': return `${p.mvol !== 1 ? 'volume ' + fmt(p.mvol) + ' · ' : ''}${p.beats} beats · master effects ${p.mphaser > 0 || p.mtrem > 0 ? 'on' : 'off'}`;
     case 'arrange': return `${p.n} sections · ${p.lens.slice(0, p.n).reduce((a, x) => a + x, 0)} cycles`;
     case 'drums': return `${p.steps} steps · ${p.bank || 'no bank'}`;
     default: return 'settings';
@@ -1323,8 +1323,7 @@ export function createBoard(root, store, hooks) {
     if (def.data?.envelope && !isCol(node)) { ctl.envEl = buildEnvelope(node, ctl, def); body.prepend(ctl.envEl); }
     if (def.data?.fmdiagram && !isCol(node)) body.prepend(buildFmDiagram(node, ctl, { store, hooks, h, relayout: () => setTimeout(drawCables, 0) }));
     if (def.data?.pulsepic && !isCol(node)) body.prepend(buildPulseDiagram(node, ctl, { store, h }));
-    if (def.data?.delaypic && !isCol(node)) body.prepend(buildDelayPic(node, ctl, { store, h }));
-    if (def.data?.reverbpic && !isCol(node)) body.prepend(buildReverbPic(node, ctl, { store, h }));
+    for (const [flag, build] of Object.entries(FXPICS)) if (def.data?.[flag] && !isCol(node)) body.prepend(build(node, ctl, { store, h }));
     if (def.data?.chords && !isCol(node)) body.prepend(buildChords(node, ctl));
     else if (def.data?.cells && !isCol(node)) body.prepend(buildSequencer(node, ctl));
     if (def.data?.tracks && !isCol(node)) body.prepend(buildDrums(node, ctl));
@@ -1884,8 +1883,7 @@ export function createBoard(root, store, hooks) {
     v.ctl.arrange?.draw(node.params);
     v.ctl.fmdiagram?.draw(node.params);
     v.ctl.pulsepic?.draw(node.params);
-    v.ctl.delaypic?.draw(node.params);
-    v.ctl.reverbpic?.draw(node.params);
+    for (const flag of Object.keys(FXPICS)) v.ctl[flag]?.draw(node.params);
     v.ctl.fxrack?.draw(node.params);
     v.ctl.mixer?.draw(node.params);
     v.ctl.envelope?.draw(node.params);
