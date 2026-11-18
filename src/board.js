@@ -1,5 +1,5 @@
 // The patchboard: pannable/zoomable page, module panels with real controls, typed jacks, cables.
-import { MUTE_KIND, cellNotes, noteRank as pitchRank, pitchModel, SCALES, parseX, leafAt, stepHas, slotWidth, xLabel, MODULES, PORT_TYPES, NOTE_NAMES, fmt, portsOf, CATEGORIES, DRUM_PRESETS, MELODY_TEMPLATES, parseArrangeOrder, withOrderLen, FM_WAVE_NAMES, OWAVE, fmWaveFn } from './modules.js';
+import { MUTE_KIND, cellNotes, noteRank as pitchRank, pitchModel, SCALES, parseX, leafAt, stepHas, slotWidth, xLabel, MODULES, PORT_TYPES, NOTE_NAMES, fmt, portsOf, CATEGORIES, PALETTE_GROUPS, DRUM_PRESETS, MELODY_TEMPLATES, parseArrangeOrder, withOrderLen, FM_WAVE_NAMES, OWAVE, fmWaveFn } from './modules.js';
 import { soundsFor, isValidSound, describe, sampleItems, sampleCategoryOf, SAMPLE_CATS } from './catalog.js';
 import { isFav, toggleFav, favCount } from './favorites.js';
 import { getPrefs, onPrefs, setPref } from './prefs.js';
@@ -2371,8 +2371,13 @@ export function buildPalette(root, hooks, getGraph) {
   const items = new Map();
   for (const [cat, title] of CATEGORIES) {
     const sec = h('div', { class: 'pal-sec' }, h('div', { class: 'pal-h' }, title));
-    for (const [type, def] of Object.entries(MODULES)) {
-      if (def.cat !== cat) continue;
+    // the Write modules are shown in small groups (melody, rhythm, harmony); every other section keeps the module order
+    const grouped = PALETTE_GROUPS[cat], order = [];
+    if (grouped) { for (const [label, types] of grouped) { order.push({ label }); for (const t of types) if (MODULES[t]) order.push({ type: t }); } for (const [t, d] of Object.entries(MODULES)) if (d.cat === cat && !grouped.some(([, ts]) => ts.includes(t))) order.push({ type: t }); }
+    else for (const [t, d] of Object.entries(MODULES)) if (d.cat === cat) order.push({ type: t });
+    for (const entry of order) {
+      if (entry.label) { sec.append(h('div', { class: 'pal-sub' }, entry.label)); continue; }
+      const type = entry.type, def = MODULES[type];
       const out = def.out === 'through' ? null : def.out;
       const item = h('div', { class: `pal-item cat-${def.cat}`, dataset: { type }, title: def.blurb },
         h('span', { class: 'pal-dot', dataset: { type: out || '' } }), h('span', {}, def.title));

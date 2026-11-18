@@ -187,10 +187,12 @@ export function importStrudel(code, { sounds = null } = {}) {
   if (code.length > 300_000) return { error: `This code is too large to read (${Math.round(code.length / 1000)} KB; the limit is 300 KB).` };
   const lines = code.split('\n');
   const lineText = (n) => (lines[n.loc.start.line - 1] || '').trim().slice(0, 110);
-  let ast;
-  try { ast = parse(code, { ecmaVersion: 2022, locations: true, allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true }); }
+  let ast; const comments = [];
+  try { ast = parse(code, { ecmaVersion: 2022, locations: true, onComment: comments, allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true }); }
   catch (e) { return { error: `This is not valid JavaScript, so Strudel could not run it either: ${e.message}` }; }
 
+  // a /* Note Pattern */ or /* Hit Pattern */ comment right before a pattern string says which module wrote it (see compile.js)
+  const tagged = (node, label) => !!node && comments.some((c) => c.type === 'Block' && c.value.trim() === label && c.end <= node.start && code.slice(c.end, node.start).trim() === '');
   const nodes = [], wires = [], keys = new Map();
   let wid = 0, stmtNo = 0, acidDefined = false;
   const out = { bpm: 120, beats: 4, master: {}, masterSig: {} };
@@ -345,12 +347,13 @@ export function importStrudel(code, { sounds = null } = {}) {
         const ps = leaf.pitches.map((w) => (deg ? (/^-?\d+$/.test(w) ? Number(w) : (() => { throw new Skip(`"${w}" is not a scale step number`); })()) : noteName(w)));
         return deg ? { n: null, d: ps.length ? ps : null } : { n: ps.length ? ps : null, d: null };
       };
+      const forceText = name === 'note' && !deg && mode0 === 'steps' && text.length <= 8000 && override === null && tagged(root.arguments[0], 'Note Pattern');
       let cells = cellsFromItems(items, 'melody', conv), coarse = null;
-      if (cells.length > 16 && mode0 === 'steps' && !calls.some((c) => c.name === 'clip' || c.name === 'legato')) {   // a long spelling of a simple pattern (see coarsen)
+      if (!forceText && cells.length > 16 && mode0 === 'steps' && !calls.some((c) => c.name === 'clip' || c.name === 'legato')) {   // a long spelling of a simple pattern (see coarsen)
         const co = coarsen(items, 'melody');
         if (co) { coarse = co; cells = cellsFromItems(co.items, 'melody', conv); }
       }
-      if (cells.length > 16 && !deg && name === 'note' && mode0 === 'steps' && text.length <= 8000) {   // too long or too fine for the step grid: keep it exactly as written, as a Note Pattern
+      if ((cells.length > 16 || forceText) && !deg && name === 'note' && mode0 === 'steps' && text.length <= 8000) {   // too long or too fine for the step grid: keep it exactly as written, as a Note Pattern
         S.melody = add('notetext', { text, vel: '' }, stmt);
         S.root = S.melody;
         S.kind = 'notes';
@@ -563,8 +566,9 @@ export function importStrudel(code, { sounds = null } = {}) {
       const onNotes = !!(root && S.kind === 'notes' && S.instrument && ['melody', 'notetext', 'randnotes'].includes(root.type));
       if (!root || (root.type !== 'sample' && !onNotes)) throw new Skip('struct() only on a single sample or a melody');
       const target = onNotes ? S.instrument : root, port = onNotes ? 'rhythm' : 'in';
+      const hitTag = tagged(a[0], 'Hit Pattern');
       // "x*8?0.4" (with an optional .ribbon(n, 1)): what a Random Rhythm module writes
-      {
+      if (!hitTag) {
         let sa = a[0], loop = 0;
         if (sa && sa.type === 'CallExpression' && sa.callee.type === 'MemberExpression' && !sa.callee.computed && (sa.callee.property.name === 'ribbon' || sa.callee.property.name === 'rib') && num(sa.arguments[1]) === 1 && num(sa.arguments[0]) !== null) { loop = num(sa.arguments[0]); sa = sa.callee.object; }
         const rt = sa ? str(sa) : null, mm = rt === null ? null : /^x\*(\d+)(?:\?([0-9.]+))?$/.exec(rt.trim());
@@ -582,7 +586,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       let parsed = null;
       try { const rs = readSteps(t, 'rhythm', (l) => l, { euclid: true }); parsed = { ...rs, cells: rs.items.length === 1 && rs.items[0].euclid ? null : cellsFromItems(rs.items, 'rhythm', (l) => l) }; }
       catch (e) { if (!(e instanceof Skip)) throw e; parsed = { err: e.message }; }
-      if (parsed.err || (parsed.cells && (parsed.cells.length < 1 || parsed.cells.length > 16)) || (onNotes && parsed.cells === null)) {   // too long or too fine for the Rhythm Sequencer: keep it exactly as written, as a Hit Pattern
+      if (hitTag || parsed.err || (parsed.cells && (parsed.cells.length < 1 || parsed.cells.length > 16)) || (onNotes && parsed.cells === null)) {   // too long or too fine for the Rhythm Sequencer: keep it exactly as written, as a Hit Pattern
         if (t.length > 8000) throw new Skip(parsed.err || `${parsed.cells.length} steps (1 to 16 are supported)`);
         const hp = add('hitpattern', { text: t }, S.stmt);
         wire(hp, target, port);

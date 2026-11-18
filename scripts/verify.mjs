@@ -1187,10 +1187,10 @@ $: s("[hh ~@4 hh ~@14]*2")
   const evs = async (code, n = 2) => (await evaluate(code, false)).queryArc(0, n).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(6)} ${h.whole.end.valueOf().toFixed(6)} ${h.value.s ?? ''} ${h.value.note ?? ''}`).sort();
   const build = (rhythmType, rhythmText, sink) => { const g3 = eg3(), N3 = (ty, p = {}) => { const nn = mn3(ty, 0, 0, p); g3.nodes.push(nn); return nn; }; const w3 = (a, b, port) => g3.wires.push({ id: 'w' + g3.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } }); const h = N3('hitpattern', { text: rhythmText }), o = N3('output'); if (sink === 'sample') { const s3 = N3('sample', { name: 'bd' }); w3(h, s3, 'in'); w3(s3, o, 'in'); } else { const m3 = N3('melody', { steps: 4, scale: 'off', cells: [{ n: ['c3'], len: 1, vel: 1 }, { n: ['e3'], len: 1, vel: 1 }, { n: ['g3'], len: 1, vel: 1 }, { n: ['c4'], len: 1, vel: 1 }] }), sy = N3('synth', { wave: 'sawtooth' }); w3(m3, sy, 'in'); w3(h, sy, 'rhythm'); w3(sy, o, 'in'); } return compile(g3); };
   const smp = build('hit', 'x ~ x*2 [x x]', 'sample');
-  check('Hit Pattern: into a Sample it writes .struct("…") with the text as it is, and the engine plays exactly that rhythm', /\.struct\("x ~ x\*2 \[x x\]"\)/.test(smp.code) && smp.issues.length === 0 && JSON.stringify(await evs(smp.code, 1)) === JSON.stringify(await evs('setcpm(120/4)\n$: s("bd").struct("x ~ x*2 [x x]")', 1)));
+  check('Hit Pattern: into a Sample it writes .struct("…") with the text as it is, and the engine plays exactly that rhythm', /\.struct\(\/\* Hit Pattern \*\/ "x ~ x\*2 \[x x\]"\)/.test(smp.code) && smp.issues.length === 0 && JSON.stringify(await evs(smp.code, 1)) === JSON.stringify(await evs('setcpm(120/4)\n$: s("bd").struct("x ~ x*2 [x x]")', 1)));
   const inst = build('hit', 'x ~ x*2 [x x]', 'synth');
   const instEv = (await evaluate(inst.code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
-  check('Hit Pattern: into an Instrument it puts that rhythm on the melody: .struct("…") sits between the notes and .s(…), and the notes are picked at each hit', /\.struct\("x ~ x\*2 \[x x\]"\)\s*\.s\("sawtooth"\)/.test(inst.code) && inst.issues.length === 0 && instEv.length === 5 && instEv.every((h) => /^[a-g]#?\d$/.test(String(h.value.note))));
+  check('Hit Pattern: into an Instrument it puts that rhythm on the melody: .struct("…") sits between the notes and .s(…), and the notes are picked at each hit', /\.struct\(\/\* Hit Pattern \*\/ "x ~ x\*2 \[x x\]"\)\s*\.s\("sawtooth"\)/.test(inst.code) && inst.issues.length === 0 && instEv.length === 5 && instEv.every((h) => /^[a-g]#?\d$/.test(String(h.value.note))));
   const oldBack = impH('setcpm(120/4)\n\n$: s("bd").struct("x ~ x x")');
   check('Hit Pattern: a rhythm that fits the Rhythm Sequencer still becomes one (nothing changes for short patterns)', oldBack.report.skipped.length === 0 && oldBack.graph.nodes.some((n) => n.type === 'rhythm') && !oldBack.graph.nodes.some((n) => n.type === 'hitpattern'));
   const longR = 'x ~ x*2 [x x] ~@3 x x ~ [x x x] x ~ x x ~@2 x [x x] ~ x x ~ x ~ x x x ~ x';
@@ -1251,5 +1251,17 @@ $: s("[hh ~@4 hh ~@14]*2")
 
   const ch = E.parseEditable('c3 f3 [g#3,f3] ~ c4', '', 'notes');
   check('Click editing: chords like [g#3,f3] are read, a pitch can be added, removed or moved inside one, and a chord of one note is written as a single note', ch && ch.steps[2].n === '[g#3,f3]' && E.writeEditable(E.addPitch(ch.steps, 0, 'e3').steps, false).text === '[c3,e3] f3 [g#3,f3] ~ c4' && E.writeEditable(E.removePitch(ch.steps, 2, 'g#3').steps, false).text === 'c3 f3 f3 ~ c4' && E.writeEditable(E.movePitch(ch.steps, 2, 'f3', 'c4').steps, false).text === 'c3 f3 [g#3,c4] ~ c4' && E.addPitch(ch.steps, 0, 'c3') === null && E.writeEditable(E.removePitch(ch.steps, 4, 'c4').steps, false).text === 'c3 f3 [g#3,f3] ~@2');
+
+  {
+    const { importStrudel: imp } = await import('../src/importer.js'), { compile: comp } = await import('../src/compile.js');
+    const { emptyGraph: eg9, makeNode: mn9 } = await import('../src/graph.js');
+    const mk = (kind, text) => { const g = eg9(), N = (ty, p = {}) => { const n = mn9(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } }); const o = N('output');
+      if (kind === 'notes') { const nt = N('notetext', { text, vel: '' }), sy = N('synth', { wave: 'sine' }); W(nt, sy, 'in'); W(sy, o, 'in'); } else { const hp = N('hitpattern', { text }), sm = N('sample', { name: 'bd' }); W(hp, sm, 'in'); W(sm, o, 'in'); } return comp(g).code; };
+    const types = (code) => imp(code).graph.nodes.map((n) => n.type).join(',');
+    check('Round trip: a short Note Pattern comes back as a Note Pattern (its code carries a comment saying so), and the same notes without the comment still become a Melody Sequencer', types(mk('notes', 'c3 f3 [g#3,f3] ~ c4')).includes('notetext') && types(mk('notes', 'c3 f3 [g#3,f3] ~ c4').replace('/* Note Pattern */ ', '')).includes('melody') && !types(mk('notes', 'c3 f3 [g#3,f3] ~ c4').replace('/* Note Pattern */ ', '')).includes('notetext'));
+    check('Round trip: a short Hit Pattern comes back as a Hit Pattern with its text unchanged, and without the comment it becomes a Rhythm Sequencer', (() => { const g = imp(mk('hits', 'x ~ x x')).graph; return g.nodes.some((n) => n.type === 'hitpattern' && n.params.text === 'x ~ x x'); })() && imp(mk('hits', 'x ~ x x').replace('/* Hit Pattern */ ', '')).graph.nodes.some((n) => n.type === 'rhythm'));
+    const rt = imp(mk('notes', 'c3@3 ~ e3 [g3,b3]@2')).graph.nodes.find((n) => n.type === 'notetext');
+    check('Round trip: the Note Pattern text is kept exactly, and a sequence of two (code, import, code) is stable', rt && rt.params.text === 'c3@3 ~ e3 [g3,b3]@2' && comp(imp(mk('notes', 'c3@3 ~ e3 [g3,b3]@2')).graph).code === mk('notes', 'c3@3 ~ e3 [g3,b3]@2'));
+  }
 }
 process.exit(failures ? 1 : 0);

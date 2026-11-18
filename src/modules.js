@@ -651,6 +651,15 @@ export const CATEGORIES = [
   ['effect', 'Effects'], ['view', 'Views'], ['number', 'Numbers'], ['output', 'Output'],
 ];
 
+// the Write section of the module list, in small groups: what each one is for
+export const PALETTE_GROUPS = {
+  sequencer: [
+    ['Melody', ['melody', 'notetext', 'randnotes']],
+    ['Rhythm', ['rhythm', 'hitpattern', 'randrhythm']],
+    ['Harmony', ['chords', 'key']],
+  ],
+};
+
 export function defaultParams(type) {
   const def = MODULES[type];
   const p = {};

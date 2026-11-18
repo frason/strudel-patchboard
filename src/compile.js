@@ -206,10 +206,10 @@ export function compile(g) {
         }
         return chain(base, calls, depth, inline);
       }
-      case 'hitpattern': return [S(q(String(p.text || 'x').trim() || 'x'), { ...m, role: 'mini', note: 'a rhythm in mini-notation: x is a hit, ~ a rest, @3 holds for 3 steps, *2 repeats, [x x] squeezes two hits into one step.' })];
+      case 'hitpattern': return [S('/* Hit Pattern */ ', { ...m, role: 'comment', note: 'A comment that says this rhythm came from a Hit Pattern module, so pasting the code back brings the module back.' }), S(q(String(p.text || 'x').trim() || 'x'), { ...m, role: 'mini', note: 'a rhythm in mini-notation: x is a hit, ~ a rest, @3 holds for 3 steps, *2 repeats, [x x] squeezes two hits into one step.' })];
       case 'notetext': {   // a melody written as text: note("…") with an optional matching .velocity("…")
         const m2 = { ...m, role: 'mini' };
-        const base = [S('note(', { ...m, role: 'fn', note: 'note("…") is the melody written out as text. Each word is a step; @3 holds a note for 3 steps; ~ is a rest; [c3,e3,g3] plays several notes at once.' }), S(q(String(p.text || '~').trim() || '~'), m2), S(')', m)];
+        const base = [S('note(', { ...m, role: 'fn', note: 'note("…") is the melody written out as text. Each word is a step; @3 holds a note for 3 steps; ~ is a rest; [c3,e3,g3] plays several notes at once.' }), S('/* Note Pattern */ ', { ...m, role: 'comment', note: 'A comment that says this melody came from a Note Pattern module, so pasting the code back brings the module back.' }), S(q(String(p.text || '~').trim() || '~'), m2), S(')', m)];
         const calls = [];
         if (String(p.vel || '').trim()) calls.push([S('.velocity(', { ...m, role: 'fn', note: 'velocity("…") sets how hard each step is played (0 to 1). It needs the same steps as the notes.' }), S(q(String(p.vel).trim()), m2), S(')', m)]);
         return chain(base, calls, depth, inline);
