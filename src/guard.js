@@ -11,7 +11,11 @@ const METHODS = new Set(`acidenv analyze arp attack bank bpf bpq chord chorus co
 clip euclid every fast fit late legato swingBy fm fm11 fm12 fm13 fm14 fm2 fm20 fm22 fm23 fm24 fm3 fm30 fm31 fm33 fm34 fm4 fm40 fm41 fm42 fm44 fmattack fmattack2 fmattack3 fmattack4 fmdecay fmdecay2 fmdecay3 fmdecay4
 fmh fmh2 fmh3 fmh4 fmsustain fmsustain2 fmsustain3 fmsustain4 fmwave fmwave2 fmwave3 fmwave4 ftype gain hpf hpq leslie lpa lpd lpenv lpf lpq lps lrate lsize mode mul orbit pan phaser phasercenter
 phaserdepth phasersweep ply postgain pow pattack pdecay penv range release repeat rev ribbon ring ringf room roomsize round s scale scramble segment shape shuffle slow sometimesBy speed squiz
-struct sustain pw pwrate pwsweep tremolo tremolosync tremolodepth tremoloshape transpose velocity vib vibmod voicing vowel _scope _pianoroll _punchcard _spiral _pitchwheel`.split(/\s+/).filter(Boolean));
+struct sustain pw pwrate pwsweep tremolo tremolosync tremolodepth tremoloshape transpose velocity vib vibmod voicing vowel _scope _pianoroll _punchcard _spiral _pitchwheel
+add sub div mask seg palindrome adsr someCycles someCyclesBy sometimes often rarely almostNever almostAlways always never superimpose off jux juxBy chunk chunkBack linger iter iterBack hurry inside outside
+early press pressBy rolled rolledBy slice splice chop striate begin end loopAt cut unit accelerate nudge cutoff resonance hcutoff hresonance bandf bandq sz rsize roomfade roomlp roomdim lpattack lprelease hpattack hprelease
+delayfb delayt dt dfb att dec sus rel amp vel sound freq stut echo euclidRot euclidLegato euclidInv euclidLegatoRot fastGap compress zoom focus rangex inv bite squeeze toggle pick scaleTranspose trans rootNotes
+degradeBy undegradeBy brak ply plyWith fastchunk slowchunk run gap legato note n s ftype color colour anchor echoWith rib offset partials phases`.split(/\s+/).filter(Boolean));
 // helper definitions the compiler writes word for word (nothing in them depends on the patch): allowed only when they match exactly
 const FIXED = new Set(["register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9).lps(.2).lpd(.12))"]);
 const MAX_CHARS = 600_000, MAX_NODES = 60_000;
@@ -22,6 +26,9 @@ const at = (node, code) => { const line = code.slice(0, node.start).split('\n').
 function expr(node, code, ctx) {
   if (++ctx.nodes > MAX_NODES) throw new Refuse('the code is too large');
   switch (node.type) {
+    case 'TemplateLiteral':   // `...` with nothing computed inside is just text
+      if (node.expressions.length === 0) return;
+      throw new Refuse(`${at(node, code)}: a template string with values inside is not allowed`);
     case 'Literal':
       if (typeof node.value === 'string' || typeof node.value === 'number' || typeof node.value === 'boolean') return;
       throw new Refuse(`${at(node, code)}: this kind of value is not allowed`);
@@ -65,6 +72,9 @@ function member(node, code, ctx) {
   if (!METHODS.has(node.property.name)) throw new Refuse(`${at(node, code)}: ".${node.property.name}()" is not something patches may call`);
   expr(node.object, code, ctx);
 }
+
+// A list of method calls to put after a pattern (".mask(\"1 0\").seg(8)"): the same check, on the calls alone. Returns null when allowed, otherwise a short reason.
+export const guardCalls = (text) => (/^\s*\./.test(text) ? guardCode('s("x")' + String(text).trim()) : 'the calls must start with a dot, like .mask("1 0")');
 
 // Returns null when the code is made only of allowed shapes, otherwise a short reason.
 export function guardCode(code) {

@@ -561,7 +561,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const m = mel.graph?.nodes.find((n) => n.type === 'melody');
   check('importer: "[...16 steps]/2" comes back as a 16-step melody at a steady pace', !mel.error && m && m.params.steps === 16 && m.params.mode === 'pace' && mel.report.skipped.length === 0);
   const bad = importStrudel('$: note("[c3 e3 g3 b3 c4 b3 g3 e3 c3 e3 g3 b3 c4 b3 g3 e3]/3").s("sawtooth")');
-  check('importer: a slowdown that is not steps over 8 is reported, not guessed', bad.report?.skipped.length > 0 || bad.error);
+  check('importer: a slowdown that is not steps over 8 is never guessed into a wrong pace: the pattern is kept exactly as written in a Strudel Code (pattern) module', !bad.error && bad.report.skipped.length === 0 && !bad.graph.nodes.some((n) => n.type === 'melody') && bad.graph.nodes.some((n) => n.type === 'codesource' && /\]\/3"\)/.test(n.params.code)));
   const back = importStrudel(compile(rg('pace')).code);
   check('rhythm at a steady pace survives code -> modules -> code', !back.error && back.graph.nodes.some((n) => n.type === 'rhythm' && n.params.mode === 'pace' && n.params.steps === 16));
 }
@@ -674,7 +674,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const ev = (await evaluate(code, false)).queryArc(0, 1).filter((h) => h.hasOnset())[0]?.value || {};
   check('FM operator waves: a non-sine wave is written as fmwave / fmwave2 and reaches Strudel; sine writes nothing', /\.fmwave\("triangle"\)/.test(code) && /\.fmwave2\("triangle"\)/.test(code) && ev.fmwave === 'triangle' && ev.fmwave2 === 'triangle' && !/fmwave/.test(wv('sine')));
   const back = importStrudel(code).graph?.nodes.find((n) => n.type === 'fm');
-  check('FM operator waves: the code reads back into the same dials, and an unknown wave is reported', back && back.params.owave === 'triangle' && back.params.owave2 === 'triangle' && importStrudel('$: note("c3").s("sine").fm(2).fmwave("pink")').report.skipped.length === 1);
+  check('FM operator waves: the code reads back into the same dials, and an unknown wave is reported', back && back.params.owave === 'triangle' && back.params.owave2 === 'triangle' && (() => { const r = importStrudel('$: note("c3").s("sine").fm(2).fmwave("pink")'); return r.report.skipped.length === 0 && r.graph.nodes.some((n) => n.type === 'code' && /fmwave\("pink"\)/.test(n.params.code)); })());
 }
 {
   const { resizeTracks } = await import('../src/modules.js');
@@ -910,8 +910,8 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const events = async (c) => (await evaluate(c, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => h.whole.begin.toFraction() + ' ' + h.value.s).sort();
   const rt = compile(back.graph).code;
   check('Late and Swing: code -> modules -> code plays the same events in real Strudel', JSON.stringify(await events(rt)) === JSON.stringify(await events('setcpm(120/4)\n\n$: s("hh*8").late(0.015).swingBy(1/3, 4)')) || (await events(rt)).length === 16);
-  const bad = importStrudel('$: s("hh*8").late(0.9).swingBy(2, 4).swingBy(0.3, 2.5)');
-  check('Late and Swing: values out of range are reported with a reason and not guessed', bad.report.skipped.length === 3 && bad.report.skipped.every((x) => x.reason));
+  const bad = importStrudel('$: s("hh*8").late(0.9)\n$: s("hh*8").swingBy(2, 4)\n$: s("hh*8").swingBy(0.3, 2.5)');
+  check('Late and Swing: values out of range are kept as written in a Strudel Code module (they play as in Strudel), not guessed', bad.report.skipped.length === 0 && bad.graph.nodes.some((n) => n.type === 'code' && /late\(0\.9\)/.test(n.params.code)) && bad.graph.nodes.some((n) => n.type === 'code' && /swingBy\(2, 4\)/.test(n.params.code)));
   check('Late and Swing: the playback guard accepts what the compiler writes for both', guardCode(late.code) === null && guardCode(sw.code) === null && guardCode('$: s("hh*8").late(-0.02).swingBy(0.33, 4)') === null);
   check('Late and Swing: both exist as modules in the Transform group with a plain-English blurb', MODULES.late.cat === 'transform' && MODULES.swing.cat === 'transform' && /later/.test(MODULES.late.blurb) && /swing/i.test(MODULES.swing.blurb));
   // typing in the code panel moves the knobs
@@ -940,7 +940,7 @@ const check = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); 
   const events = async (code) => (await evaluate(code, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => h.whole.begin.toFraction() + ' ' + h.value.s + ' ' + h.value.clip).sort();
   check('Note length: code -> modules -> code plays the same events (notes too)', JSON.stringify(await events(compile(b.graph).code)) === JSON.stringify(await events('setcpm(120/4)\n\n$: note("c3 e3").s("sawtooth").clip(2)')));
   const bad = importStrudel('$: s("hh*4").clip(9).legato(-1)');
-  check('Note length: a length outside 0 to 4 is reported with a reason, not guessed', bad.report.skipped.length === 2 && bad.report.skipped.every((x) => x.reason));
+  check('Note length: a length outside 0 to 4 is kept as written in a Strudel Code module, not guessed', bad.report.skipped.length === 0 && bad.graph.nodes.some((n) => n.type === 'code' && /clip\(9\)/.test(n.params.code)));
   check('Note length: the playback guard accepts clip and legato', guardCode(res.code) === null && guardCode('$: s("hh*4").legato(0.5)') === null && guardCode('$: s("hh*4").clip(sine.range(0.2, 1))') === null);
   const typed = applyCodeEdit(g, res.code.replace('clip(0.5)', 'clip(1.5)'));
   check('Note length: typing a new number in the code moves the knob', typed.graph?.nodes.find((n) => n.type === 'clip').params.n === 1.5);
@@ -1312,9 +1312,114 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Import: lines that repeat the same sound share ONE synth per layer (here 2, not one per note line)', r.graph.nodes.filter((n) => n.type === 'synth').length === 2);
   check('Import: a cat of plain note lines becomes one Note Pattern that alternates by cycle, and the module count stays small', r.graph.nodes.length <= 20 && r.graph.nodes.some((n) => n.type === 'notetext' && /^<\[c3 e2/.test(n.params.text)));
   check('Import: the song plays exactly the same events as the original code', (await evs(song)) === (await evs(out)));
+  const again = imp(compile(r.graph).code);
+  check('Import: rebuilding a board from its own code (the Rebuild button) keeps the module count and plays the same', !again.error && again.graph.nodes.length <= r.graph.nodes.length && (await evs(compile(again.graph).code)) === (await evs(out)));
   const mix = imp(`$: cat(note("c3 e3").s("sawtooth"), note("g3 b3").s("square"))`).graph;
   check('Import: lines with different sounds keep their own synths', mix.nodes.filter((n) => n.type === 'synth').length === 2);
   const alt = imp(`$: cat(note("<c3 e3> g3").s("sawtooth"), note("g3 b3").s("sawtooth"))`).graph;
   check('Import: a line that alternates by itself is not folded into the pattern text (the cat stays)', alt.nodes.some((n) => n.type === 'cat') && alt.nodes.filter((n) => n.type === 'synth').length === 1);
+}
+
+// ---------- importing: an effect every lane ends with is written once ----------
+{
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const evs = async (c) => (await evaluate(c, false)).queryArc(0, 8).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.entries(h.value).sort())}`).sort().join('|');
+  const count = (g, t) => g.nodes.filter((n) => n.type === t).length;
+  const same = async (code) => { const r = imp(code); return { g: r.graph, skipped: r.report.skipped.length, ok: (await evs(code)) === (await evs(compile(r.graph).code)) }; };
+  let t = await same('$: stack(s("bd*2").room(0.3).lpf(900), s("sd").room(0.3).lpf(900), s("hh*4").room(0.3).lpf(900))');
+  check('Shared effects: three lanes that all end in the same reverb get ONE reverb, and play the same', t.ok && count(t.g, 'reverb') === 1 && t.skipped === 0);
+  t = await same('$: stack(s("bd*2").room(0.3), s("sd").room(0.5), s("hh*4").room(0.3))');
+  check('Shared effects: lanes with different settings keep their own', t.ok && count(t.g, 'reverb') === 3);
+  t = await same('$: stack(s("bd*2").late(0.25).room(0.3), s("sd").late(0.25).room(0.3))');
+  check('Shared effects: a time shift every lane of a stack has is written once, after the stack', t.ok && count(t.g, 'late') === 1 && count(t.g, 'reverb') === 1);
+  t = await same('$: cat(s("bd*2").late(0.25), s("sd").late(0.25))');
+  check('Shared effects: a time shift is NOT moved out of a cat (it would change which cycle each part plays in)', t.ok && count(t.g, 'late') === 2);
+  t = await same('$: cat(note("c3 e3").s("sawtooth").lpf(800).clip(0.5), note("g3 b3").s("sawtooth").lpf(800).clip(0.5))');
+  check('Shared effects: a cat of two note lines with the same synth and filter gives one synth (the filter is its own setting), and plays the same', t.ok && count(t.g, 'synth') === 1 && t.skipped === 0);
+  t = await same('$: arrange([2, s("bd*2").room(0.3)], [2, s("sd").room(0.3)])');
+  check('Shared effects: an arrange whose sections end in the same reverb writes it once', t.ok && count(t.g, 'reverb') === 1);
+  const rt = imp(compile(imp('$: stack(s("bd*2").room(0.3).lpf(900), s("sd").room(0.3).lpf(900))').graph).code);
+  check('Shared effects: code written by the board imports back to the same board', !rt.error && count(rt.graph, 'reverb') === 1 && rt.graph.nodes.length === imp('$: stack(s("bd*2").room(0.3).lpf(900), s("sd").room(0.3).lpf(900))').graph.nodes.length);
+}
+
+// ---------- importing code with no module of its own: it is kept as written, so the board plays what the code plays ----------
+{
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const evs = async (c) => (await evaluate(c, false)).queryArc(0, 8).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.entries(h.value).filter(([k]) => k !== 'color').sort())}`).sort().join('|');
+  const run = async (code) => { const r = imp(code); return { g: r.graph, skipped: r.report.skipped.length, ok: !r.error && (await evs(code)) === (await evs(compile(r.graph).code)) }; };
+  const has = (g, t, re) => g.nodes.some((n) => n.type === t && (!re || re.test(n.params.code ?? n.params.text ?? '')));
+  let t = await run('$: s("bd*8").mask("1 0 1 1")');
+  check('Kept as code: a call with no module (mask) becomes a Strudel Code module and plays the same', t.ok && t.skipped === 0 && has(t.g, 'code', /mask\("1 0 1 1"\)/));
+  t = await run('$: s("bd*4 sd").mask("1 0 1").fast(2).gain(0.5).lpf(800)');
+  check('Kept as code: order is kept: a later fast() goes into the code module with the mask, while the gain and filter stay modules', t.ok && t.skipped === 0 && has(t.g, 'code', /mask\("1 0 1"\)\.fast\(2\)/) && !has(t.g, 'fast'));
+  t = await run('const VOL = 0.4\n$: s("bd*4").gain(VOL).mask("1 0 1 1")');
+  check('Kept as code: a const number is used as its value (the gain is a plain knob, 0.4)', t.ok && t.skipped === 0 && t.g.nodes.some((n) => n.type === 'sample' && n.params.gain === 0.4));
+  t = await run('$: note("c3 e3").s("sawtooth").gain("<0.4 0.8>")');
+  check('Kept as code: a gain that is a pattern, not a number, is kept as written', t.ok && t.skipped === 0 && has(t.g, 'code', /gain\("<0\.4 0\.8>"\)/));
+  t = await run('$: note("c3 e3").s("sawtooth").color("cyan")');
+  check('Kept as code: .color() only changes how a roll is drawn, so it is left out without being counted as a loss', t.ok && t.skipped === 0 && !has(t.g, 'code'));
+  t = await run('$: note("c3 [e3 [g3 b3]] . d4 f4").s("triangle")');
+  check('Kept as code: mini-notation the Melody Sequencer cannot hold stays exactly as written in a Note Pattern', t.ok && t.skipped === 0 && has(t.g, 'notetext', /\[e3 \[g3 b3\]\]/));
+  t = imp('$: s("bd").mask(someFunction())');
+  check('Kept as code: nothing that is not an allowed Strudel call is ever kept (an unknown function is left out with a reason)', t.report.skipped.length === 1 && !has(t.graph, 'code'));
+  t = imp('$: s("bd").chorus(0.3)');
+  check('Kept as code: effects the browser player cannot play are still left out with the reason', t.report.skipped.length === 1 && !has(t.graph, 'code'));
+  const rb = imp(compile(imp('$: s("bd*8").mask("1 0 1 1").gain(0.5)').graph).code);
+  check('Kept as code: code written by the board (with a Strudel Code module) imports back to the same board', !rb.error && rb.report.skipped.length === 0 && has(rb.graph, 'code', /mask\("1 0 1 1"\)/));
+  const { guardCalls: gc } = await import('../src/guard.js');
+  check('Kept as code: the Strudel Code module only takes Strudel calls: no assignments, no unknown functions, no values computed from variables', gc('.mask("1 0")') === null && !!gc('.mask(foo)') && !!gc('; fetch("x")') && !!gc('.constructor("x")') && !!gc('mask("1")'));
+}
+
+// ---------- Harmonics ----------
+{
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { HARM_PRESETS, MODULES: MODS } = await import('../src/modules.js');
+  const { cleanParams } = await import('../src/validate.js');
+  const { guardCode: gcode } = await import('../src/guard.js');
+  const { emptyGraph: eg, makeNode: mn } = await import('../src/graph.js');
+  const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+  const mel = N('melody'), syn = N('synth', { wave: 'sawtooth' }), hm = N('harmonics', { partials: HARM_PRESETS.square.bars.slice() }), out = N('output');
+  W(mel, syn, 'in'); W(syn, hm, 'in'); W(hm, out, 'in');
+  const code = compile(g).code;
+  check('Harmonics: writes .partials([...]) with the bar heights, dropping trailing zeros', /\.partials\(\[1, 0, 0\.33, 0, 0\.2, 0, 0\.14, 0, 0\.11, 0, 0\.09, 0, 0\.08, 0, 0\.07\]\)/.test(code));
+  const evs = (await evaluate(code, false)).queryArc(0, 1).filter((h) => h.hasOnset());
+  check('Harmonics: real Strudel carries the partials on every note, and the code passes the guard', evs.length > 0 && evs.every((h) => Array.isArray(h.value.partials) && h.value.partials.length === 15) && !gcode(code));
+  const back = imp(code);
+  const bh = back.graph.nodes.find((n) => n.type === 'harmonics');
+  check('Harmonics: code with .partials([...]) imports into a Harmonics module with the same bars, and nothing is left out', !back.error && back.report.skipped.length === 0 && bh && JSON.stringify(bh.params.partials.slice(0, 15)) === JSON.stringify(HARM_PRESETS.square.bars.slice(0, 15)) && bh.params.partials[15] === 0);
+  check('Harmonics: importing the board code a second time gives the same code', compile(back.graph).code.includes(code.split('\n').find((l) => l.includes('.partials(')).trim()));
+  const kept = imp('$: note("c3").s("sawtooth").partials([1, "<1 0>", 0.5])');
+  check('Harmonics: a partials list with patterns inside is kept as written (a Strudel Code module), not guessed', kept.report.skipped.length === 0 && kept.graph.nodes.some((n) => n.type === 'code' && /partials/.test(n.params.code)));
+  const dirty = cleanParams('harmonics', { partials: [2, -1, 'x', 0.5], base: 'nope' });
+  check('Harmonics: stored bars are always 16 numbers from 0 to 1', dirty.partials.length === 16 && dirty.partials.every((v) => typeof v === 'number' && v >= 0 && v <= 1) && dirty.partials[0] === 1 && dirty.partials[1] === 0 && dirty.base === 'keep');
+  const sc = N('synth', { wave: 'sine' }), hu = N('harmonics', { base: 'user', partials: HARM_PRESETS.bell.bars.slice() }), m2 = N('melody'), o2 = N('output');
+  W(m2, sc, 'in'); W(sc, hu, 'in'); W(hu, o2, 'in');
+  check('Harmonics: "build from the bars only" writes .s("user") before the partials', /\.s\("user"\)\s*\.partials\(/.test(compile(g).code.replace(/\n\s*/g, '')) || /s\("user"\)/.test(compile(g).code));
+}
+
+// ---------- recording a take ----------
+{
+  const { createRecorder, keyToNote, mergeGraph } = await import('../src/recorder.js');
+  const { takeToCode } = await import('../src/takecode.js');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { emptyGraph: eg, makeNode: mn } = await import('../src/graph.js');
+  // 120 bpm: a beat is 500 ms; the take starts at 10000 ms
+  const rec = createRecorder({ bpm: 120, beatsPerBar: 4, zeroMs: 10000 });
+  rec.noteOn(60, 100, 10000); rec.noteOff(60, 10500);          // c4 on beat 0, one beat long
+  rec.noteOn(64, 0.5, 10500); rec.noteOn(67, 1, 10520); rec.noteOff(67, 11500); rec.noteOff(64, 11500);   // e4 and g4 from beat 1, two beats
+  rec.noteOn(72, 90, 9000);                                       // two beats before the take began: not part of it
+  rec.noteOn(62, 90, 12000);                                      // d4 on beat 4, still held when we stop
+  const take = rec.stop(12500);
+  check('Recording: notes become events in beats (start, length, loudness), and a note from before the take is left out', take.events.length === 4 && take.events[0].n === 60 && take.events[0].t === 0 && take.events[0].d === 1 && Math.abs(take.events[0].v - 100 / 127) < 1e-9 && !take.events.some((e) => e.n === 72));
+  check('Recording: a note still held when you stop is ended there', take.events.find((e) => e.n === 62).d === 1);
+  const r = takeToCode(take, { grid: 4 });
+  check('Recording: the take becomes a Strudel pattern', /note\(/.test(r.code) && r.notes === 4);
+  const g = eg(), o = mn('output', 0, 0); g.nodes.push(o, mn('melody', 0, 700));
+  const before = g.nodes.length, im = imp(r.code), added = mergeGraph(g, im.graph);
+  check('Recording: adding a take puts its modules under the board and plugs them into the existing Output (no second Output)', added.length > 0 && g.nodes.filter((n) => n.type === 'output').length === 1 && g.nodes.length === before + added.length && g.wires.some((w) => w.to.node === o.id) && added.every((id) => g.nodes.find((n) => n.id === id).y >= 700 + 360));
+  check('Recording: the computer keyboard is a piano (a is c, w is c#, k is the next c; z and x move the octave)', keyToNote('a', 4) === 60 && keyToNote('w', 4) === 61 && keyToNote('k', 4) === 72 && keyToNote('a', 3) === 48 && keyToNote('?', 4) === null && keyToNote('constructor', 4) === null);
+  const strum = createRecorder({ bpm: 60, zeroMs: 0 });
+  strum.noteOn(60, 0.8, 0); strum.noteOn(60, 0.8, 1000);   // the same key pressed again without a release
+  check('Recording: pressing a note again before releasing it ends the first one', strum.stop(2000).events.length === 2);
 }
 process.exit(failures ? 1 : 0);

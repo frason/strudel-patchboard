@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --port 5174",
     "build": "vite build",
+    "rubric": "node --import ./scripts/stub-loader.mjs scripts/rubric.mjs",
     "test": "node --import ./scripts/stub-loader.mjs scripts/verify.mjs && npm run test:reconcile && npm run test:guard",
     "preview": "vite preview --port 4173",
     "test:import": "node --import ./scripts/stub-loader.mjs scripts/import-test.mjs",

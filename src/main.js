@@ -24,6 +24,9 @@ import { patchText, checkSync } from './textsync.js';
 import { LESSONS } from './starters.js';
 import { patternToDrums } from './todrums.js';
 import { CONVERTERS } from './convert.js';
+import { openRecorder } from './recordui.js';
+import { takeToCode } from './takecode.js';
+import { mergeGraph } from './recorder.js';
 import { getAI, setAI, clearAI, consumeAiNotice, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
 import { defaultParams, FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
 import { effectiveKey, makeNode, nodeById, wiresFrom, wiresInto, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
@@ -1098,7 +1101,8 @@ function showHelp(type) {
   document.body.append(helpEl);
   helpEl.querySelector('.help-body').focus?.();
 }
-function closeModal() { modalEl?.remove(); modalEl = null; }
+const modalCloseHooks = [];   // things a window cleans up when it closes (a recording window stops listening to the keyboard)
+function closeModal() { modalEl?.remove(); modalEl = null; while (modalCloseHooks.length) { try { modalCloseHooks.pop()(); } catch { /* ignore */ } } }
 function showModal(title, body) {
   closeModal();
   modalEl = h('div', { class: 'modal-back', onpointerdown: (e) => { if (e.target === modalEl) closeModal(); } },
@@ -1119,6 +1123,38 @@ function importText(text, label, back) {
     reportDialog(r, label, back);
   } catch (e) { toast('Could not read that: ' + e.message, [], 8000); }
 }
+// Read the code this board writes and build the board again from it. Pasting code into the code panel only applies what changed, so a board made by an
+// older import keeps its old shape; this makes the board the way an import would make it now (shared synths, Note Patterns, and so on).
+function rebuildFromCode() {
+  const before = store.graph.nodes.length;
+  if (!before) return toast('The board is empty, so there is nothing to rebuild.', [], 3000);
+  const r = importStrudel(compile(store.graph).code, { sounds: (name, bank) => soundsFor(bank || '').includes(name) });
+  if (r.error) return toast('Could not rebuild: ' + r.error, [], 8000);
+  const after = r.graph.nodes.length, lost = r.report.skipped.length;
+  const body = h('div', {},
+    h('p', { class: 'imp-hint' }, `The board is read back from its own code and built again: ${before} modules become ${after}. It plays the same, but module positions, colours, collapsed and muted states, and settings the code does not carry are reset.`),
+    lost ? h('p', { class: 'imp-hint' }, `${lost} part${lost === 1 ? '' : 's'} of the code could not be turned into modules and would be left out.`) : h('p', { class: 'imp-hint' }, 'Everything in the code can be turned into modules.'),
+    h('div', { class: 'modal-btns' },
+      h('button', { class: 'btn', id: 'rebuild-go', onclick: () => { closeModal(); loadGraph(r.graph, `rebuilt board (${before} → ${after} modules)`); } }, 'Rebuild'),
+      h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel')));
+  showModal('Rebuild this board from its code?', body);
+}
+// Record from a MIDI keyboard (or the computer keyboard) and add the notes to the board as modules
+function openRecord() {
+  const out = store.graph.nodes.find((n) => n.type === 'output');
+  openRecorder({
+    h, showModal, closeModal, onClose: (fn) => modalCloseHooks.push(fn),
+    getTempo: () => ({ bpm: Number(out?.params.bpm) || 120, beatsPerBar: Number(out?.params.beats) || 4 }),
+    onAdd(take, grid) {
+      const r = takeToCode(take, { grid }), imp = importStrudel(r.code, { sounds: (name, bank) => soundsFor(bank || '').includes(name) });
+      if (imp.error) return toast('Could not add the take: ' + imp.error, [], 8000);
+      let added = [];
+      store.update((g) => { added = mergeGraph(g, imp.graph); }, { label: 'add a recorded take' });
+      requestAnimationFrame(() => added[0] && board.reveal?.(added[0]));
+      toast(`Added your take: ${r.notes} note${r.notes === 1 ? '' : 's'} over ${r.bars} bar${r.bars === 1 ? '' : 's'}${r.lanes > 1 ? `, ${r.lanes} voices` : ''}.`, [undoAction], 7000);
+    },
+  });
+}
 function openImport() {
   const area = h('textarea', { class: 'imp-area', id: 'import-text', spellcheck: 'false', placeholder: 'Paste Strudel code here, e.g.\n\nsetcpm(120/4)\n\$: s("bd*2 ~ sd").bank("RolandTR909")' });
   area.addEventListener('keydown', (e) => e.stopPropagation());
@@ -1128,6 +1164,8 @@ function openImport() {
     h('div', { class: 'modal-btns' },
       h('button', { class: 'btn', id: 'import-paste-go', onclick: () => importText(area.value, 'pasted code', openImport) }, 'Import this code'),
       h('button', { class: 'btn ghost', id: 'import-choose', onclick: () => fileInput.click() }, 'Choose a file…'),
+      h('button', { class: 'btn ghost', id: 'import-record', title: 'Play a MIDI keyboard (or the computer keyboard) and add what you play to the board', onclick: () => { closeModal(); openRecord(); } }, 'Record notes…'),
+      h('button', { class: 'btn ghost', id: 'import-rebuild', title: 'Read the code this board writes and build the board again from it, the way an import would make it now. Useful for a board made by an older import.', onclick: () => { closeModal(); rebuildFromCode(); } }, 'Rebuild this board'),
       h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel')));
   showModal('Import', body);
   setTimeout(() => area.focus(), 0);

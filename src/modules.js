@@ -86,6 +86,12 @@ export const SOMETIMES_FNS = {
 const freezeParam = { key: 'loop', label: 'freeze', kind: 'knob', min: 0, max: 99, step: 1, def: 0, tip: '0: different every cycle. 1 and up: pick that variation and repeat it every cycle (.ribbon(n, 1)).' };
 
 export const MODULES = {
+  // ---------- code that has no modules ----------
+  codesource: {
+    title: 'Strudel Code (pattern)', cat: 'source', out: 'sound',
+    blurb: 'A whole Strudel pattern written as code, kept exactly as written: n("0 2 4").scale("C:minor").s("piano"). Code the importer could not turn into modules lands here, so the board still plays what the code plays. It is a sound on its own: plug it into the Output, or into effects. Only calls Strudel offers are allowed, with plain numbers, text and x => x.call() functions as arguments.',
+    params: [{ key: 'code', label: 'code', kind: 'code', wrap: true, def: 'note("c3 e3 g3").s("sawtooth")', tip: 'a pattern: note(...), n(...), s(...), stack(...) ... followed by method calls' }],
+  },
   // ---------- sequencers ----------
   melody: {
     title: 'Melody Sequencer', cat: 'sequencer', out: 'notes',
@@ -257,6 +263,12 @@ export const MODULES = {
     blurb: 'Sets how long each note or hit lasts compared with its step: clip(1) is exactly the step, below 1 is short and detached (staccato), above 1 the notes ring on into the next step (legato). A sample is cut off when the time is up. legato(x) is another name for clip(x), and either is read from code.',
     params: [{ key: 'n', label: 'length', kind: 'knob', min: 0, max: 4, step: 0.05, def: 0.5, call: 'clip', always: true, wire: true, tip: 'multiplies the length of each note; 1 = the whole step' }],
   },
+  code: {
+    title: 'Strudel Code', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Strudel method calls that have no module of their own, kept exactly as written and applied to whatever is plugged in: .mask("1 0 1 1").seg(8). Code the importer could not turn into modules lands here, so the board still plays what the code plays. Only calls Strudel offers are allowed, with plain numbers, text and x => x.call() functions as arguments.',
+    params: [{ key: 'code', label: 'calls', kind: 'code', wrap: true, def: '.mask("1 0 1 1")', tip: 'method calls starting with a dot, one after another' }],
+  },
   swing: {
     title: 'Swing', cat: 'transform', out: 'through', data: { swingpic: true },
     inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
@@ -362,6 +374,12 @@ export const MODULES = {
       { key: 'time', label: 'time', kind: 'knob', min: 0.01, max: 1, step: 0.01, def: 0.25, call: 'delaytime', unit: 's', wire: true },
       { key: 'feedback', label: 'feedback', kind: 'knob', min: 0, max: 0.95, step: 0.01, def: 0.5, call: 'delayfeedback', wire: true },
     ],
+  },
+  harmonics: {
+    title: 'Harmonics', cat: 'effect', out: 'sound', data: { harmonics: true },
+    inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
+    blurb: 'Sets how loud each harmonic of the sound is. A note is a stack of harmonics: 1 is the note itself, 2 the octave above, 3 the octave and a fifth, 4 two octaves, and so on. Raise one bar and that overtone rings out; pull a bar to zero and it disappears. It works on the basic waves of an Instrument (sine, triangle, sawtooth, square), and writes .partials([...]). Choose "build from the bars only" to make a new wave out of nothing but the bars you set.',
+    params: [{ key: 'base', label: 'wave', kind: 'select', def: 'keep', options: [['keep', "keep the Instrument's wave"], ['user', 'build from the bars only']], tip: 'keep: shape the wave the Instrument plays. build: a new wave made only of the bars.' }],
   },
   reverb: {
     title: 'Reverb', cat: 'effect', out: 'sound', data: { reverbpic: true },
@@ -660,11 +678,24 @@ export const PALETTE_GROUPS = {
   ],
 };
 
+// harmonics: how loud each of the first 16 harmonics is (0 to 1). 1 is the note itself, 2 the octave above, 3 the octave and a fifth ...
+export const HARM_COUNT = 16;
+const harmRow = (f) => Array.from({ length: HARM_COUNT }, (_, i) => Math.round(Math.min(1, Math.max(0, f(i + 1))) * 100) / 100);
+export const HARM_PRESETS = {
+  saw: { label: 'Saw', bars: harmRow((n) => 1 / n), tip: 'every harmonic, each quieter: bright and buzzy' },
+  square: { label: 'Square', bars: harmRow((n) => (n % 2 ? 1 / n : 0)), tip: 'odd harmonics only: hollow and woody' },
+  triangle: { label: 'Triangle', bars: harmRow((n) => (n % 2 ? 1 / (n * n) : 0)), tip: 'odd harmonics, falling fast: soft and flute-like' },
+  hollow: { label: 'Hollow', bars: harmRow((n) => (n % 2 ? (n < 9 ? 0.8 : 0.3) : 0)), tip: 'odd harmonics held up: clarinet-like' },
+  soft: { label: 'Soft', bars: harmRow((n) => [1, 0.3, 0.1][n - 1] || 0), tip: 'the note and two faint overtones' },
+  bell: { label: 'Bell', bars: harmRow((n) => [1, 0, 0, 0.6, 0, 0.3, 0, 0.45, 0, 0.2, 0, 0.15][n - 1] || 0), tip: 'gaps and spikes: glassy and bell-like' },
+  sine: { label: 'Sine', bars: harmRow((n) => (n === 1 ? 1 : 0)), tip: 'only the note itself' },
+};
 export function defaultParams(type) {
   const def = MODULES[type];
   const p = {};
   for (const s of def.params) p[s.key] = s.def;
   if (def.data?.tracks) p.tracks = defaultTracks(p.steps);
+  if (def.data?.harmonics) p.partials = HARM_PRESETS.saw.bars.slice();
   if (def.data?.arrange) p.lens = [4, 4, 4, 4, 4, 4];
   if (def.data?.mixer) p.strips = Array.from({ length: 6 }, () => ({ vol: 1, pan: 0.5, mute: false, solo: false }));
   if (def.data?.cells) {
@@ -836,8 +867,8 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
-  ...['melody', 'notetext', 'rhythm', 'hitpattern', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm'].map((t) => [t, 'silence']),
-  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes'].map((t) => [t, 'bypass']),
+  ...['melody', 'notetext', 'rhythm', 'hitpattern', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm', 'codesource'].map((t) => [t, 'silence']),
+  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes', 'code', 'harmonics'].map((t) => [t, 'bypass']),
 ]);
 
 // FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.

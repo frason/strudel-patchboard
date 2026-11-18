@@ -6,6 +6,7 @@ import { parseMini, Unsupported } from './mini.js';
 import { MODULES, SCALES, makeCells, EVERY_FNS, SOMETIMES_FNS, NOTE_NAMES } from './modules.js';
 import { parseChord, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
 import { melodyToNotes } from './convert.js';
+import { guardCalls, guardCode } from './guard.js';
 
 class Skip extends Error {}
 
@@ -17,9 +18,12 @@ const SIGNALS = { sine: 'sine', saw: 'saw', tri: 'tri', square: 'square', rand: 
 const FLAT = { db: 'c#', eb: 'd#', gb: 'f#', ab: 'g#', bb: 'a#', cb: 'b', fb: 'e' };
 
 // ---------- small helpers on the syntax tree ----------
-const str = (n) => (n && n.type === 'Literal' && typeof n.value === 'string' ? n.value : n && n.type === 'TemplateLiteral' && n.expressions.length === 0 ? n.quasis[0].value.cooked : null);
-function num(n) {
+let CONSTS = new Map();   // const name = <number or text> in the code being read: using the name counts as writing the value
+const constOf = (n, depth) => (n && n.type === 'Identifier' && depth < 6 && CONSTS.has(n.name) ? CONSTS.get(n.name) : null);
+const str = (n, depth = 0) => (constOf(n, depth) ? str(constOf(n, depth), depth + 1) : n && n.type === 'Literal' && typeof n.value === 'string' ? n.value : n && n.type === 'TemplateLiteral' && n.expressions.length === 0 ? n.quasis[0].value.cooked : null);
+function num(n, depth = 0) {
   if (!n) return null;
+  if (constOf(n, depth)) return num(constOf(n, depth), depth + 1);
   if (n.type === 'Literal' && typeof n.value === 'number') return n.value;
   if (n.type === 'Literal' && typeof n.value === 'string' && /^\s*-?(\d+\.?\d*|\.\d+)\s*$/.test(n.value)) return Number(n.value);
   if (n.type === 'UnaryExpression' && n.operator === '-') { const v = num(n.argument); return v === null ? null : -v; }
@@ -183,6 +187,7 @@ function splitTop(t) {
 // ---------- the importer ----------
 // sounds: a Set of the plain sound names, or a function (name, bank) => boolean that knows each drum machine's own list
 export function importStrudel(code, { sounds = null } = {}) {
+  CONSTS = new Map();
   const report = { done: [], skipped: [], notes: [] };
   if (typeof code !== 'string') return { error: 'There is no code to read.' };
   if (code.length > 300_000) return { error: `This code is too large to read (${Math.round(code.length / 1000)} KB; the limit is 300 KB).` };
@@ -194,7 +199,7 @@ export function importStrudel(code, { sounds = null } = {}) {
 
   // a /* Note Pattern */ or /* Hit Pattern */ comment right before a pattern string says which module wrote it (see compile.js)
   const tagged = (node, label) => !!node && comments.some((c) => c.type === 'Block' && c.value.trim() === label && c.end <= node.start && code.slice(c.end, node.start).trim() === '');
-  const nodes = [], wires = [], keys = new Map();
+  const nodes = [], wires = [], keys = new Map(), vars = new Map();   // vars: names of patterns the file declares with const
   let wid = 0, stmtNo = 0, acidDefined = false;
   const out = { bpm: 120, beats: 4, master: {}, masterSig: {} };
   const add = (type, params, stmt) => { const n = makeNode(type, 0, 0, params); n.__stmt = stmt; nodes.push(n); return n; };
@@ -220,6 +225,33 @@ export function importStrudel(code, { sounds = null } = {}) {
     if ((live.length ? live : synths).every((sy) => implicitSynths.has(sy))) implicitSynths.add(synth);
     synths.forEach(drop);
     return { synth, inputs };
+  }
+  // ---- one copy of an effect shared by every lane ----
+  // stack(a.room(.3).lpf(900), b.room(.3).lpf(900)) plays the same as stack(a, b).room(.3).lpf(900): when every lane ends in the same effects, they are written once after the combiner.
+  // Effects that only set a value on each sound can be shared by stack, cat and arrange. Time shifts (late, fast, slow, ply) can be shared by a stack only,
+  // because a cat or arrange would then change which cycle each part plays in. Anything random or routed (degrade, sometimes, duck, orbit) is never shared.
+  const SHARE_PARAM = new Set(['filter', 'delay', 'reverb', 'distortion', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'fx', 'tremolo', 'phaser', 'compressor', 'clip']);
+  const SHARE_TIME = new Set(['late', 'fast', 'slow', 'ply']);
+  function hoistTails(kids, stmt, timeOk) {
+    if (kids.length < 2) return null;
+    const ok = (n) => SHARE_PARAM.has(n.type) || (timeOk && SHARE_TIME.has(n.type));
+    const walks = kids.map((k) => {   // from the end of the lane backwards: the effects that could be shared, then the node before them
+      const list = []; let n = k.head;
+      while (n && ok(n)) {
+        const ins = wires.filter((w) => w.to.node === n.id);
+        if (ins.length !== 1 || ins[0].to.port !== 'in') break;
+        list.push(n); n = nodes.find((x) => x.id === ins[0].from.node);
+      }
+      return { list, next: n };
+    });
+    let m = 0;
+    const sig = (n) => n.type + JSON.stringify(n.params);
+    while (walks.every((w) => w.list[m]) && walks.every((w) => sig(w.list[m]) === sig(walks[0].list[m]))) m++;
+    if (m === 0 || walks.some((w) => !w.next && w.list.length === m)) return null;
+    const tail = walks[0].list.slice(0, m).reverse().map((n) => ({ type: n.type, params: JSON.parse(JSON.stringify(n.params)) }));
+    const heads = walks.map((w) => w.next || w.list[m]);
+    walks.forEach((w) => w.list.slice(0, m).forEach(drop));
+    return { kids: kids.map((k, i) => ({ ...k, head: heads[i] })), tail };
   }
   // cat of plain note lines -> one Note Pattern that alternates by cycle: <[a b c] [d e f]>. Only when every line is a Melody Sequencer or Note Pattern played straight (no key, no loudness, no tricks).
   function foldCat(inputs, stmt) {
@@ -337,6 +369,24 @@ export function importStrudel(code, { sounds = null } = {}) {
     && e.callee.object.type === 'CallExpression' && e.callee.object.callee.type === 'Identifier' && e.callee.object.callee.name === 'irand';
 
   // ----- build one pattern (a chain of calls) -----
+  // buildChain, but a pattern no module can express is kept as written in a Strudel Code (pattern) module, so the board still plays it
+  function chainOrCode(expr, stmt, why = '') {
+    const n0 = nodes.length, w0 = wires.length;
+    try { return buildChain(expr, stmt); }
+    catch (e) {
+      if (!(e instanceof Skip)) throw e;
+      let text = null;
+      try { text = inlineSrc(expr); } catch { text = null; }
+      if (!text || guardCode(text)) throw e;
+      const gone = new Set(nodes.slice(n0).map((x) => x.id));
+      nodes.length = n0; wires.length = w0;
+      for (const [k, v] of [...keys]) if (gone.has(v.id)) keys.delete(k);
+      const cn = add('codesource', { code: text.slice(0, 4000) }, stmt);
+      report.notes.push(`line ${expr.loc.start.line}: ${e.message}, so this pattern is kept as written in a Strudel Code (pattern) module.`);
+      return { head: cn, sources: [cn], meta: { orbit: null, duck: null, analyze: null }, extra: [] };
+    }
+  }
+
   function buildChain(expr, stmt, override = null) {
     let { root, calls } = unwrap(expr);
     for (let hop = 0; root.type === 'Identifier' && vars.has(root.name) && hop < 8; hop++) { const v = unwrap(vars.get(root.name)); root = v.root; calls = [...v.calls, ...calls]; }
@@ -384,13 +434,20 @@ export function importStrudel(code, { sounds = null } = {}) {
         S.octShift = (k.octave - 3) * 12;
         deg = true;
       }
-      const { items, mode: mode0, fast, slow } = readSteps(text, 'melody', (leaf) => leaf);
+      // a Note Pattern's own code (it carries the /* Note Pattern */ comment) is kept exactly as written, whatever is inside it: alternations, brackets, long bars
+      const tagText = name === 'note' && override === null && text.length <= 8000 && tagged(root.arguments[0], 'Note Pattern');
+      let items = [], mode0 = 'steps', fast = 1, slow = 1;
+      let miniFail = null;
+      if (!tagText) {
+        try { ({ items, mode: mode0, fast, slow } = readSteps(text, 'melody', (leaf) => leaf)); cellsFromItems(items, 'melody', (leaf) => ({ n: null, d: null })); }   // (the second call only checks that the steps can be laid out)
+        catch (e) { if (e instanceof Skip && name === 'note' && override === null && text.length <= 8000 && text.trim()) miniFail = e; else throw e; }
+      }
       const conv = (leaf) => {
         const ps = leaf.pitches.map((w) => (deg ? (/^-?\d+$/.test(w) ? Number(w) : (() => { throw new Skip(`"${w}" is not a scale step number`); })()) : noteName(w)));
         return deg ? { n: null, d: ps.length ? ps : null } : { n: ps.length ? ps : null, d: null };
       };
-      const forceText = name === 'note' && !deg && mode0 === 'steps' && text.length <= 8000 && override === null && tagged(root.arguments[0], 'Note Pattern');
-      let cells = cellsFromItems(items, 'melody', conv), coarse = null;
+      const forceText = (tagText || !!miniFail) && !deg;
+      let cells = tagText || miniFail ? [] : cellsFromItems(items, 'melody', conv), coarse = null;
       if (!forceText && cells.length > 16 && mode0 === 'steps' && !calls.some((c) => c.name === 'clip' || c.name === 'legato')) {   // a long spelling of a simple pattern (see coarsen)
         const co = coarsen(items, 'melody');
         if (co) { coarse = co; cells = cellsFromItems(co.items, 'melody', conv); }
@@ -399,7 +456,8 @@ export function importStrudel(code, { sounds = null } = {}) {
         S.melody = add('notetext', { text, vel: '' }, stmt);
         S.root = S.melody;
         S.kind = 'notes';
-        report.notes.push(`line ${root.loc.start.line}: this pattern has ${cells.length} steps, more than the Melody Sequencer holds, so it was kept as written in a Note Pattern module.`);
+        if (miniFail) report.notes.push(`line ${root.loc.start.line}: the Melody Sequencer cannot hold this pattern (${miniFail.message}), so it was kept exactly as written in a Note Pattern module.`);
+        else if (!forceText) report.notes.push(`line ${root.loc.start.line}: this pattern has ${cells.length} steps, more than the Melody Sequencer holds, so it was kept as written in a Note Pattern module.`);
       } else {
       if (cells.length < 1 || cells.length > 16) throw new Skip(`${cells.length} steps (1 to 16 are supported${cells.length > 16 ? ', and no grid of 16 steps or fewer fits where these notes start and how long they last' : ''})`);
       cells.forEach((c) => { c.vel = 1; });
@@ -450,7 +508,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       const useMixer = name === 'stack' && args.length <= 6 && peeled.some((p) => p.st.hasVol);
       const kids = [], stripSt = [];
       args.forEach((a, ai) => {
-        try { kids.push(buildChain(useMixer ? peeled[ai].expr : a, stmt)); stripSt.push(peeled[ai].st); }
+        try { kids.push(chainOrCode(useMixer ? peeled[ai].expr : a, stmt)); stripSt.push(peeled[ai].st); }
         catch (e) { if (e instanceof Skip) skip(a, e.message, code.slice(a.start, a.end).split('\n')[0].slice(0, 90)); else throw e; }
       });
       if (!kids.length) throw new Skip('nothing inside could be read');
@@ -459,8 +517,11 @@ export function importStrudel(code, { sounds = null } = {}) {
         const g = groupDuck(kids, stmt);
         S.root = g.head; S.extraHeads = g.extra; S.sources = kids.flatMap((k) => k.sources);
       } else {
-        const shared = name === 'cat' || name === 'slowcat' ? shareSynth(kids, stmt) : null;
-        let heads = shared ? shared.inputs : kids.map((k) => k.head);
+        const ht = useMixer ? null : hoistTails(kids, stmt, name === 'stack');
+        const ks = ht ? ht.kids : kids;
+        S.tail = ht ? ht.tail : null;
+        const shared = name === 'cat' || name === 'slowcat' ? shareSynth(ks, stmt) : null;
+        let heads = shared ? shared.inputs : ks.map((k) => k.head);
         const folded = shared ? foldCat(shared.inputs, stmt) : null;
         if (folded) heads = [folded];
         const type = name === 'stack' ? (useMixer ? 'mixer' : 'stack') : 'cat';
@@ -481,7 +542,7 @@ export function importStrudel(code, { sounds = null } = {}) {
         if (a.type !== 'ArrayExpression' || a.elements.length !== 2) { skip(a, 'an arrange() section that is not [cycles, pattern]', where); continue; }
         const len = num(a.elements[0]);
         if (len === null || !Number.isInteger(len) || len < 1 || len > 9999) { skip(a, `an arrange() section length of ${len ?? 'something that is not a number'} (modules take whole cycles from 1 to 9999)`, where); continue; }
-        try { secs.push({ len, kid: buildChain(a.elements[1], stmt) }); }
+        try { secs.push({ len, kid: chainOrCode(a.elements[1], stmt) }); }
         catch (e) { if (e instanceof Skip) skip(a, e.message, where); else throw e; }
       }
       if (!secs.length) throw new Skip('nothing inside could be read');
@@ -491,8 +552,11 @@ export function importStrudel(code, { sounds = null } = {}) {
         grp.forEach((g, j) => wire(g.head, node, 'in' + (j + 1)));
         return node;
       };
-      const shared = shareSynth(secs.map((s2) => s2.kid), stmt);   // every section plays through the same synth: one synth after the arrangement
-      let cur = secs.map((s2, i) => ({ len: s2.len, head: shared ? shared.inputs[i] : s2.kid.head }));
+      const ht = hoistTails(secs.map((s2) => s2.kid), stmt, false);   // effects every section ends with are written once after the arrangement
+      const skids = ht ? ht.kids : secs.map((s2) => s2.kid);
+      S.tail = ht ? ht.tail : null;
+      const shared = shareSynth(skids, stmt);   // every section plays through the same synth: one synth after the arrangement
+      let cur = secs.map((s2, i) => ({ len: s2.len, head: shared ? shared.inputs[i] : skids[i].head }));
       while (cur.length > 6) {
         const next = [];
         for (let i = 0; i < cur.length; i += 6) { const grp = cur.slice(i, i + 6); next.push(grp.length === 1 ? grp[0] : { len: grp.reduce((t, g) => t + g.len, 0), head: arrangeNode(grp) }); }
@@ -512,10 +576,18 @@ export function importStrudel(code, { sounds = null } = {}) {
 
     const pending = [];
     const velocity = [];
-    for (const c of calls) {
+    S.codeCalls = [];
+    const absorbed = new Set();   // calls that were moved into a Strudel Code module together with an earlier call (see keepAsCode)
+    calls.forEach((c, ci) => {
+      if (absorbed.has(ci)) return;
       try { applyCall(S, c, fxFor, pending, velocity); }
-      catch (e) { if (e instanceof Skip) report.skipped.push({ line: c.prop.loc.start.line, text: `.${c.name}(…)  in  ${lineText(c.prop)}`, reason: e.message }); else throw e; }
-    }
+      catch (e) {
+        if (!(e instanceof Skip)) throw e;
+        const taken = keepAsCode(S, c, calls.slice(ci + 1));
+        if (taken) { taken.forEach((k) => absorbed.add(ci + 1 + k)); return; }
+        report.skipped.push({ line: c.prop.loc.start.line, text: `.${c.name}(…)  in  ${lineText(c.prop)}`, reason: e.message });
+      }
+    });
     // velocity pattern lines up with the melody's steps
     for (const v of velocity) {
       if (S.melody.type === 'notetext') { S.melody.params.vel = v.text.slice(0, 8000); continue; }   // a Note Pattern keeps its loudness pattern as text
@@ -543,6 +615,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     for (const t of S.pre) seq.push(add(t.type, t.params, stmt));
     for (const p of pending) seq.push(p);
     if (S.kind === 'notes' && S.instrument) seq.push(S.instrument);
+    for (const t of S.tail || []) seq.push(add(t.type, t.params, stmt));   // effects shared by every lane (see hoistTails)
     for (const f of S.fx.values()) {
       if (f.type === 'fm' && !('decay' in f.params || 'sustain' in f.params || 'attack' in f.params)) f.params.sustain = 1;   // code with no fm envelope holds a steady brightness; the module's own default is a decaying one
       const nd = add(f.type, f.params, stmt);
@@ -550,6 +623,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       seq.push(nd);
     }
     void needsFilter;
+    if (S.codeCalls && S.codeCalls.length) seq.push(add('code', { code: S.codeCalls.join('') }, stmt));
     if (S.meta.orbit != null) { const on = add('orbit', { n: Math.min(8, Math.max(1, Math.round(S.meta.orbit))) }, stmt); S.meta.orbitNode = on; seq.push(on); }
     if (S.meta.analyze) seq.push(add('scope', { style: 'wave' }, stmt));
     for (const v of S.viz) seq.push(add(v, v === 'scope' ? { style: 'wave' } : {}, stmt));
@@ -580,6 +654,42 @@ export function importStrudel(code, { sounds = null } = {}) {
     return { cells, mode, fast };
   }
 
+  // A call no module can express is kept as written in a Strudel Code module after the chain, so the board still plays what the code plays.
+  // Order matters to Strudel: .mask("1 0").fast(2) is not .fast(2).mask("1 0"). So the call takes with it every LATER call that is not a plain value-setter
+  // (gain, filters, reverb and so on never change when things happen, so those can still become modules). Names of numbers and text that the file declares with const
+  // are replaced by their values. Returns the offsets (into `rest`) of the later calls it took, or null when it cannot be kept: the call is not one Strudel offers
+  // (the guard's list), or the browser player cannot play it, or it needs something only a module can do (a scale).
+  const COMMUTES = new Set(['gain', 'pan', 'lpf', 'hpf', 'bpf', 'lpq', 'hpq', 'cutoff', 'resonance', 'hcutoff', 'hresonance', 'room', 'roomsize', 'size', 'rsize', 'sz', 'delay', 'delaytime', 'delayfeedback', 'delayfb', 'delayt', 'distort', 'shape', 'crush', 'coarse', 'attack', 'decay', 'sustain', 'release', 'adsr', 'postgain', 'orbit', 'speed', 'bank', 'vowel', 'phaser', 'phaserdepth', 'phasercenter', 'phasersweep', 'tremolo', 'fm', 'fmh', 'duck', 'duckattack', 'duckdepth', 'color', 'colour', 'legato', 'clip', 'velocity', 'lps', 'lpa', 'lpd', 'lpenv', 'detune', 'acidenv', 'compressor', 'djf', 'ftype', 'roomfade', 'roomlp', 'roomdim', 'att', 'rel', 'dec', 'sus', 'amp', 'vel', 'unit', 'cut', 'accelerate', 'begin', 'end']);
+  // the source of an expression with every name the file declared with const written out as its value (numbers and text, and patterns too), so it stands on its own
+  function inlineSrc(node, depth = 0) {
+    const ids = [];
+    const walk = (nd, parent, key) => {
+      if (!nd || typeof nd.type !== 'string') return;
+      const isProp = parent && parent.type === 'MemberExpression' && key === 'property' && !parent.computed;
+      if (nd.type === 'Identifier' && !isProp && depth < 6 && (CONSTS.has(nd.name) || vars.has(nd.name))) ids.push(nd);
+      for (const k of Object.keys(nd)) { if (k === 'loc') continue; const v = nd[k]; if (Array.isArray(v)) v.forEach((y) => walk(y, nd, k)); else if (v && typeof v.type === 'string') walk(v, nd, k); }
+    };
+    walk(node, null, '');
+    let txt = code.slice(node.start, node.end);
+    ids.sort((p, q) => q.start - p.start).forEach((id) => {
+      const init = CONSTS.get(id.name) || vars.get(id.name);
+      txt = txt.slice(0, id.start - node.start) + '(' + inlineSrc(init, depth + 1) + ')' + txt.slice(id.end - node.start);
+    });
+    return txt;
+  }
+  const callText = (c) => `.${c.name}(${c.args.map((x) => inlineSrc(x)).join(', ')})`;
+  function keepAsCode(S, c, rest) {
+    if (NO_BROWSER_FX[c.name] || c.name === 'squiz') return null;   // the browser player cannot play these at all: left out with the reason
+    const took = [];
+    rest.forEach((r, k) => { if (!COMMUTES.has(r.name)) took.push(k); });
+    if (took.some((k) => rest[k].name === 'scale' || NO_BROWSER_FX[rest[k].name] || rest[k].name === 'squiz')) return null;
+    const text = callText(c) + took.map((k) => callText(rest[k])).join('');
+    if (guardCalls(text)) return null;
+    S.codeCalls.push(text);
+    report.notes.push(`line ${c.prop.loc.start.line}: ${text.length > 70 ? text.slice(0, 70) + '…' : text} has no module of its own, so it is kept as written in a Strudel Code module.`);
+    return took;
+  }
+
   function applyCall(S, c, fxFor, pending, velocity) {
     const n = c.name, a = c.args;
     const src = S.sources;
@@ -590,6 +700,11 @@ export function importStrudel(code, { sounds = null } = {}) {
     };
     if (n !== 'ribbon' && n !== 'rib' && n !== 'scale') S.lastRand = null;   // a ribbon only belongs to the random module right before it
     if (n === 'scale') { if (S.keyNode || S.randNode) return; throw new Skip('scale() on something that is not an n() pattern'); }
+    if (n === 'partials' && a[0] && a[0].type === 'ArrayExpression' && a[0].elements.length >= 1 && a[0].elements.length <= 16 && a[0].elements.every((e) => e && num(e) !== null && num(e) >= 0 && num(e) <= 1) && S.sources.some((x) => x.type === 'synth')) {
+      const vals = a[0].elements.map((e) => Math.round(num(e) * 100) / 100);
+      fxFor('harmonics').params.partials = Array.from({ length: 16 }, (_, i) => vals[i] ?? 0);   // a list shorter than 16: the rest are silent
+      return;
+    }
     if (n === 'voicing') return;
     if (n === 'mode' && S.root?.type === 'chords') { const t = str(a[0]); if (t && ['above:c3', 'above:c4', 'above:c5'].includes(t)) { S.root.params.register = t; return; } throw new Skip('this voicing mode'); }
     if (n === 'anchor' || n === 'dict' || n === 'offset' || n === 'octaves') throw new Skip(`${n}() voicing setting`);
@@ -644,7 +759,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       const { items, mode: mode0, fast, slow } = parsed;
       if (items.length === 1 && items[0].euclid && !onNotes) {
         const e = items[0].euclid;
-        const rh = add('rhythm', { steps: 1, mode, cells: [{ on: true, len: 1 }] }, S.stmt);
+        const rh = add('rhythm', { steps: 1, mode: 'steps', cells: [{ on: true, len: 1 }] }, S.stmt);
         wire(rh, root, 'in');
         pending.push(null);
         pending.pop();
@@ -698,6 +813,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     if (n === 'duckattack' || n === 'duckatt') { const v = num(a[0]); if (v === null) throw new Skip('duckattack with something other than a number'); S.meta.duck = S.meta.duck || {}; S.meta.duck.attack = v; return; }
     if (n === 'analyze') { S.meta.analyze = true; return; }
     if (VIZ.has(n)) { S.viz.push(n.includes('scope') ? 'scope' : n.includes('punchcard') ? 'punchcard' : n.includes('spiral') ? 'spiral' : n.includes('pitchwheel') ? 'pitchwheel' : 'pianoroll'); return; }
+    if (n === 'color' || n === 'colour' || n === 'markcss') { report.notes.push(`line ${c.prop.loc.start.line}: .${n}() only changes how a piano roll or punchcard is drawn in Strudel, never the sound, so it is left out.`); return; }
     if (OTHER_VIZ.has(n)) throw new Skip(`${n}() is a visual that has no module (pianoroll, punchcard, spiral, pitchwheel and scope do)`);
     if (n === 'cpm' || n === 'cps') throw new Skip(`${n}() on one pattern (the tempo is set for the whole patch by the Output module)`);
     // gain and friends: parameters of the sound maker
@@ -775,7 +891,6 @@ export function importStrudel(code, { sounds = null } = {}) {
     return { head: duck, extra: rest.map((k) => k.head) };
   }
 
-  const vars = new Map();
   let hydraSeen = false;
   const HYDRA_WHY = 'Hydra visuals do not run here (they are left out, not deleted: your code is unchanged, and Hydra runs in strudel.cc)';
   const HYDRA_ROOTS = new Set(['osc', 'noise', 'voronoi', 'gradient', 'shape', 'solid', 'src', 'render', 'setResolution', 'update', 'hush', 's0', 's1', 's2', 's3', 'o0', 'o1', 'o2', 'o3', 'a']);
@@ -837,6 +952,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     } else if (st.type === 'VariableDeclaration') {
       for (const d of st.declarations) {
         if (d.id.type === 'Identifier' && d.init && d.init.type === 'CallExpression') vars.set(d.id.name, d.init);
+        else if (st.kind === 'const' && d.id.type === 'Identifier' && d.init && (num(d.init) !== null || str(d.init) !== null)) CONSTS.set(d.id.name, d.init);   // a plain number or text: where it is used, the value is used
         else skip(st, 'a variable that is not a pattern');
       }
       continue;
@@ -847,7 +963,7 @@ export function importStrudel(code, { sounds = null } = {}) {
 
     stmtNo++;
     try {
-      const r = buildChain(expr, stmtNo);
+      const r = chainOrCode(expr, stmtNo);
       heads.push({ ...r, line: st.loc.start.line, text: lineText(st) });
     } catch (e) {
       if (e instanceof Skip) skip(st, e.message, lineText(st));

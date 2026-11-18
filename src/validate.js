@@ -69,6 +69,11 @@ function cleanParam(spec, v, node, notes) {
       const t = cleanText(v, cap);
       return t === null ? d : t.replace(/[^\p{L}\p{N}_\s\[\]<>*!@?~,:.\-()/%|{}#^+']/gu, '');
     }
+    case 'code': {   // Strudel method calls kept as written: quotes are part of them, so only control characters are removed. The guard checks every call before anything runs.
+      if (typeof v === 'string' && v.length > 4000) throw new Error(`the Strudel Code text is too long (${v.length} characters; the limit is 4000)`);
+      const t = cleanText(v, 4000);
+      return t === null ? d : t;
+    }
     case 'instrument': return typeof v === 'string' && SOUND.test(v) ? v : d;
     default: return d;
   }
@@ -87,6 +92,10 @@ export function cleanParams(type, raw) {
   if (def.data?.mixer) {
     const st = Array.isArray(src.strips) ? src.strips.slice(0, 6) : [];
     out.strips = Array.from({ length: 6 }, (_, i) => { const s = st[i] || {}; return { vol: num(s.vol, 0, 2, 1), pan: num(s.pan, 0, 1, 0.5), mute: s.mute === true, solo: s.solo === true }; });
+  }
+  if (def.data?.harmonics) {
+    const arr = Array.isArray(src.partials) ? src.partials : [];
+    out.partials = Array.from({ length: 16 }, (_, i) => num(arr[i], 0, 1, dflt.partials[i] ?? 0));
   }
   if (def.data?.arrange) {
     const l = Array.isArray(src.lens) ? src.lens : [];

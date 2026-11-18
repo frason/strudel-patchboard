@@ -3,6 +3,7 @@
 // which is how highlighting, hover and "who made this event" work without any second representation of the sound.
 import { parseArrangeOrder, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas } from './modules.js';
 import { chordSymbol } from './chords.js';
+import { guardCalls, guardCode } from './guard.js';
 import { nodeById, wiresInto, outType, effectiveKey, scopeId } from './graph.js';
 const FM_WAVES = new Set(['sine', 'sawtooth', 'square', 'triangle', 'supersaw', 'pulse', 'sin', 'saw', 'sqr', 'tri', 'z_sine', 'z_sawtooth', 'z_square', 'z_triangle']);   // oscillators FM can modulate
 
@@ -316,6 +317,13 @@ export function compile(g) {
         calls.push(...paramCalls(n, depth));
         return chain(up, calls, depth, inline);
       }
+      case 'codesource': {   // a whole pattern written as code, kept as written (see the Strudel Code (pattern) module)
+        const t = String(p.code || '').trim();
+        if (!t) return silent(n, 'code');
+        const bad = guardCode(t);
+        if (bad) { issues.push({ node: n.id, msg: 'Strudel Code (pattern) left out: ' + bad }); return silent(n, 'code'); }
+        return [S(t, { ...m, role: 'fn', note: 'Strudel code kept exactly as written: this module holds a whole pattern that has no modules of its own.' })];
+      }
       case 'sample': {
         const calls = [];
         const trig = input(n, 'in', depth, true);
@@ -336,6 +344,15 @@ export function compile(g) {
         if (!up) return silent(n, 'input');
         const c = knobCall(n, def.params[0], def.params[0].call, depth, { say: SAY[def.params[0].call](p.n) });
         return chain(up, [c], depth, inline);
+      }
+      case 'code': {   // method calls kept as written (see the Strudel Code module)
+        const up = input(n, 'in', depth, inline);
+        if (!up) return silent(n, 'input');
+        const t = String(p.code || '').trim();
+        if (!t) return up;
+        const bad = guardCalls(t);
+        if (bad) { issues.push({ node: n.id, msg: 'Strudel Code left out: ' + bad }); return up; }
+        return chain(up, [[S(t, { ...m, role: 'fn', note: 'Strudel code kept exactly as written: this module holds method calls that have no module of their own.' })]], depth, inline);
       }
       case 'rev': {
         const up = input(n, 'in', depth, inline);
@@ -517,6 +534,16 @@ export function compile(g) {
         if (!up) return silent(n, 'sound');
         const off = def.params.filter((s) => s.call && !p[s.key + '_on']).map((s) => s.key);
         return chain(up, paramCalls(n, depth, off), depth, inline);
+      }
+      case 'harmonics': {   // the loudness of each harmonic: .partials([1, 0.5, 0.33, ...])
+        const up = input(n, 'in', depth, inline);
+        if (!up) return silent(n, 'sound');
+        const arr = (Array.isArray(p.partials) ? p.partials : []).slice(0, 16).map((v) => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 100) / 100);
+        let last = arr.length; while (last > 1 && arr[last - 1] === 0) last--;
+        const calls = [];
+        if (p.base === 'user') calls.push([S('.s("user")', { ...m, role: 'knob', key: 'base', note: 'sound("user") makes a wave out of nothing but the harmonics listed in partials.' })]);
+        calls.push([S(`.partials([${arr.slice(0, last).join(', ')}])`, { ...m, role: 'knob', key: 'partials', note: 'partials([...]) is how loud each harmonic is: the first number is the note itself, the second the octave above, the third the octave and a fifth, and so on. A harmonic that is not listed is silent.' })]);
+        return chain(up, calls, depth, inline);
       }
       case 'delay': case 'reverb': case 'distortion': case 'pan': case 'vibrato': case 'pulsewidth': case 'vowel': case 'djf': case 'lofi': case 'pitchenv': case 'fm': {
         const up = input(n, 'in', depth, inline);

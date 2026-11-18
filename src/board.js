@@ -11,8 +11,9 @@ import { buildPulseDiagram } from './pulsediagram.js';
 import { FXPICS } from './fxpics.js';
 import { ROLLS } from './rollview.js';
 import { CONVERTERS } from './convert.js';
+import { HARMPICS } from './harmpic.js';
 const autosize = (ta) => { ta.style.height = 'auto'; if (ta.scrollHeight) ta.style.height = ta.scrollHeight + 2 + 'px'; };   // a text box that grows with its lines
-const PICS = { ...FXPICS, ...ROLLS };   // every small picture a module can show, by the flag it sets in its data
+const PICS = { ...FXPICS, ...ROLLS, ...HARMPICS };   // every small picture a module can show, by the flag it sets in its data
 import { soundIconSvg, hasSoundIcon, soundGlyph } from './soundicons.js';
 import { icon } from './icons.js';
 import { buildFxRack } from './fxrack.js';
@@ -1265,7 +1266,7 @@ export function createBoard(root, store, hooks) {
         const wrap = h('label', { class: 'field col' }, h('span', {}, spec.label), ta);
         ctl.inputs[spec.key] = ta;
         body.append(wrap);
-      } else if (spec.kind === 'text') {
+      } else if (spec.kind === 'text' || spec.kind === 'code') {
         // wrap: a long pattern breaks onto new lines inside the box (and the box grows) instead of scrolling sideways or stretching the module
         const inp = spec.wrap
           ? h('textarea', { class: 'txt wrapbox', rows: 1, spellcheck: 'false', oninput: (e) => { const t = e.target.value.replace(/\s*\n\s*/g, ' '); if (t !== e.target.value) e.target.value = t; autosize(e.target); hooks.setParam(node.id, spec.key, t); } })
