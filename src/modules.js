@@ -101,14 +101,14 @@ export const MODULES = {
   hitpattern: {
     title: 'Hit Pattern', cat: 'sequencer', out: 'trigger', data: { hitstrip: true },
     blurb: 'A rhythm written as text, for patterns too long or detailed for the Rhythm Sequencer: x is a hit and ~ a rest, with weights, repeats and brackets ("x ~ x*2 [x x] ~@3", or "<x [x x]>" to alternate by cycle). It has no pitch and no sound: plug it into the rhythm input of a Sample, or of an Instrument to put the rhythm on a melody. Code that spells out a long rhythm lands here when it does not fit the Rhythm Sequencer.',
-    params: [{ key: 'text', label: 'hits', kind: 'text', def: 'x ~ x x' }],
+    params: [{ key: 'text', label: 'hits', kind: 'text', wrap: true, def: 'x ~ x x' }],
   },
   notetext: {
     title: 'Note Pattern', cat: 'sequencer', out: 'notes', data: { noteroll: true },
     blurb: 'A melody written as text, for tunes too long or too detailed for the step grid: note("c4@3 e4 ~ [g3,b3]@2"). Each word is a step, @3 holds a note for 3 steps, ~ is a rest and [a,b,c] plays a chord. The loudness box takes a pattern with exactly the same steps ("0.8@3 0.5 ~ 0.7@2"). Code that spells out a long melody lands here when it does not fit the Melody Sequencer.',
     params: [
-      { key: 'text', label: 'notes', kind: 'text', def: 'c3 e3 g3 c4' },
-      { key: 'vel', label: 'loudness', kind: 'text', def: '', tip: 'optional: a pattern of 0 to 1 with the same steps as the notes' },
+      { key: 'text', label: 'notes', kind: 'text', wrap: true, def: 'c3 e3 g3 c4' },
+      { key: 'vel', label: 'loudness', kind: 'text', wrap: true, def: '', tip: 'optional: a pattern of 0 to 1 with the same steps as the notes' },
     ],
   },
   randnotes: {

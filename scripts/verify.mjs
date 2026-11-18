@@ -1264,4 +1264,35 @@ $: s("[hh ~@4 hh ~@14]*2")
     check('Round trip: the Note Pattern text is kept exactly, and a sequence of two (code, import, code) is stable', rt && rt.params.text === 'c3@3 ~ e3 [g3,b3]@2' && comp(imp(mk('notes', 'c3@3 ~ e3 [g3,b3]@2')).graph).code === mk('notes', 'c3@3 ~ e3 [g3,b3]@2'));
   }
 }
+
+// ---------- converting between grid and text modules ----------
+{
+  const { melodyToNotes, hitsToText, notesToMelody, hitsToRhythm } = await import('../src/convert.js');
+  const { emptyGraph, makeNode: mkn } = await import('../src/graph.js'), { defaultParams: dp, makeCells: mc } = await import('../src/modules.js');
+  const build = (kind, params, withKey) => {
+    const g = emptyGraph(), N = (ty, p = {}) => { const n = mkn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+    const o = N('output'), src = N(kind, params), snd = kind === 'melody' || kind === 'notetext' ? N('synth', { wave: 'sine' }) : N('sample', { name: 'bd' });
+    W(src, snd, 'in'); W(snd, o, 'in'); if (withKey) { const k = N('key', { root: 'D', scale: 'minor' }); W(k, src, 'key'); }
+    return { g, src };
+  };
+  const events = async (g) => (await evaluate(compile(g).code, false)).queryArc(0, 4).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${[].concat(h.value.note ?? h.value.s).join(',').toLowerCase()} ${h.value.velocity ?? ''}`).sort().join(' | ');
+  const asType = (g, id, r) => { const g2 = JSON.parse(JSON.stringify(g)), n = g2.nodes.find((x) => x.id === id); n.type = r.type; n.params = r.params; g2.wires = g2.wires.filter((w) => w.to.node !== id); return g2; };
+  const melCells = (spec) => { const cells = mc('melody', spec.length); spec.forEach((x, i) => { if (x) cells[i] = { ...cells[i], ...x }; }); return cells; };
+  const same = async (kind, params, withKey, conv, label) => {
+    const { g, src } = build(kind, params, withKey), r = conv(g, src);
+    const ea = await events(g), eb = r.error ? '' : await events(asType(g, src.id, r));
+    check(`Convert: ${label} (${r.error || 'converted'})`, !r.error && ea === eb);
+    if (!r.error && ea !== eb) console.log('   before:', ea, '\n   after: ', eb, '\n   text:', r.params.text);
+    return r;
+  };
+  await same('melody', { ...dp('melody'), steps: 8, scale: 'off', mode: 'steps', cells: melCells([{ n: 'c3', len: 2, vel: 0.5 }, null, { n: ['e3', 'g3'] }, null, { n: 'a3', vel: 0.7 }, null, { n: 'c4' }, null]) }, false, melodyToNotes, 'a Melody Sequencer with names, a chord, a held note and loudness plays the same as its Note Pattern');
+  await same('melody', { ...dp('melody'), steps: 4, scale: 'off', mode: 'steps', cells: melCells([{ d: 0 }, { d: 2 }, { d: 4 }, { d: -3 }]) }, true, melodyToNotes, 'scale degrees from a Key become the same notes as names');
+  await same('melody', { ...dp('melody'), steps: 16, scale: 'off', mode: 'pace', cells: melCells(Array.from({ length: 16 }, (_, i) => (i % 3 ? null : { n: ['c3', 'e3', 'g3'][(i / 3) % 3] }))) }, false, melodyToNotes, 'a 16-step melody on a steady pace keeps its slow timing');
+  await same('rhythm', { ...dp('rhythm'), steps: 8, mode: 'steps', cells: Array.from({ length: 8 }, (_, i) => ({ on: [0, 3, 4, 6].includes(i), len: i === 6 ? 2 : 1 })) }, false, (g, n) => hitsToText(n), 'a Rhythm Sequencer plays the same as its Hit Pattern');
+  await same('notetext', { text: 'c3@3 ~ e3 [g3,b3]@2 ~', vel: '0.9@3 ~ 0.6 0.7@2 ~' }, false, (g, n) => notesToMelody(n), 'a Note Pattern with a chord, held notes and loudness plays the same as its Melody Sequencer');
+  await same('hitpattern', { text: 'x ~ x@2 ~@2 x' }, false, (g, n) => hitsToRhythm(n), 'a Hit Pattern plays the same as its Rhythm Sequencer');
+  check('Convert: a melody turned into text and back gives the same grid', (() => { const { g, src } = build('melody', { ...dp('melody'), steps: 4, scale: 'off', mode: 'steps', cells: melCells([{ n: 'c3' }, null, { n: ['e3', 'g3'], len: 2 }, null]) }, false), t = melodyToNotes(g, src), back = notesToMelody({ params: t.params }); return !back.error && back.params.steps === 4 && back.params.cells[0].n === 'c3' && back.params.cells[2].len === 2 && back.params.cells[2].n.join() === 'e3,g3'; })());
+  check('Convert: text that a grid cannot hold stays text, with a reason', ['c3 [e3 g3]', '<c3 e3>', 'c3*2', 'c3@20'].every((t) => notesToMelody({ params: { text: t, vel: '' } }).error) && ['x [x x]', '<x ~>', 'x*3', 'x@20'].every((t) => hitsToRhythm({ params: { text: t } }).error));
+  check('Convert: an empty grid refuses', (() => { const { g, src } = build('melody', { ...dp('melody'), steps: 4, scale: 'off', mode: 'steps', cells: melCells([null, null, null, null]) }, false); return !!melodyToNotes(g, src).error; })());
+}
 process.exit(failures ? 1 : 0);

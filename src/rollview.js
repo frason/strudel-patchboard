@@ -145,7 +145,7 @@ function view(node, ctl, { store, hooks, h }, kind) {
   fitBtn.addEventListener('click', () => { fit = !fit; paint(); });
   fitBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
   scroll.addEventListener('pointerdown', (e) => e.stopPropagation());
-  scroll.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+  scroll.addEventListener('wheel', (e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }, { passive: true });   // a pinch (ctrl + wheel) must reach the board, or the browser zooms the whole page instead
 
   // ---- editing by clicks ----
   canvas.addEventListener('pointerdown', (e) => {

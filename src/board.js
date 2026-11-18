@@ -10,6 +10,8 @@ import { buildFmDiagram } from './fmdiagram.js';
 import { buildPulseDiagram } from './pulsediagram.js';
 import { FXPICS } from './fxpics.js';
 import { ROLLS } from './rollview.js';
+import { CONVERTERS } from './convert.js';
+const autosize = (ta) => { ta.style.height = 'auto'; if (ta.scrollHeight) ta.style.height = ta.scrollHeight + 2 + 'px'; };   // a text box that grows with its lines
 const PICS = { ...FXPICS, ...ROLLS };   // every small picture a module can show, by the flag it sets in its data
 import { soundIconSvg, hasSoundIcon, soundGlyph } from './soundicons.js';
 import { icon } from './icons.js';
@@ -1264,8 +1266,12 @@ export function createBoard(root, store, hooks) {
         ctl.inputs[spec.key] = ta;
         body.append(wrap);
       } else if (spec.kind === 'text') {
-        const inp = h('input', { class: 'txt', type: 'text', spellcheck: 'false', oninput: (e) => hooks.setParam(node.id, spec.key, e.target.value) });
-        inp.addEventListener('keydown', (e) => e.stopPropagation());
+        // wrap: a long pattern breaks onto new lines inside the box (and the box grows) instead of scrolling sideways or stretching the module
+        const inp = spec.wrap
+          ? h('textarea', { class: 'txt wrapbox', rows: 1, spellcheck: 'false', oninput: (e) => { const t = e.target.value.replace(/\s*\n\s*/g, ' '); if (t !== e.target.value) e.target.value = t; autosize(e.target); hooks.setParam(node.id, spec.key, t); } })
+          : h('input', { class: 'txt', type: 'text', spellcheck: 'false', oninput: (e) => hooks.setParam(node.id, spec.key, e.target.value) });
+        inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (spec.wrap && e.key === 'Enter') e.preventDefault(); });
+        if (spec.wrap && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => autosize(inp)).observe(inp);
         // A Sample's pattern box lights up the word that is playing: a see-through layer over the text, with a mark where each sound sounds now
         let hlWrap = null;
         if (node.type === 'sample' && spec.key === 'name') {
@@ -1329,6 +1335,13 @@ export function createBoard(root, store, hooks) {
     if (def.data?.chords && !isCol(node)) body.prepend(buildChords(node, ctl));
     else if (def.data?.cells && !isCol(node)) body.prepend(buildSequencer(node, ctl));
     if (def.data?.tracks && !isCol(node)) body.prepend(buildDrums(node, ctl));
+    if (CONVERTERS[node.type] && !isCol(node)) {   // step grid <-> text module
+      const cv = CONVERTERS[node.type];
+      ctl.convert = h('button', { class: 'btn sm to-text', type: 'button', title: cv.title }, cv.label);
+      ctl.convert.addEventListener('pointerdown', (e) => e.stopPropagation());
+      ctl.convert.addEventListener('click', () => hooks.convertSeq(node.id));
+      body.append(h('div', { class: 'convert-row' }, ctl.convert));
+    }
     if (node.type === 'sample' && ctl.soundField && ctl.inputs.bank) ctl.soundField.prepend(ctl.inputs.bank.closest('.field'));   // the bank decides which sounds exist, so it comes first, above the sound
     // order for a sound maker: the sound first, then the envelope, then (for a synth wave only) the wave buttons, then the knobs
     if (ctl.wavesEl) { if (ctl.envEl) ctl.envEl.after(ctl.wavesEl); else body.prepend(ctl.wavesEl); }
@@ -1848,6 +1861,11 @@ export function createBoard(root, store, hooks) {
       if (v.ctl.inst.waves) { v.ctl.inst.waves.classList.toggle('dim', !wave); v.ctl.inst.waves.title = wave ? '' : 'The sound is not a synth wave: click one to switch to it'; v.ctl.inst.waves.querySelectorAll('.wave-btn').forEach((b) => b.classList.toggle('on', b.dataset.wave === id)); }
       v.ctl.inst.btn.title = it ? it.cat + ' · ' + (it.kind === 'soundfont' ? 'General MIDI instrument' : it.kind === 'sample' ? 'recorded sample' : 'synth wave') : id + ' is not a known instrument';
     }
+    if (v.ctl.convert) {   // a grid can always become text; text only while it is a plain list that fits a grid
+      const r = CONVERTERS[node.type].run(g, node);
+      v.ctl.convert.disabled = !!r.error && (node.type === 'notetext' || node.type === 'hitpattern');
+      v.ctl.convert.title = v.ctl.convert.disabled ? r.error : CONVERTERS[node.type].title;
+    }
     if (v.ctl.toDrums) v.ctl.toDrums.hidden = !(soundNames(node.params.name).length >= 2 && !wiresInto(g, node.id, 'in').length);   // several different sounds typed in, and no rhythm cable: offer the Drum Machine
     if (v.ctl.sampleCard) {
       const names = soundNames(node.params.name), first = names[0] || '', bank = node.params.bank || '';
@@ -1881,6 +1899,7 @@ export function createBoard(root, store, hooks) {
     for (const [key, inp] of Object.entries(v.ctl.inputs)) {
       const val = node.params[key];
       if (document.activeElement !== inp) inp.value = val;
+      if (inp.classList.contains('wrapbox')) autosize(inp);
     }
     v.ctl.arrange?.draw(node.params);
     v.ctl.fmdiagram?.draw(node.params);

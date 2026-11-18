@@ -1017,3 +1017,11 @@ html, body { overscroll-behavior: none; }
 .rollfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 8px 4px; border-top: 1px solid #1b242d; }
 .rollinfo { font: 600 9px var(--mono, monospace); color: #7fa6a2; }
 .rollfit { font: 600 9px var(--mono, monospace); color: #a9c7c4; background: #11202a; border: 1px solid #3c8f8a; border-radius: 4px; padding: 1px 7px; cursor: pointer; }
+.convert-row { margin-top: 6px; display: flex; }
+.to-text:disabled { opacity: .45; cursor: not-allowed; }
+/* Note Pattern and Hit Pattern: the picture and the text never decide how narrow the module can be (it is never narrower than a standard module), and long text breaks onto new lines */
+.node:has(.rollwrap) .rollwrap { width: 0; min-width: 100%; box-sizing: border-box; }
+.rollinfo { min-width: 0; overflow-wrap: anywhere; }
+.txt.wrapbox { resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.35; display: block; }
+.field:has(.wrapbox) { align-items: flex-start; }
+.field:has(.wrapbox) > span { padding-top: 4px; }

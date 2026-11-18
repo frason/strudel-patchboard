@@ -21,7 +21,7 @@ function chain(base, calls, depth, inline) {
 const q = (s) => JSON.stringify(String(s));
 
 // text of one step, with repeats ([..]*2) and brackets ([a b]) and length (@2). leaf() renders one leaf value.
-function stepText(t, leaf) {
+export function stepText(t, leaf) {
   if (t.rest) return '~';
   const x = parseX(t.cell);
   let out = x.type === 'sub' ? '[' + Array.from({ length: x.n }, (_, k) => leaf(leafAt(t.cell, k), t)).join(' ') + ']' : leaf(t.cell, t);

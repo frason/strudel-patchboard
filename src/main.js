@@ -1,5 +1,7 @@
 import { wake as wakeAnims } from './anim.js';
 import './style.css';
+// A pinch on a trackpad arrives as ctrl + wheel. The board zooms itself; whatever it does not handle must never zoom the whole page (that hides the top bar).
+document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
 if (import.meta.env.DEV) import('./capture.js');   // developer-only audio capture; stripped from the build
 import { createStore, storage } from './store.js';
 import { createBoard, buildPalette, h, openSoundPicker } from './board.js';
@@ -21,6 +23,7 @@ import { queryPatch, layoutSnapshot, drawSnapshot } from './snapshot.js';
 import { patchText, checkSync } from './textsync.js';
 import { LESSONS } from './starters.js';
 import { patternToDrums } from './todrums.js';
+import { CONVERTERS } from './convert.js';
 import { getAI, setAI, clearAI, consumeAiNotice, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
 import { defaultParams, FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
 import { effectiveKey, makeNode, nodeById, wiresFrom, wiresInto, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
@@ -615,6 +618,18 @@ const hooks = {
       g.wires = g.wires.filter((w) => !(w.to.node === id && w.to.port.startsWith('p:') && !['p:gain', 'p:pan'].includes(w.to.port)));   // cables into settings the Drum Machine does not have
     }, { label: 'convert to Drum Machine' });
     toast(`Now a Drum Machine: ${r.tracks.length} rows, ${r.steps} steps.${r.alternates ? ' The first cycle of the pattern was used.' : ''}${lost.length ? ` The Sample's ${lost.join(', ')} setting${lost.length > 1 ? 's' : ''} had no place on a Drum Machine.` : ''}`, [undoAction], 9000);
+  },
+  convertSeq(id) {   // Melody Sequencer <-> Note Pattern, Rhythm Sequencer <-> Hit Pattern
+    const n = nodeById(store.graph, id), cv = n && CONVERTERS[n.type];
+    if (!cv) return;
+    const r = cv.run(store.graph, n);
+    if (r.error) return toast(r.error, [], 7000);
+    store.update((g) => {
+      const s = nodeById(g, id);
+      s.type = r.type; s.params = r.params;
+      g.wires = g.wires.filter((w) => w.to.node !== id);   // the new module has no inputs (a Key cable is no longer needed)
+    }, { label: 'convert to ' + MODULES[r.type].title });
+    toast(r.note, [undoAction], 7000);
   },
   applyFmAlgorithm(id, algoId) {
     const al = FM_ALGORITHMS.find((x) => x.id === algoId);
