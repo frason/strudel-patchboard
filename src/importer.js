@@ -5,6 +5,7 @@ import { makeNode, normalize, validateShape } from './graph.js';
 import { parseMini, Unsupported } from './mini.js';
 import { MODULES, SCALES, makeCells, EVERY_FNS, SOMETIMES_FNS, NOTE_NAMES } from './modules.js';
 import { parseChord, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
+import { melodyToNotes } from './convert.js';
 
 class Skip extends Error {}
 
@@ -198,6 +199,47 @@ export function importStrudel(code, { sounds = null } = {}) {
   const out = { bpm: 120, beats: 4, master: {}, masterSig: {} };
   const add = (type, params, stmt) => { const n = makeNode(type, 0, 0, params); n.__stmt = stmt; nodes.push(n); return n; };
   const wire = (a, b, port = 'in') => wires.push({ id: 'iw' + wid++, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+
+  // ---- one synth for a whole sequence ----
+  // cat(note(a).s("saw"), note(b).s("saw")) plays the same as cat(note(a), note(b)).s("saw"): when every part is one note pattern going into an identical synth, the parts are
+  // joined first and ONE synth follows them (a part that plays nothing can have any synth). Returns { synth, inputs } or null.
+  const drop = (n) => { const i = nodes.indexOf(n); if (i >= 0) nodes.splice(i, 1); for (let j = wires.length - 1; j >= 0; j--) if (wires[j].from.node === n.id || wires[j].to.node === n.id) wires.splice(j, 1); };
+  const silentNode = (n) => (n.type === 'melody' ? n.params.cells.every((c) => !(c.n && c.n.length) && !(c.d && c.d.length)) : n.type === 'notetext' ? /^[\s~]*$/.test(n.params.text) : false);
+  function shareSynth(kids, stmt) {
+    if (kids.length < 2) return null;
+    const synths = kids.map((k) => (k.sources.length === 1 && k.sources[0] === k.head && k.head.type === 'synth' ? k.head : null));
+    if (synths.some((x) => !x)) return null;
+    const feeds = synths.map((sy) => wires.filter((w) => w.to.node === sy.id));
+    if (feeds.some((f) => f.length !== 1 || f[0].to.port !== 'in')) return null;
+    const inputs = feeds.map((f) => nodes.find((n) => n.id === f[0].from.node));
+    if (inputs.some((n) => !n)) return null;
+    const live = synths.filter((_, i) => !silentNode(inputs[i]) && !(inputs[i].type === 'cat' || inputs[i].type === 'arrange' ? false : false));
+    const ref = (live.length ? live : synths)[0], same = JSON.stringify(ref.params);
+    if (live.some((sy) => JSON.stringify(sy.params) !== same)) return null;
+    const synth = add('synth', { ...ref.params }, stmt);
+    if ((live.length ? live : synths).every((sy) => implicitSynths.has(sy))) implicitSynths.add(synth);
+    synths.forEach(drop);
+    return { synth, inputs };
+  }
+  // cat of plain note lines -> one Note Pattern that alternates by cycle: <[a b c] [d e f]>. Only when every line is a Melody Sequencer or Note Pattern played straight (no key, no loudness, no tricks).
+  function foldCat(inputs, stmt) {
+    const texts = [];
+    for (const n of inputs) {
+      const feeds = wires.filter((w) => w.to.node === n.id);
+      if (feeds.length) return null;
+      let t = null;
+      if (n.type === 'notetext') t = String(n.params.vel || '').trim() ? null : String(n.params.text).trim();
+      else if (n.type === 'melody' && n.params.mode === 'steps' && n.params.scale === 'off' && n.params.cells.every((c) => (c.vel ?? 1) === 1)) {
+        if (silentNode(n)) t = '~';
+        else { const r = melodyToNotes({ nodes, wires }, n); t = r.error ? null : r.params.text; }
+      }
+      if (!t || /[<>\/?|:%]/.test(t)) return null;
+      texts.push(/[\s\[\]]/.test(t) ? '[' + t + ']' : t);
+    }
+    const node = add('notetext', { text: '<' + texts.join(' ') + '>', vel: '' }, stmt);
+    inputs.forEach(drop);
+    return node;
+  }
   const skip = (node, reason, text) => report.skipped.push({ line: node.loc.start.line, text: (text ?? lineText(node)), reason, full: code.slice(node.start, node.end).slice(0, 20000) });
 
   const keyFor = (root, scale, stmt) => { const k = root + ':' + scale; if (!keys.has(k)) keys.set(k, add('key', { root, scale }, -1)); return keys.get(k); };
@@ -417,13 +459,17 @@ export function importStrudel(code, { sounds = null } = {}) {
         const g = groupDuck(kids, stmt);
         S.root = g.head; S.extraHeads = g.extra; S.sources = kids.flatMap((k) => k.sources);
       } else {
-        const heads = kids.map((k) => k.head);
+        const shared = name === 'cat' || name === 'slowcat' ? shareSynth(kids, stmt) : null;
+        let heads = shared ? shared.inputs : kids.map((k) => k.head);
+        const folded = shared ? foldCat(shared.inputs, stmt) : null;
+        if (folded) heads = [folded];
         const type = name === 'stack' ? (useMixer ? 'mixer' : 'stack') : 'cat';
         let cur = heads;
         while (cur.length > 6) { const next = []; for (let i = 0; i < cur.length; i += 6) { const grp = cur.slice(i, i + 6); if (grp.length === 1) { next.push(grp[0]); continue; } const sn = add(type, { n: Math.max(2, grp.length) }, stmt); grp.forEach((h, j) => wire(h, sn, 'in' + (j + 1))); next.push(sn); } cur = next; }
-        const sn = add(type, type === 'mixer' ? { n: Math.max(2, cur.length), strips: Array.from({ length: 6 }, (_, j) => ({ vol: stripSt[j]?.vol ?? 1, pan: stripSt[j]?.pan ?? 0.5, mute: false, solo: false })) } : { n: Math.max(2, cur.length) }, stmt);
-        cur.forEach((h, j) => wire(h, sn, 'in' + (j + 1)));
-        S.root = sn; S.sources = kids.flatMap((k) => k.sources);
+        const sn = folded || add(type, type === 'mixer' ? { n: Math.max(2, cur.length), strips: Array.from({ length: 6 }, (_, j) => ({ vol: stripSt[j]?.vol ?? 1, pan: stripSt[j]?.pan ?? 0.5, mute: false, solo: false })) } : { n: Math.max(2, cur.length) }, stmt);
+        if (!folded) cur.forEach((h, j) => wire(h, sn, 'in' + (j + 1)));
+        S.root = sn; S.sources = shared ? [shared.synth] : kids.flatMap((k) => k.sources);
+        if (shared) { S.kind = 'notes'; S.instrument = shared.synth; }
         S.extraHeads = [];
       }
     } else if (name === 'arrange') {
@@ -445,14 +491,16 @@ export function importStrudel(code, { sounds = null } = {}) {
         grp.forEach((g, j) => wire(g.head, node, 'in' + (j + 1)));
         return node;
       };
-      let cur = secs.map((s2) => ({ len: s2.len, head: s2.kid.head }));
+      const shared = shareSynth(secs.map((s2) => s2.kid), stmt);   // every section plays through the same synth: one synth after the arrangement
+      let cur = secs.map((s2, i) => ({ len: s2.len, head: shared ? shared.inputs[i] : s2.kid.head }));
       while (cur.length > 6) {
         const next = [];
         for (let i = 0; i < cur.length; i += 6) { const grp = cur.slice(i, i + 6); next.push(grp.length === 1 ? grp[0] : { len: grp.reduce((t, g) => t + g.len, 0), head: arrangeNode(grp) }); }
         cur = next;
       }
       const an = arrangeNode(cur);
-      S.root = an; S.sources = secs.flatMap((s2) => s2.kid.sources);
+      S.root = an; S.sources = shared ? [shared.synth] : secs.flatMap((s2) => s2.kid.sources);
+      if (shared) { S.kind = 'notes'; S.instrument = shared.synth; }
       S.extraHeads = [];
     } else if (name === 'silence') {
       throw new Skip('silence');

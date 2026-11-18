@@ -1295,4 +1295,26 @@ $: s("[hh ~@4 hh ~@14]*2")
   check('Convert: text that a grid cannot hold stays text, with a reason', ['c3 [e3 g3]', '<c3 e3>', 'c3*2', 'c3@20'].every((t) => notesToMelody({ params: { text: t, vel: '' } }).error) && ['x [x x]', '<x ~>', 'x*3', 'x@20'].every((t) => hitsToRhythm({ params: { text: t } }).error));
   check('Convert: an empty grid refuses', (() => { const { g, src } = build('melody', { ...dp('melody'), steps: 4, scale: 'off', mode: 'steps', cells: melCells([null, null, null, null]) }, false); return !!melodyToNotes(g, src).error; })());
 }
+
+// ---------- importing a song that repeats the same sound on every line ----------
+{
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const song = `setcpm(125 / 4)
+$: arrange(
+  [5, note("~").s("sawtooth")],
+  [4, cat(note("c3 e2 c3 c3 e2 c3 d2 e2").s("sawtooth"), note("g2 b1 g2 g2 b1 g2 a1 b1").s("sawtooth"), note("d3 f#2 d3 d3 f#2 d3 d2 f#2").s("sawtooth"))],
+  [3, cat(note("c3 e2").s("sawtooth"), note("g2 b1").s("sawtooth"))],
+  [1, note("~")]
+).clip(0.85).attack(0.008).release(0.075).lpf(1200).hpf(85).gain(0.16).late(0.375)
+$: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note("d3").s("sawtooth"), note("f#3").s("sawtooth"))], [1, note("~")]).clip(0.94).attack(0.045).lpf(950).gain(0.085)
+`;
+  const r = imp(song), out = compile(r.graph).code, evs = async (c) => (await evaluate(c, false)).queryArc(0, 14).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.entries(h.value).sort())}`).sort().join('|');
+  check('Import: lines that repeat the same sound share ONE synth per layer (here 2, not one per note line)', r.graph.nodes.filter((n) => n.type === 'synth').length === 2);
+  check('Import: a cat of plain note lines becomes one Note Pattern that alternates by cycle, and the module count stays small', r.graph.nodes.length <= 20 && r.graph.nodes.some((n) => n.type === 'notetext' && /^<\[c3 e2/.test(n.params.text)));
+  check('Import: the song plays exactly the same events as the original code', (await evs(song)) === (await evs(out)));
+  const mix = imp(`$: cat(note("c3 e3").s("sawtooth"), note("g3 b3").s("square"))`).graph;
+  check('Import: lines with different sounds keep their own synths', mix.nodes.filter((n) => n.type === 'synth').length === 2);
+  const alt = imp(`$: cat(note("<c3 e3> g3").s("sawtooth"), note("g3 b3").s("sawtooth"))`).graph;
+  check('Import: a line that alternates by itself is not folded into the pattern text (the cat stays)', alt.nodes.some((n) => n.type === 'cat') && alt.nodes.filter((n) => n.type === 'synth').length === 1);
+}
 process.exit(failures ? 1 : 0);

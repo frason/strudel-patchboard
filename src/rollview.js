@@ -212,7 +212,7 @@ function view(node, ctl, { store, hooks, h }, kind) {
       const ev = await queryPatch(code(p), cycles);
       if (mine !== seq) return;
       events = ev.length > 6000 ? ev.slice(0, 6000) : ev; error = ev.length > 6000 ? 'showing the first 6000' : '';
-    } catch (e) { if (mine !== seq) return; events = []; error = "can't read this pattern yet"; }
+    } catch (e) { if (mine !== seq) return; events = []; const why = String((e && e.message) || e || '').replace(/\s+/g, ' ').slice(0, 140); error = "can't read this pattern yet" + (why ? ': ' + why : ''); console.warn('[patchboard] picture could not be drawn:', e); }
     paint();
   };
   const draw = (p) => {
