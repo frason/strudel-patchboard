@@ -87,16 +87,37 @@ const syncOutScope = () => {
   if (on && !scopeRaf) scopeRaf = requestAnimationFrame(drawOutScope);
   if (!on) { cancelAnimationFrame(scopeRaf); scopeRaf = null; scopeCv.getContext('2d').clearRect(0, 0, scopeCv.width, scopeCv.height); }
 };
-let lastOver = 0, lastBusy = 0, seenUnder = null;
+let lastOver = 0, lastBusy = 0, seenUnder = null, seenLate = 0, lastLate = 0;
+// page stalls: the page did nothing for a moment (a heavy task, a throttled tab). While notes are playing, a stall of a fifth of a second makes Strudel skip notes.
+const stalls = [], pageOpenedAt = Date.now(); let lastBeat = performance.now(), hiddenSince = 0;
+setInterval(() => {
+  const now = performance.now(), drift = now - lastBeat - 100; lastBeat = now;
+  if (document.hidden) hiddenSince = now;
+  else if (drift > 150 && now - hiddenSince > 2000) { stalls.push({ at: Date.now(), ms: Math.round(drift), playing: engine.playing }); if (stalls.length > 60) stalls.shift(); }
+}, 100);
+const healthText = () => {
+  const au = engine.audioInfo(), ln = engine.lateNotes(), mins = Math.round((Date.now() - pageOpenedAt) / 60000), ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'less than a minute ago' : m + ' min ago'; };
+  const playingStalls = stalls.filter((x) => x.playing), heap = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) + ' MB' : 'n/a';
+  return [
+    `page open ${mins >= 120 ? Math.round(mins / 60) + ' h' : mins + ' min'} · memory ${heap}`,
+    au ? `audio ${au.state} · ${au.sampleRate} Hz · latency ${au.baseLatencyMs} ms (output ${au.outputLatencyMs} ms) · running ${au.seconds} s` : 'audio not started yet',
+    `notes skipped ${ln.count}${ln.count ? ' (last ' + ago(ln.at) + ')' : ''}`,
+    `page stalls over 0.15 s: ${stalls.length}${stalls.length ? ', longest ' + Math.max(...stalls.map((x) => x.ms)) + ' ms, while playing ' + playingStalls.length + (playingStalls.length ? ' (last ' + ago(playingStalls[playingStalls.length - 1].at) + ')' : '') : ''}`,
+  ].join('\n');
+};
 setInterval(() => {
   if (engine.playing && engine.peak() > 1.0) lastOver = Date.now();
   const show = Date.now() - lastOver < 2000;
   overEl.hidden = !show;
   if (show) overEl.textContent = engine.limiterOn() ? 'limiting' : 'clipping';
+  const ln = engine.lateNotes(); if (ln.count > seenLate) lastLate = Date.now(); seenLate = ln.count;   // a note reached the player too late and was skipped
   const u = engine.playing ? engine.underruns() : null;
   if (u !== null && seenUnder !== null && u > seenUnder) lastBusy = Date.now();
   seenUnder = u;
-  busyEl.hidden = Date.now() - lastBusy > 4000;
+  const skipped = Date.now() - lastLate < 6000, busy = Date.now() - lastBusy < 4000;
+  busyEl.hidden = !(busy || skipped);
+  busyEl.textContent = skipped ? 'notes skipped' : 'overloaded';
+  busyEl.title = skipped ? 'A note reached the audio player after its moment had passed, so it was skipped. This happens when the page or the computer is too busy, or when the tab was in the background. Closing other tabs and turning Animations off in Settings usually helps.' : 'The computer could not keep up and the sound broke up a moment ago. Fewer voices will fix it: shorter release times, a smaller reverb room, fewer layers, or turn Animations off in Settings.';
 }, 100);
 const undoBtn = h('button', { class: 'btn', id: 'undo', title: 'Undo (Ctrl/⌘ Z)', onclick: () => doUndo() }, '↶ Undo');
 const redoBtn = h('button', { class: 'btn', id: 'redo', title: 'Redo (Shift Ctrl/⌘ Z)', onclick: () => doRedo() }, '↷ Redo');
@@ -694,7 +715,7 @@ const hooks = {
   },
 };
 const board = createBoard(boardEl, store, hooks);
-if (import.meta.env.DEV) window.__app = { store, hooks, LESSONS, setPref, panel };   // developer-only, for tests
+if (import.meta.env.DEV) window.__app = { store, hooks, LESSONS, setPref, panel, engine };   // developer-only, for tests
 const palette = buildPalette(paletteEl, hooks, () => store.graph);
 const views = createViews({ board, store, engine, getEvaluated: () => evaluated });
 views.start();
@@ -951,6 +972,9 @@ function openSettings() {
     h('div', { class: 'menu-empty' }, 'Safe output softly rounds off peaks above about 0.8 so a loud patch does not crackle. It is part of this app, not of the code, so it is not in the code panel and is not there on strudel.cc: on, the board sounds a little different from the same code elsewhere only when a patch is very loud.'),
     h('div', { class: 'menu-empty' }, 'These only change how the board looks. The patch and the code are untouched.'),
     h('div', { class: 'menu-empty build', title: 'Quote this when reporting a problem' }, 'Build ' + BUILD_LABEL),
+    h('div', { class: 'menu-h' }, 'Audio health'),
+    h('pre', { class: 'menu-empty health', id: 'health-text', title: 'Notes can be skipped when the page stalls. If notes go missing, copy this and send it with the problem.' }, healthText()),
+    h('button', { class: 'btn sm', id: 'health-copy', onclick: async () => { const t = 'Build ' + BUILD_LABEL + '\n' + healthText(); try { await navigator.clipboard.writeText(t); toast('Audio health copied', [], 1800); } catch { toast('Could not copy', [], 2500); } } }, 'Copy'),
     h('div', { class: 'menu-empty about' }, 'An unofficial visual editor for ', h('a', { href: 'https://strudel.cc', target: '_blank', rel: 'noopener' }, 'Strudel'), ', not made or endorsed by the Strudel team. Built on Strudel (AGPL-3.0).', SOURCE_URL ? [' ', h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code')] : null)));
 }
 settingsBtn.addEventListener('click', openSettings);

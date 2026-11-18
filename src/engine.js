@@ -89,6 +89,7 @@ function unlockAudioSession() {
 }
 
 export function createEngine() {
+  const late = { count: 0, at: 0, by: 0 };   // notes that reached the audio player after their moment had passed (they are skipped, with only a console message)
   let repl = null;
   let starting = null;
   let playing = false;
@@ -108,6 +109,7 @@ export function createEngine() {
     try {
       const ctx = getAudioContext();
       const delayMs = Math.max(0, (t - ctx.currentTime) * 1000);
+      if (t - ctx.currentTime < 0.002) { late.count++; late.at = Date.now(); late.by = Math.max(late.by, ctx.currentTime - t); }   // handed over too late: Strudel's audio player will skip this note
       const durMs = Math.max(90, duration * 1000);
       const locations = hap.context?.locations || [];
       hapSubs.forEach((f) => f({ locations, delayMs, durMs, value: hap.value }));
@@ -115,7 +117,20 @@ export function createEngine() {
     return webaudioOutput(hap, deadline, duration, cps, t);
   };
 
+  // Strudel skips notes it cannot play on time and only says so in the console: when the page is too busy (or the tab was in the background) its clock misses a
+  // stretch of the pattern ("skip query: too late"), or a note reaches the audio player after its moment ("cannot schedule sounds in the past", "skip hap").
+  // Count those messages, so the app can say that notes were skipped instead of leaving a gap that nobody can explain.
+  let watching = false;
+  const SKIP = /skip query: too late|cannot schedule sounds in the past|skip hap: still loading/;
+  const watchSkips = () => {
+    if (watching) return; watching = true;
+    for (const k of ['log', 'warn']) {
+      const orig = console[k].bind(console);
+      console[k] = (...a) => { try { const m = typeof a[0] === 'string' ? a[0] : ''; if (SKIP.test(m)) { late.count++; late.at = Date.now(); } } catch { /* never in the way of logging */ } orig(...a); };
+    }
+  };
   async function ensure() {
+    watchSkips();
     if (repl) return repl;
     if (!starting) {
       starting = (async () => {
@@ -198,6 +213,12 @@ export function createEngine() {
     waveform(buf) { const s = safe; if (!s || s.on === null) return false; s.meter.getFloatTimeDomainData(buf); return true; },
     limiterOn: () => getPrefs().safeOutput !== false,
     // how many times the speakers ran dry since the page loaded (the computer could not keep up). Chrome-based browsers only; null elsewhere.
+    lateNotes: () => ({ ...late }),
+    // how the audio side looks right now, for the health line in Settings
+    audioInfo() {
+      try { const c = getAudioContext(); return { state: c.state, sampleRate: c.sampleRate, baseLatencyMs: Math.round((c.baseLatency || 0) * 1000), outputLatencyMs: Math.round((c.outputLatency || 0) * 1000), seconds: Math.round(c.currentTime) }; }
+      catch { return null; }
+    },
     underruns() { try { const n = getAudioContext().playbackStats?.underrunEvents; return Number.isFinite(n) ? n : null; } catch { return null; } },
     isReady: () => !!repl,
     async preview({ id, kind, bank, pitched }) {
