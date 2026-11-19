@@ -9,7 +9,7 @@ const LENGTHS = [['0', 'until I press stop'], ['4', '4 bars'], ['8', '8 bars'], 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // deps: { h, showModal, closeModal, getTempo() -> { bpm, beatsPerBar }, onAdd(take, grid) }
-export async function openRecorder({ h, showModal, closeModal, getTempo, onAdd, onClose }) {
+export async function openRecorder({ h, showModal, closeModal, getTempo, onAdd, onClose, addLabel = 'Add to the board' }) {
   const { bpm, beatsPerBar } = getTempo();
   const beatMs = 60000 / bpm;
   let rec = null, ctx = null, midi = null, stopListen = () => {}, source = KB, octave = 4, state = 'idle', clickTimer = 0, raf = 0, zeroPerf = 0, take = null, endTimer = 0, closed = false;
@@ -21,7 +21,7 @@ export async function openRecorder({ h, showModal, closeModal, getTempo, onAdd, 
   const len = h('select', { class: 'sel', id: 'rec-length', 'aria-label': 'How long to record' }, LENGTHS.map(([v, l]) => h('option', { value: v }, l)));
   const countIn = h('input', { type: 'checkbox', id: 'rec-countin', checked: true }), metro = h('input', { type: 'checkbox', id: 'rec-metro', checked: true });
   const canvas = h('canvas', { class: 'rec-roll', width: 760, height: 150, role: 'img', 'aria-label': 'The notes recorded so far' });
-  const goBtn = h('button', { class: 'btn', id: 'rec-go' }, '● Record'), addBtn = h('button', { class: 'btn', id: 'rec-add', disabled: true }, 'Add to the board'), closeBtn = h('button', { class: 'btn ghost', id: 'rec-close' }, 'Close');
+  const goBtn = h('button', { class: 'btn', id: 'rec-go' }, '● Record'), addBtn = h('button', { class: 'btn', id: 'rec-add', disabled: true }, addLabel), closeBtn = h('button', { class: 'btn ghost', id: 'rec-close' }, 'Close');
   const row = (label, ...kids) => h('label', { class: 'field rec-field' }, h('span', {}, label), ...kids);
   const body = h('div', { class: 'rec' },
     h('p', { class: 'imp-hint' }, `Tempo ${Math.round(bpm * 10) / 10} BPM, ${beatsPerBar} beats a bar (the Output module's tempo). A click counts you in. Play, then press Stop.`),
@@ -112,7 +112,7 @@ export async function openRecorder({ h, showModal, closeModal, getTempo, onAdd, 
     take = rec.stop(nowMs()); rec = null; state = 'idle'; goBtn.textContent = '● Record again'; src.disabled = false; len.disabled = false;
     const r = take.events.length ? takeToPattern(take, { grid: Number(snap.value) }) : null;
     addBtn.disabled = !r;
-    status.textContent = r ? `${take.events.length} note${take.events.length === 1 ? '' : 's'} over ${r.bars} bar${r.bars === 1 ? '' : 's'}. Add them to the board, or record again.` : 'No notes were played. Press Record and try again.';
+    status.textContent = r ? `${take.events.length} note${take.events.length === 1 ? '' : 's'} over ${r.bars} bar${r.bars === 1 ? '' : 's'}. Press "${addLabel}", or record again.` : 'No notes were played. Press Record and try again.';
   };
   goBtn.addEventListener('click', () => (state === 'idle' ? begin() : stop()));
   addBtn.addEventListener('click', () => { if (take?.events.length) { onAdd(take, Number(snap.value)); closeBtn.click(); } });

@@ -93,6 +93,11 @@ export function cleanParams(type, raw) {
     const st = Array.isArray(src.strips) ? src.strips.slice(0, 6) : [];
     out.strips = Array.from({ length: 6 }, (_, i) => { const s = st[i] || {}; return { vol: num(s.vol, 0, 2, 1), pan: num(s.pan, 0, 1, 0.5), mute: s.mute === true, solo: s.solo === true }; });
   }
+  if (def.data?.take) {   // a recording: notes with start and length in beats, kept to sensible sizes
+    const evs = (arr) => (Array.isArray(arr) ? arr.slice(0, 2000) : []).filter((e) => e && isNum(e.t) && isNum(e.d) && isNum(e.n)).map((e) => ({ t: Math.round(clamp(e.t, 0, 4096) * 1000) / 1000, d: Math.round(clamp(e.d, 0.05, 4096) * 1000) / 1000, n: int(e.n, 0, 127, 60), v: Math.round(num(e.v, 0, 1, 0.8) * 100) / 100 }));
+    out.events = evs(src.events); out.bpm = num(src.bpm, 20, 300, 120); out.beats = int(src.beats, 1, 12, 4);
+    out.versions = (Array.isArray(src.versions) ? src.versions.slice(0, 5) : []).filter((v) => v && typeof v === 'object').map((v) => ({ at: num(v.at, 0, 9e15, 0), bpm: num(v.bpm, 20, 300, 120), beats: int(v.beats, 1, 12, 4), events: evs(v.events) }));
+  }
   if (def.data?.harmonics) {
     const arr = Array.isArray(src.partials) ? src.partials : [];
     out.partials = Array.from({ length: 16 }, (_, i) => num(arr[i], 0, 1, dflt.partials[i] ?? 0));

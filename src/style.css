@@ -1067,3 +1067,17 @@ html, body { overscroll-behavior: none; }
 .rec-status { min-height: 18px; font: 500 12px var(--mono, monospace); color: #a9c7c4; }
 
 .menu-empty.health { white-space: pre-wrap; font: 500 11px var(--mono, monospace); margin: 0 0 4px; }
+
+/* Note Pattern: notes and velocity fold to one line */
+.field > .collwrap { position: relative; flex: 1 1 0; width: auto; min-width: 0; display: block; }
+.collwrap .txt { width: 100%; box-sizing: border-box; padding-right: 22px; }
+.txt.wrapbox.collapsible:not(.open) { height: 24px !important; white-space: nowrap; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, #000 82%, transparent); mask-image: linear-gradient(90deg, #000 82%, transparent); }
+.txt-toggle { position: absolute; right: 2px; top: 1px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #7f9490; font: 600 13px/1 var(--mono, monospace); cursor: pointer; }
+.txt-toggle:hover { color: #d6efec; background: #1b242d; }
+.txt-toggle.on { transform: rotate(180deg); color: #d6efec; }
+/* Take */
+.takewrap { padding: 2px 0 4px; }
+.takecanvas { width: 100%; height: auto; display: block; border: 1px solid #27313b; border-radius: 6px; }
+.takeinfo { padding: 4px 2px 2px; font: 600 11px var(--mono, monospace); color: #7fa6a2; }
+.takerow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0; }
+.takerow .takeolder { flex: 1 1 130px; min-width: 0; }

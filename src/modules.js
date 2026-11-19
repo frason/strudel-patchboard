@@ -104,6 +104,14 @@ export const MODULES = {
     ],
     data: { cells: true },
   },
+  take: {
+    title: 'Take', cat: 'sequencer', out: 'notes', data: { take: true },
+    blurb: 'A recording of you playing a keyboard. It keeps your notes exactly (when each started, how long it lasted, how hard you pressed), and writes them as a pattern snapped to the grid you choose. Press Re-record to play it again; the take you replace is kept under Earlier takes, so you can go back to it. Plug it into an Instrument.',
+    params: [
+      { key: 'name', label: 'name', kind: 'text', def: 'Take' },
+      { key: 'grid', label: 'snap to', kind: 'select', def: 4, options: [[4, '16ths'], [2, '8ths'], [12, '16ths and triplets']], num: true, tip: 'how finely your timing is snapped: 8ths are tidier, 16ths keep more of how you played' },
+    ],
+  },
   hitpattern: {
     title: 'Hit Pattern', cat: 'sequencer', out: 'trigger', data: { hitstrip: true },
     blurb: 'A rhythm written as text, for patterns too long or detailed for the Rhythm Sequencer: x is a hit and ~ a rest, with weights, repeats and brackets ("x ~ x*2 [x x] ~@3", or "<x [x x]>" to alternate by cycle). It has no pitch and no sound: plug it into the rhythm input of a Sample, or of an Instrument to put the rhythm on a melody. Code that spells out a long rhythm lands here when it does not fit the Rhythm Sequencer.',
@@ -111,10 +119,10 @@ export const MODULES = {
   },
   notetext: {
     title: 'Note Pattern', cat: 'sequencer', out: 'notes', data: { noteroll: true },
-    blurb: 'A melody written as text, for tunes too long or too detailed for the step grid: note("c4@3 e4 ~ [g3,b3]@2"). Each word is a step, @3 holds a note for 3 steps, ~ is a rest and [a,b,c] plays a chord. The loudness box takes a pattern with exactly the same steps ("0.8@3 0.5 ~ 0.7@2"). Code that spells out a long melody lands here when it does not fit the Melody Sequencer.',
+    blurb: 'A melody written as text, for tunes too long or too detailed for the step grid: note("c4@3 e4 ~ [g3,b3]@2"). Each word is a step, @3 holds a note for 3 steps, ~ is a rest and [a,b,c] plays a chord. The velocity box (how hard each note is played) takes a pattern with exactly the same steps ("0.8@3 0.5 ~ 0.7@2"). Code that spells out a long melody lands here when it does not fit the Melody Sequencer.',
     params: [
-      { key: 'text', label: 'notes', kind: 'text', wrap: true, def: 'c3 e3 g3 c4' },
-      { key: 'vel', label: 'loudness', kind: 'text', wrap: true, def: '', tip: 'optional: a pattern of 0 to 1 with the same steps as the notes' },
+      { key: 'text', label: 'notes', kind: 'text', wrap: true, collapse: true, def: 'c3 e3 g3 c4' },
+      { key: 'vel', label: 'velocity', kind: 'text', wrap: true, collapse: true, def: '', tip: 'optional: how hard each note is played, 0 to 1, with exactly the same steps as the notes' },
     ],
   },
   randnotes: {
@@ -672,7 +680,7 @@ export const CATEGORIES = [
 // the Write section of the module list, in small groups: what each one is for
 export const PALETTE_GROUPS = {
   sequencer: [
-    ['Melody', ['melody', 'notetext', 'randnotes']],
+    ['Melody', ['melody', 'notetext', 'take', 'randnotes']],
     ['Rhythm', ['rhythm', 'hitpattern', 'randrhythm']],
     ['Harmony', ['chords', 'key']],
   ],
@@ -696,6 +704,7 @@ export function defaultParams(type) {
   for (const s of def.params) p[s.key] = s.def;
   if (def.data?.tracks) p.tracks = defaultTracks(p.steps);
   if (def.data?.harmonics) p.partials = HARM_PRESETS.saw.bars.slice();
+  if (def.data?.take) { p.events = []; p.bpm = 120; p.beats = 4; p.versions = []; }
   if (def.data?.arrange) p.lens = [4, 4, 4, 4, 4, 4];
   if (def.data?.mixer) p.strips = Array.from({ length: 6 }, () => ({ vol: 1, pan: 0.5, mute: false, solo: false }));
   if (def.data?.cells) {
@@ -867,7 +876,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
-  ...['melody', 'notetext', 'rhythm', 'hitpattern', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm', 'codesource'].map((t) => [t, 'silence']),
+  ...['melody', 'notetext', 'rhythm', 'hitpattern', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm', 'codesource', 'take'].map((t) => [t, 'silence']),
   ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes', 'code', 'harmonics'].map((t) => [t, 'bypass']),
 ]);
 

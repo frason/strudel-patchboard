@@ -12,8 +12,10 @@ import { FXPICS } from './fxpics.js';
 import { ROLLS } from './rollview.js';
 import { CONVERTERS } from './convert.js';
 import { HARMPICS } from './harmpic.js';
+import { TAKEPICS } from './takepic.js';
+const openText = new Set();   // text boxes the person pinned open (a long text otherwise folds to one line)
 const autosize = (ta) => { ta.style.height = 'auto'; if (ta.scrollHeight) ta.style.height = ta.scrollHeight + 2 + 'px'; };   // a text box that grows with its lines
-const PICS = { ...FXPICS, ...ROLLS, ...HARMPICS };   // every small picture a module can show, by the flag it sets in its data
+const PICS = { ...FXPICS, ...ROLLS, ...HARMPICS, ...TAKEPICS };   // every small picture a module can show, by the flag it sets in its data
 import { soundIconSvg, hasSoundIcon, soundGlyph } from './soundicons.js';
 import { icon } from './icons.js';
 import { buildFxRack } from './fxrack.js';
@@ -1273,6 +1275,18 @@ export function createBoard(root, store, hooks) {
           : h('input', { class: 'txt', type: 'text', spellcheck: 'false', oninput: (e) => hooks.setParam(node.id, spec.key, e.target.value) });
         inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (spec.wrap && e.key === 'Enter') e.preventDefault(); });
         if (spec.wrap && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => autosize(inp)).observe(inp);
+        // collapse: a long text shows as one line and opens to its full size when you click into it or press the arrow
+        let collapseBtn = null;
+        if (spec.collapse) {
+          const pin = `${node.id}:${spec.key}`;
+          inp.classList.add('collapsible'); if (openText.has(pin)) inp.classList.add('open');
+          inp.addEventListener('focus', () => { inp.classList.add('open'); autosize(inp); });
+          inp.addEventListener('blur', () => { if (!openText.has(pin)) { inp.classList.remove('open'); autosize(inp); } });
+          collapseBtn = h('button', { type: 'button', class: 'txt-toggle', title: 'Show the whole text, or fold it to one line', 'aria-label': 'Show or fold the text' }, '⌄');
+          collapseBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+          collapseBtn.addEventListener('click', (e) => { e.preventDefault(); if (openText.has(pin)) { openText.delete(pin); inp.classList.remove('open'); } else { openText.add(pin); inp.classList.add('open'); } collapseBtn.classList.toggle('on', openText.has(pin)); autosize(inp); });
+          collapseBtn.classList.toggle('on', openText.has(pin));
+        }
         // A Sample's pattern box lights up the word that is playing: a see-through layer over the text, with a mark where each sound sounds now
         let hlWrap = null;
         if (node.type === 'sample' && spec.key === 'name') {
@@ -1296,7 +1310,7 @@ export function createBoard(root, store, hooks) {
             flash(from, to, ms) { const r = { from, to }; active.add(r); paint(); setTimeout(() => { active.delete(r); paint(); }, ms); },
           };
         }
-        const wrap = h('label', { class: 'field' }, h('span', {}, spec.label), hlWrap || inp);
+        const wrap = h('label', { class: 'field' }, h('span', {}, spec.label), collapseBtn ? h('span', { class: 'collwrap' }, inp, collapseBtn) : (hlWrap || inp));
         wrap.addEventListener('mouseenter', () => hooks.hover?.({ node: node.id, key: spec.key }));
         wrap.addEventListener('mouseleave', () => hooks.hover?.({ node: node.id }));
         ctl.inputs[spec.key] = inp;

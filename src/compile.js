@@ -4,6 +4,7 @@
 import { parseArrangeOrder, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas } from './modules.js';
 import { chordSymbol } from './chords.js';
 import { guardCalls, guardCode } from './guard.js';
+import { takeToPattern } from './takecode.js';
 import { nodeById, wiresInto, outType, effectiveKey, scopeId } from './graph.js';
 const FM_WAVES = new Set(['sine', 'sawtooth', 'square', 'triangle', 'supersaw', 'pulse', 'sin', 'saw', 'sqr', 'tri', 'z_sine', 'z_sawtooth', 'z_square', 'z_triangle']);   // oscillators FM can modulate
 
@@ -534,6 +535,15 @@ export function compile(g) {
         if (!up) return silent(n, 'sound');
         const off = def.params.filter((s) => s.call && !p[s.key + '_on']).map((s) => s.key);
         return chain(up, paramCalls(n, depth, off), depth, inline);
+      }
+      case 'take': {   // a recording, written as a pattern (see takecode.js)
+        const ev = Array.isArray(p.events) ? p.events : [];
+        if (!ev.length) return silent(n, 'recording');
+        const r = takeToPattern({ bpm: p.bpm, beatsPerBar: p.beats, events: ev }, { grid: Number(p.grid) || 4 });
+        const say = `Your recording "${p.name || 'Take'}": ${r.notes} note${r.notes === 1 ? '' : 's'} over ${r.bars} bar${r.bars === 1 ? '' : 's'}, snapped to the grid and written as a pattern.`;
+        // the quoted notes are mini-notation: written as their own pieces, so the code panel lights up each note as it plays (like a Note Pattern)
+        const tag = S(`/* Take "${String(p.name || 'Take').replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 40)}" snap ${Number(p.grid) || 4} bpm ${Number(p.bpm) || 120} beats ${Number(p.beats) || 4} bars ${r.bars} */ `, { ...m, role: 'comment', note: 'A comment that says this pattern is a recording from a Take module, so pasting the code back brings the Take back.' });
+        return [tag, ...r.pattern.split(/("(?:[^"\\]|\\.)*")/).filter((x) => x !== '').map((part) => S(part, part.startsWith('"') ? { ...m, role: 'mini', note: say } : { ...m, role: 'fn', note: say }))];
       }
       case 'harmonics': {   // the loudness of each harmonic: .partials([1, 0.5, 0.33, ...])
         const up = input(n, 'in', depth, inline);

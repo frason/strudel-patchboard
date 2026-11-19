@@ -25,8 +25,8 @@ import { LESSONS } from './starters.js';
 import { patternToDrums } from './todrums.js';
 import { CONVERTERS } from './convert.js';
 import { openRecorder } from './recordui.js';
-import { takeToCode } from './takecode.js';
 import { mergeGraph } from './recorder.js';
+import { cleanParams } from './validate.js';
 import { getAI, setAI, clearAI, consumeAiNotice, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
 import { defaultParams, FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
 import { effectiveKey, makeNode, nodeById, wiresFrom, wiresInto, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
@@ -643,6 +643,32 @@ const hooks = {
     }, { label: 'convert to Drum Machine' });
     toast(`Now a Drum Machine: ${r.tracks.length} rows, ${r.steps} steps.${r.alternates ? ' The first cycle of the pattern was used.' : ''}${lost.length ? ` The Sample's ${lost.join(', ')} setting${lost.length > 1 ? 's' : ''} had no place on a Drum Machine.` : ''}`, [undoAction], 9000);
   },
+  recordTake(id) { openRecord(id); },
+  // the notes of a Take after a click or drag on its roll (one undo step for a whole drag)
+  editTake(id, events) {
+    store.update((g) => {
+      const n = nodeById(g, id); if (!n || n.type !== 'take') return;
+      n.params.events = cleanParams('take', { ...n.params, events }).events;
+    }, { coalesce: 'take:' + id, label: 'edit a take' });
+  },
+  // a new recording for a Take: the notes it had are kept as an earlier take (the last five), so nothing you played is lost
+  setTake(id, take, grid) {
+    store.update((g) => {
+      const n = nodeById(g, id); if (!n || n.type !== 'take') return;
+      const old = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, events: n.params.events || [] };
+      const versions = old.events.length ? [old, ...(n.params.versions || [])] : (n.params.versions || []);
+      Object.assign(n.params, cleanParams('take', { ...n.params, events: take.events, bpm: take.bpm, beats: take.beatsPerBar, grid: grid || n.params.grid, versions: versions.slice(0, 5) }));
+    }, { label: 're-record a take' });
+    toast('Take replaced. The one before is under Earlier takes.', [undoAction], 5000);
+  },
+  restoreTake(id, i) {
+    store.update((g) => {
+      const n = nodeById(g, id), v = n?.params.versions?.[i]; if (!n || !v) return;
+      const cur = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, events: n.params.events || [] }, rest = n.params.versions.filter((_, k) => k !== i);
+      Object.assign(n.params, cleanParams('take', { ...n.params, events: v.events, bpm: v.bpm, beats: v.beats, versions: (cur.events.length ? [cur, ...rest] : rest).slice(0, 5) }));
+    }, { label: 'go back to an earlier take' });
+    toast('Earlier take restored. The one you had is kept too.', [undoAction], 4000);
+  },
   convertSeq(id) {   // Melody Sequencer <-> Note Pattern, Rhythm Sequencer <-> Hit Pattern
     const n = nodeById(store.graph, id), cv = n && CONVERTERS[n.type];
     if (!cv) return;
@@ -818,6 +844,9 @@ function liveSlider() {
   }
 }
 store.subscribe(liveSlider);
+// the browser can refuse to save (its storage is full, or blocked): say so, because a refresh would lose the work
+let lastSaveWarn = 0;
+store.onSave((ok) => { if (!ok && Date.now() - lastSaveWarn > 300000) { lastSaveWarn = Date.now(); toast('This board could not be saved: the browser\'s storage is full or blocked. Export it now to keep your work.', [{ label: 'Export', fn: () => exportBtn.click() }], 25000); } });
 
 // ---------- visuals from real events ----------
 function segmentsAt(loc) {
@@ -1163,19 +1192,25 @@ function rebuildFromCode() {
       h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel')));
   showModal('Rebuild this board from its code?', body);
 }
-// Record from a MIDI keyboard (or the computer keyboard) and add the notes to the board as modules
-function openRecord() {
-  const out = store.graph.nodes.find((n) => n.type === 'output');
+// Record from a MIDI keyboard (or the computer keyboard). A new recording becomes a Take module (plugged into an Instrument); with replaceId it replaces that Take's notes,
+// and the one it replaces is kept under Earlier takes.
+function openRecord(replaceId = null) {
+  const out = store.graph.nodes.find((n) => n.type === 'output'), target = replaceId ? nodeById(store.graph, replaceId) : null;
   openRecorder({
     h, showModal, closeModal, onClose: (fn) => modalCloseHooks.push(fn),
+    addLabel: target ? 'Use this take' : 'Add to the board',
     getTempo: () => ({ bpm: Number(out?.params.bpm) || 120, beatsPerBar: Number(out?.params.beats) || 4 }),
     onAdd(take, grid) {
-      const r = takeToCode(take, { grid }), imp = importStrudel(r.code, { sounds: (name, bank) => soundsFor(bank || '').includes(name) });
-      if (imp.error) return toast('Could not add the take: ' + imp.error, [], 8000);
+      if (target) return hooks.setTake(replaceId, take, grid);
+      const names = new Set(store.graph.nodes.filter((n) => n.type === 'take').map((n) => n.params.name));
+      let k = 1; while (names.has('Take ' + k)) k++;
+      const t = makeNode('take', 0, 0, cleanParams('take', { name: 'Take ' + k, grid, bpm: take.bpm, beats: take.beatsPerBar, events: take.events, versions: [] }));
+      const sy = makeNode('synth', 0, 0, { wave: 'triangle' }), o = makeNode('output', 0, 0);
+      const g = { v: 1, nodes: [t, sy, o], wires: [{ id: uid('w'), from: { node: t.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: uid('w'), from: { node: sy.id, port: 'out' }, to: { node: o.id, port: 'in' } }] };
       let added = [];
-      store.update((g) => { added = mergeGraph(g, imp.graph); }, { label: 'add a recorded take' });
+      store.update((cur) => { added = mergeGraph(cur, g); }, { label: 'add a recorded take' });
       requestAnimationFrame(() => added[0] && board.reveal?.(added[0]));
-      toast(`Added your take: ${r.notes} note${r.notes === 1 ? '' : 's'} over ${r.bars} bar${r.bars === 1 ? '' : 's'}${r.lanes > 1 ? `, ${r.lanes} voices` : ''}.`, [undoAction], 7000);
+      toast(`Added "Take ${k}": ${take.events.length} note${take.events.length === 1 ? '' : 's'}. Press Re-record on it to play it again.`, [undoAction], 7000);
     },
   });
 }

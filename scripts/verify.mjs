@@ -1422,4 +1422,57 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   strum.noteOn(60, 0.8, 0); strum.noteOn(60, 0.8, 1000);   // the same key pressed again without a release
   check('Recording: pressing a note again before releasing it ends the first one', strum.stop(2000).events.length === 2);
 }
+
+// ---------- Take module ----------
+{
+  const { cleanParams } = await import('../src/validate.js');
+  const { takeToPattern } = await import('../src/takecode.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const { emptyGraph: eg, makeNode: mn } = await import('../src/graph.js');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const events = [{ t: 0, d: 1, n: 60, v: 0.8 }, { t: 1, d: 1, n: 64, v: 0.6 }, { t: 2, d: 2, n: 67, v: 1 }, { t: 2, d: 2, n: 72, v: 1 }, { t: 5, d: 0.5, n: 62, v: 0.7 }];
+  const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+  const tk = N('take', cleanParams('take', { name: 'Take 1', grid: 4, bpm: 120, beats: 4, events })), sy = N('synth', { wave: 'triangle' }), out = N('output');
+  W(tk, sy, 'in'); W(sy, out, 'in');
+  const code = compile(g).code;
+  const want = takeToPattern({ bpm: 120, beatsPerBar: 4, events }, { grid: 4 }).pattern;
+  check('Take: the module writes the recording as the same pattern takecode gives, with an instrument after it', code.includes(want) && /\.s\("triangle"\)/.test(code) && !gc(code));
+  const cres = compile(g), minis = cres.segments.filter((sg) => sg.node === tk.id && sg.role === 'mini');
+  check('Take: its notes are written as mini-notation pieces, so the code panel lights up each note as it plays', minis.length >= 1 && minis.every((sg) => /^"[^"]*"$/.test(cres.code.slice(sg.from, sg.to))) && cres.code.slice(minis[0].from, minis[0].to).startsWith('"'));
+  const played = (await evaluate(code, false)).queryArc(0, 2).filter((h) => h.hasOnset()).map((h) => h.value.note).sort();
+  check('Take: real Strudel plays all five notes of the recording in its two bars', played.length === 5 && ['c4', 'e4', 'g4', 'c5', 'd4'].every((n) => played.map(String).map((x) => x.toLowerCase()).includes(n)));
+  const bad = cleanParams('take', { events: [{ t: -5, d: 0, n: 300, v: 9 }, { t: 'x' }, null, { t: 1, d: 1, n: 60 }], bpm: 9999, beats: 0, versions: [{ events: [{ t: 0, d: 1, n: 60, v: 1 }] }, 'x'] });
+  check('Take: stored notes are always clean (start from 0, length above 0, note 0 to 127, loudness 0 to 1), the tempo is sane, and bad entries are dropped', bad.events.length === 2 && bad.events.every((e) => e.t >= 0 && e.d >= 0.05 && e.n >= 0 && e.n <= 127 && e.v >= 0 && e.v <= 1) && bad.bpm === 300 && bad.beats === 1 && bad.versions.length === 1 && bad.versions[0].events.length === 1);
+  const six = cleanParams('take', { events: [], versions: Array.from({ length: 9 }, () => ({ events: [{ t: 0, d: 1, n: 60 }] })) });
+  check('Take: at most five earlier takes are kept', six.versions.length === 5);
+  const empty = mn('take'), sy2 = mn('synth', 0, 0, { wave: 'triangle' }), o2 = mn('output'), g2 = eg(); g2.nodes.push(empty, sy2, o2);
+  g2.wires.push({ id: 'a', from: { node: empty.id, port: 'out' }, to: { node: sy2.id, port: 'in' } }, { id: 'b', from: { node: sy2.id, port: 'out' }, to: { node: o2.id, port: 'in' } });
+  check('Take: an empty take is silent and says so, instead of writing broken code', !compile(g2).code.includes('note(') && compile(g2).issues.some((i) => i.node === empty.id));
+  const rb = imp(code), rtk = rb.graph.nodes.find((n) => n.type === 'take');
+  check('Take: the code a Take writes imports back as a Take (name, snap, tempo kept), with nothing left out', !rb.error && rb.report.skipped.length === 0 && rtk && rtk.params.name === 'Take 1' && rtk.params.grid === 4 && rtk.params.bpm === 120 && !rb.graph.nodes.some((n) => n.type === 'notetext' || n.type === 'melody') && rb.graph.nodes.some((n) => n.type === 'synth'));
+  check('Take: code -> Take -> code gives the same code, and the notes land on the grid', compile(rb.graph).code === code && rtk.params.events.every((e) => Math.abs(e.t * 4 - Math.round(e.t * 4)) < 0.01));
+  // harder takes: chords, overlapping notes (several voices), sections (arrange), triplets
+  const rnd = (() => { let x = 7; return () => (x = (x * 16807) % 2147483647) / 2147483647; })();
+  const hard = [];
+  for (let k = 0; k < 40; k++) hard.push({ t: Math.floor(rnd() * 30 * 4) / 4, d: 0.25 + Math.floor(rnd() * 6) / 4, n: 48 + Math.floor(rnd() * 24), v: 0.8 });
+  for (const grid of [4, 2, 12]) {
+    const g3 = eg(), N3 = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g3.nodes.push(n); return n; }, W3 = (a, b, port) => g3.wires.push({ id: 'w' + g3.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+    const t3 = N3('take', cleanParams('take', { name: 'Long', grid, bpm: 100, beats: 4, events: hard })), s3 = N3('synth', { wave: 'sawtooth' }), o3 = N3('output'); W3(t3, s3, 'in'); W3(s3, o3, 'in');
+    const c3 = compile(g3).code, r3 = imp(c3), k3 = r3.graph.nodes.find((n) => n.type === 'take');
+    const sig = async (c) => (await evaluate(c, false)).queryArc(0, 12).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${h.value.note} ${h.value.velocity}`).sort().join('|');
+    const s0 = await sig(c3), s1 = await sig(compile(r3.graph).code);
+    check(`Take: a long take with chords and overlapping notes (snap ${grid}) imports so that it plays exactly the same notes: as a Take when it writes back identically, otherwise as modules (${/arrange/.test(c3) ? 'in sections' : 'one section'})`, r3.report.skipped.length === 0 && s0.length > 0 && s0 === s1 && (!k3 || compile(r3.graph).code === c3));
+  }
+  {   // a long tune that has to be written in sections (arrange)
+    const long = Array.from({ length: 1500 }, (_, i) => ({ t: i * 0.5, d: 0.5, n: 48 + ((i * 7) % 24), v: i % 3 ? 0.8 : 0.6 }));
+    const g4 = eg(), N4 = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g4.nodes.push(n); return n; }, W4 = (a, b, port) => g4.wires.push({ id: 'w' + g4.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+    const t4 = N4('take', cleanParams('take', { name: 'Long tune', grid: 4, bpm: 120, beats: 4, events: long })), s4 = N4('synth', { wave: 'triangle' }), o4 = N4('output'); W4(t4, s4, 'in'); W4(s4, o4, 'in');
+    const c4 = compile(g4).code, r4 = imp(c4), k4 = r4.graph.nodes.find((n) => n.type === 'take');
+    check('Take: a long recording written in sections (arrange) comes back as the same Take, with identical code', /arrange\(/.test(c4) && !!k4 && r4.report.skipped.length === 0 && compile(r4.graph).code === c4 && k4.params.events.length === 1500);
+  }
+  const edited = code.replace(/c4@\d+/, 'c4@2 d4');
+  check('Take: a pattern edited by hand (so it no longer has the shape a Take writes) stays a Note Pattern, not a wrong Take', imp(edited).graph.nodes.every((n) => n.type !== 'take') && imp(code.replace(/\/\* Take[^*]*\*\/ /, '')).graph.nodes.every((n) => n.type !== 'take'));
+  const { MODULES: MODS2 } = await import('../src/modules.js');
+  check('Note Pattern: the second text box is called velocity', MODS2.notetext.params.find((p) => p.key === 'vel').label === 'velocity' && MODS2.notetext.params.every((p) => p.collapse));
+}
 process.exit(failures ? 1 : 0);

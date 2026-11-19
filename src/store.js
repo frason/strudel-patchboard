@@ -27,7 +27,7 @@ export function createStore(initial) {
   let fresh = false;   // true from a replace() until the next change: the automatic tidy after a load can join that one undo step
   const subs = new Set();
   let autosaveTimer = null, lastSnapshotAt = 0, lastSnapshot = '';
-  let notices = [];
+  const saveSubs = new Set();   // told after every autosave whether it worked (the browser's storage can be full or blocked)
 
   const emit = (meta = {}) => subs.forEach((f) => f(graph, meta));
 
@@ -35,7 +35,8 @@ export function createStore(initial) {
     clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => {
       const json = JSON.stringify(graph);
-      lsSet(K.auto, graph);
+      const saved = lsSet(K.auto, graph);
+      saveSubs.forEach((f) => { try { f(saved); } catch { /* ignore */ } });
       const now = Date.now();
       if (json !== lastSnapshot && now - lastSnapshotAt > 4000) {
         const h = storage.history();
@@ -51,6 +52,7 @@ export function createStore(initial) {
     get canUndo() { return undo.length > 0; },
     get canRedo() { return redo.length > 0; },
     subscribe(f) { subs.add(f); return () => subs.delete(f); },
+    onSave(f) { saveSubs.add(f); return () => saveSubs.delete(f); },
     // mutate a draft copy; coalesce lets a knob drag or node drag count as one undo step
     update(fn, { coalesce = null, label = '' } = {}) {
       const draft = clone(graph);

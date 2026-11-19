@@ -7,6 +7,8 @@ import { MODULES, SCALES, makeCells, EVERY_FNS, SOMETIMES_FNS, NOTE_NAMES } from
 import { parseChord, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
 import { melodyToNotes } from './convert.js';
 import { guardCalls, guardCode } from './guard.js';
+import { cleanParams } from './validate.js';
+import { takeToPattern } from './takecode.js';
 
 class Skip extends Error {}
 
@@ -198,6 +200,70 @@ export function importStrudel(code, { sounds = null } = {}) {
   catch (e) { return { error: `This is not valid JavaScript, so Strudel could not run it either: ${e.message}` }; }
 
   // a /* Note Pattern */ or /* Hit Pattern */ comment right before a pattern string says which module wrote it (see compile.js)
+  // the comment written right before a node (only spaces between), or null
+  const commentBefore = (node) => { const c = node && comments.find((x) => x.type === 'Block' && x.end <= node.start && code.slice(x.end, node.start).trim() === ''); return c ? c.value : null; };
+  // A Take module writes its recording as a pattern with a comment in front: /* Take "Take 1" snap 4 bpm 120 beats 4 */ note("...").velocity("...").slow(2)
+  // Read the pattern back into the recording's notes. Only when it has exactly the shape a Take writes (so a pattern edited by hand stays a Note Pattern).
+  // Returns { params, used } (used = how many of the calls after the root belong to the pattern) or null.
+  const NOTE_W = /^(~|[a-g][#b]?-?\d|\[[a-g][#b]?-?\d(?:,[a-g][#b]?-?\d)*\])(?:@(\d+))?$/i, VEL_W = /^(~|\d*\.?\d+)(?:@(\d+))?$/;
+  const PC = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+  const midiOf = (w) => { const m = /^([a-g])([#b]?)(-?\d)$/i.exec(w); return m ? 12 * (Number(m[3]) + 1) + PC[m[1].toLowerCase()] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) : null; };
+  function readTake(expr, root, calls) {
+    const cm = commentBefore(expr), m = cm && /^\s*Take\s+"([^"]{0,40})"\s+snap\s+(\d+)\s+bpm\s+([\d.]+)\s+beats\s+(\d+)\s+bars\s+(\d+)\s*$/.exec(cm);
+    if (!m) return null;
+    const grid = Number(m[2]), bpm = Number(m[3]), bpb = Number(m[4]), totalBars = Number(m[5]);
+    if (![2, 4, 12].includes(grid) || !(bpm >= 20 && bpm <= 300) || !(bpb >= 1 && bpb <= 12) || !(totalBars >= 1 && totalBars <= 512)) return null;
+    const T = grid * bpb, events = [];
+    // One lane: note("names").velocity("loudness") written in weights. The weights are in whole steps of the grid divided by a common factor, so a lane of
+    // `bars` bars has T * bars / (its total weight) grid steps in each weight unit. Adds its notes; returns false when it is not a lane a Take writes.
+    const lane = (node, startBeat, bars) => {
+      const u = unwrap(node); if (u.root.type !== 'CallExpression' || rootName(u.root) !== 'note' || u.calls.length !== 1 || u.calls[0].name !== 'velocity') return false;
+      const names = str(u.root.arguments[0]), vels = str(u.calls[0].args[0]); if (names === null || vels === null) return false;
+      const nt = names.trim().split(/\s+/), vt = vels.trim().split(/\s+/); if (nt.length !== vt.length) return false;
+      const toks = []; let units = 0;
+      for (let i = 0; i < nt.length; i++) {
+        const a = NOTE_W.exec(nt[i]), b = VEL_W.exec(vt[i]); if (!a || !b) return false;
+        const w = a[2] === undefined ? 1 : Number(a[2]), wv = b[2] === undefined ? 1 : Number(b[2]); if (w !== wv || w < 1) return false;
+        if ((a[1] === '~') !== (b[1] === '~')) return false;
+        toks.push({ a: a[1], v: b[1], w, at: units }); units += w;
+      }
+      const per = (T * bars) / units; if (!Number.isInteger(per) || per < 1) return false;
+      for (const k of toks) {
+        if (k.a === '~') continue;
+        const v = Number(k.v); if (!(v >= 0 && v <= 1)) return false;
+        for (const nm of k.a.replace(/^\[|\]$/g, '').split(',')) { const n = midiOf(nm); if (n === null) return false; events.push({ t: startBeat + (k.at * per) / grid, d: (k.w * per) / grid, n, v }); }
+      }
+      return true;
+    };
+    let used = 0;
+    if (rootName(root) === 'note' && root.type === 'CallExpression') {
+      if (calls[0]?.name !== 'velocity' || !lane(calls[0].node, 0, totalBars)) return null;
+      if (totalBars > 1) { const sl = calls[1]; if (!sl || sl.name !== 'slow' || num(sl.args[0]) !== totalBars) return null; used = 2; } else used = 1;
+    } else if (rootName(root) === 'stack' && root.type === 'CallExpression') {
+      if (!root.arguments.length || !root.arguments.every((a) => lane(a, 0, totalBars))) return null;
+      if (totalBars > 1) { const sl = calls[0]; if (!sl || sl.name !== 'slow' || num(sl.args[0]) !== totalBars) return null; used = 1; }
+    } else if (rootName(root) === 'arrange' && root.type === 'CallExpression') {
+      let start = 0;
+      for (const a of root.arguments) {
+        if (a.type !== 'ArrayExpression' || a.elements.length !== 2) return null;
+        const nb = num(a.elements[0]); if (!Number.isInteger(nb) || nb < 1) return null;
+        const sec = unwrap(a.elements[1]); let node = a.elements[1], r = sec.root, cs = sec.calls;
+        if (r.type === 'Identifier' && r.name === 'silence' && !cs.length) { start += nb * bpb; continue; }
+        if (nb > 1) { const sl = cs[cs.length - 1]; if (!sl || sl.name !== 'slow' || num(sl.args[0]) !== nb) return null; node = sl.node.callee.object; r = unwrap(node).root; cs = unwrap(node).calls; }
+        if (rootName(r) === 'stack' && r.type === 'CallExpression' && !cs.length) { if (!r.arguments.length || !r.arguments.every((l) => lane(l, start, nb))) return null; }
+        else if (!lane(node, start, nb)) return null;
+        start += nb * bpb;
+      }
+      if (start !== totalBars * bpb) return null;
+    } else return null;
+    if (!events.length) return null;
+    const params = cleanParams('take', { name: m[1], grid, bpm, beats: bpb, events, versions: [] });
+    // only a Take when it writes back exactly the same pattern (notes that overlap can be dealt into voices differently the second time: then it stays a Note Pattern, which is exact)
+    const endNode = used ? calls[used - 1].node : root, norm = (x) => x.replace(/\s+/g, ' ').trim();
+    let regen = ''; try { regen = takeToPattern({ bpm, beatsPerBar: bpb, events: params.events }, { grid }).pattern; } catch { return null; }
+    if (norm(regen) !== norm(code.slice(root.start, endNode.end))) return null;
+    return { used, params };
+  }
   const tagged = (node, label) => !!node && comments.some((c) => c.type === 'Block' && c.value.trim() === label && c.end <= node.start && code.slice(c.end, node.start).trim() === '');
   const nodes = [], wires = [], keys = new Map(), vars = new Map();   // vars: names of patterns the file declares with const
   let wid = 0, stmtNo = 0, acidDefined = false;
@@ -391,7 +457,9 @@ export function importStrudel(code, { sounds = null } = {}) {
     let { root, calls } = unwrap(expr);
     for (let hop = 0; root.type === 'Identifier' && vars.has(root.name) && hop < 8; hop++) { const v = unwrap(vars.get(root.name)); root = v.root; calls = [...v.calls, ...calls]; }
     const name = rootName(root);
-    if (override === null && (name === 'note' || name === 'n' || name === 's' || name === 'sound') && root.type === 'CallExpression') {
+    const tk = override === null ? readTake(expr, root, calls) : null;   // a Take's own pattern: becomes a Take module again
+    if (tk) calls = calls.slice(tk.used);
+    if (!tk && override === null && (name === 'note' || name === 'n' || name === 's' || name === 'sound') && root.type === 'CallExpression') {
       const t0 = str(root.arguments[0]);
       const parts = t0 === null ? [] : splitTop(t0);
       if (parts.length > 1) {
@@ -406,7 +474,10 @@ export function importStrudel(code, { sounds = null } = {}) {
     const fxFor = (type) => { if (!S.fx.has(type)) S.fx.set(type, { type, params: {}, signals: [] }); return S.fx.get(type); };
 
     // root
-    if (name === 'n' && override === null && isRandNotes(root.arguments?.[0])) {
+    if (tk) {
+      S.root = add('take', tk.params, stmt); S.kind = 'notes';
+      S.instrument = add('synth', { wave: 'triangle' }, stmt); implicitSynths.add(S.instrument); S.sources.push(S.instrument);
+    } else if (name === 'n' && override === null && isRandNotes(root.arguments?.[0])) {
       const rn = root.arguments[0], K = num(rn.callee.object.arguments[0]), St = num(rn.arguments[0]);
       const sc = calls.find((c) => c.name === 'scale');
       if (K === null || St === null || !Number.isInteger(K) || !Number.isInteger(St) || K < 2 || K > 14 || St < 1 || St > 16) throw new Skip('irand(…).segment(…) with numbers outside 2–14 and 1–16');

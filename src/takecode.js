@@ -28,7 +28,7 @@ export function quantizeTake(take, { grid = 24, overlap } = {}) {
     g.notes.add(e.n); g.vel = Math.max(g.vel, Number.isFinite(e.v) ? Math.min(1, Math.max(0, e.v)) : 0.8);
     groups.set(key, g);
   }
-  const steps = [...groups.values()].map((g) => ({ s: g.s, dur: g.dur, notes: [...g.notes].sort((a, b) => a - b), vel: g.vel })).sort((a, b) => a.s - b.s || b.dur - a.dur);
+  const steps = [...groups.values()].map((g) => ({ s: g.s, dur: g.dur, notes: [...g.notes].sort((a, b) => a - b), vel: g.vel })).sort((a, b) => a.s - b.s || b.dur - a.dur || a.notes[0] - b.notes[0] || a.vel - b.vel);   // equal starts and lengths: lowest note first, so the same notes always give the same voices
   const lanes = []; let shortened = 0;
   for (const st of steps) {
     let placed = false;
