@@ -241,6 +241,12 @@ export const MODULES = {
     blurb: 'Slows a pattern down: slow(2) stretches it over two cycles.',
     params: [{ key: 'n', label: 'times', kind: 'knob', min: 0.25, max: 8, step: 0.25, def: 2, call: 'slow', always: true, wire: true }],
   },
+  notefilter: {
+    title: 'Note filter', cat: 'transform', out: 'through', data: { notefilter: true },
+    inputs: [{ id: 'in', type: ['notes'], label: 'notes', required: true }],
+    blurb: 'Lets only certain notes through (or everything except them): pick the notes on the little keyboard. A picked note counts in every octave. Use it to give one note its own sound: plug a Melody Sequencer or Note Pattern into two Instruments, put a Note filter in front of one of them set to "only these", and give that chain its own Harmonics, Reverb or Delay. It works when it is plugged straight into a Melody Sequencer or a Note Pattern with plain note names. A chord passes when any of its notes is picked.',
+    params: [{ key: 'mode', label: 'lets through', kind: 'select', def: 'only', options: [['only', 'only the picked notes'], ['except', 'everything except the picked notes']] }],
+  },
   rev: {
     title: 'Reverse', cat: 'transform', out: 'through',
     inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
@@ -386,8 +392,8 @@ export const MODULES = {
   harmonics: {
     title: 'Harmonics', cat: 'effect', out: 'sound', data: { harmonics: true },
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'Sets how loud each harmonic of the sound is. A note is a stack of harmonics: 1 is the note itself, 2 the octave above, 3 the octave and a fifth, 4 two octaves, and so on. Raise one bar and that overtone rings out; pull a bar to zero and it disappears. It works on the basic waves of an Instrument (sine, triangle, sawtooth, square), and writes .partials([...]). Choose "build from the bars only" to make a new wave out of nothing but the bars you set.',
-    params: [{ key: 'base', label: 'wave', kind: 'select', def: 'keep', options: [['keep', "keep the Instrument's wave"], ['user', 'build from the bars only']], tip: 'keep: shape the wave the Instrument plays. build: a new wave made only of the bars.' }],
+    blurb: 'Builds the sound from its harmonics. Switch to "Only some notes" to shape just certain notes (for example a bright 5th harmonic only on C and G): pick the notes on the little keyboard and draw their bars. Only the picked notes use the bars; every other note keeps the Instrument\'s own sound, untouched. That works when the Instrument is plugged straight into a Melody Sequencer or a Note Pattern. A note is a stack of harmonics: 1 is the note itself, 2 the octave above, 3 the octave and a fifth, 4 two octaves, and so on. Each bar is how loud that harmonic is: raise bar 3 and the fifth above the octave rings out; pull a bar to zero and it disappears. By default the wave is made from the bars alone, so what you hear is what you draw (the Instrument\'s own wave is replaced). The other choice filters the Instrument\'s wave: each bar then multiplies that wave\'s own harmonics, which only works on sawtooth, square and triangle. It writes .partials([...]).',
+    params: [{ key: 'base', label: 'wave', kind: 'select', def: 'user', options: [['user', 'made from the bars (hear exactly what you draw)'], ['keep', "filter the Instrument's wave (bars multiply its harmonics)"]], tip: 'made from the bars: the Instrument\'s wave is replaced by one built from these bars. filter: the bars multiply the harmonics the Instrument\'s wave already has (sawtooth, square or triangle only).' }],
   },
   reverb: {
     title: 'Reverb', cat: 'effect', out: 'sound', data: { reverbpic: true },
@@ -703,7 +709,8 @@ export function defaultParams(type) {
   const p = {};
   for (const s of def.params) p[s.key] = s.def;
   if (def.data?.tracks) p.tracks = defaultTracks(p.steps);
-  if (def.data?.harmonics) p.partials = HARM_PRESETS.saw.bars.slice();
+  if (def.data?.harmonics) { p.partials = HARM_PRESETS.saw.bars.slice(); p.accent = HARM_PRESETS.saw.bars.slice(); p.accentNotes = Array(12).fill(false); p.scope = 'all'; }
+  if (def.data?.notefilter) p.pcs = Array(12).fill(false);
   if (def.data?.take) { p.events = []; p.bpm = 120; p.beats = 4; p.versions = []; }
   if (def.data?.arrange) p.lens = [4, 4, 4, 4, 4, 4];
   if (def.data?.mixer) p.strips = Array.from({ length: 6 }, () => ({ vol: 1, pan: 0.5, mute: false, solo: false }));
@@ -877,7 +884,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
   ...['melody', 'notetext', 'rhythm', 'hitpattern', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm', 'codesource', 'take'].map((t) => [t, 'silence']),
-  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes', 'code', 'harmonics'].map((t) => [t, 'bypass']),
+  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes', 'code', 'harmonics', 'notefilter'].map((t) => [t, 'bypass']),
 ]);
 
 // FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.

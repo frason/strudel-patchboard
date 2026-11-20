@@ -10,7 +10,7 @@ import { createEngine } from './engine.js';
 import { createViews } from './views.js';
 import { icon } from './icons.js';
 import { presetCells } from './chords.js';
-import { getPrefs, setPref, onPrefs } from './prefs.js';
+import { getPrefs, setPref, onPrefs, DEFAULT_PREFS } from './prefs.js';
 import { loadCatalog, onCatalog, soundsFor, sampleItems, SAMPLE_CATS } from './catalog.js';
 import { INSTRUMENTS, CATEGORIES as INST_CATS } from './instruments.js';
 import { compile, EMPTY_NOTE } from './compile.js';
@@ -28,7 +28,7 @@ import { openRecorder } from './recordui.js';
 import { mergeGraph } from './recorder.js';
 import { cleanParams } from './validate.js';
 import { getAI, setAI, clearAI, consumeAiNotice, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
-import { defaultParams, FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
+import { defaultParams, FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, MUTE_KIND, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
 import { effectiveKey, makeNode, nodeById, wiresFrom, wiresInto, uid, validateShape, normalize, whyNot, clone, insertPlan } from './graph.js';
 
 // Link to this app's source code (the AGPL asks public copies to offer it). Fill in once the repository exists.
@@ -95,15 +95,27 @@ setInterval(() => {
   if (document.hidden) hiddenSince = now;
   else if (drift > 150 && now - hiddenSince > 2000) { stalls.push({ at: Date.now(), ms: Math.round(drift), playing: engine.playing }); if (stalls.length > 60) stalls.shift(); }
 }, 100);
+let clk0 = null;   // the audio clock against the page clock: they should run at the same speed
+setInterval(() => { if (clk0) return; const au = engine.audioInfo(); if (au && engine.playing) clk0 = { p: performance.now(), t: au.time }; }, 1000);
+// what this browser has stored for the page (it survives new sessions), and which settings differ from the defaults
+const storageLine = () => {
+  try {
+    const sizes = Object.keys(localStorage).filter((k) => k.startsWith('pb.')).map((k) => [k.slice(3), Math.round((localStorage.getItem(k) || '').length / 1024)]).sort((a, b) => b[1] - a[1]);
+    const total = sizes.reduce((t, x) => t + x[1], 0), prefs = getPrefs(), off = Object.entries(prefs).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(DEFAULT_PREFS[k])).map(([k, v]) => `${k}=${JSON.stringify(v)}`);
+    return `stored ${total} KB (${sizes.slice(0, 4).map(([k, n]) => `${k} ${n}`).join(', ')}) · settings changed: ${off.join(', ') || 'none'}`;
+  } catch { return 'stored: cannot read'; }
+};
 const healthText = () => {
   const au = engine.audioInfo(), ln = engine.lateNotes(), mins = Math.round((Date.now() - pageOpenedAt) / 60000), ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'less than a minute ago' : m + ' min ago'; };
   const playingStalls = stalls.filter((x) => x.playing), heap = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) + ' MB' : 'n/a';
   return [
     `page open ${mins >= 120 ? Math.round(mins / 60) + ' h' : mins + ' min'} · memory ${heap}`,
     au ? `audio ${au.state} · ${au.sampleRate} Hz · latency ${au.baseLatencyMs} ms (output ${au.outputLatencyMs} ms) · running ${au.seconds} s` : 'audio not started yet',
+    (au && clk0 && performance.now() - clk0.p > 10000 ? `audio clock ${(((au.time - clk0.t) / ((performance.now() - clk0.p) / 1000))).toFixed(3)}× the page clock (1.000 is right)` : null),
+    storageLine(),
     `notes skipped ${ln.count}${ln.count ? ' (last ' + ago(ln.at) + ')' : ''}`,
     `page stalls over 0.15 s: ${stalls.length}${stalls.length ? ', longest ' + Math.max(...stalls.map((x) => x.ms)) + ' ms, while playing ' + playingStalls.length + (playingStalls.length ? ' (last ' + ago(playingStalls[playingStalls.length - 1].at) + ')' : '') : ''}`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 };
 setInterval(() => {
   if (engine.playing && engine.peak() > 1.0) lastOver = Date.now();
@@ -609,6 +621,11 @@ const hooks = {
   },
   muteNodes(ids, muted) {
     store.update((g) => { for (const n of g.nodes) if (ids.includes(n.id) && MUTE_KIND[n.type]) { if (muted) n.muted = true; else delete n.muted; } }, { label: muted ? 'mute' : 'unmute' });
+  },
+  muteGroup(gid) {   // silence (or bring back) every sound and effect in a group with one click
+    const gr = (store.graph.groups || []).find((x) => x.id === gid); if (!gr) return;
+    const m = gr.nodes.map((id) => nodeById(store.graph, id)).filter((n) => n && MUTE_KIND[n.type]);
+    if (m.length) hooks.muteNodes(gr.nodes, !m.every((n) => n.muted));
   },
   alignNodes(ids, mode) {
     const sel = store.graph.nodes.filter((n) => ids.includes(n.id));

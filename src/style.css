@@ -1081,3 +1081,26 @@ html, body { overscroll-behavior: none; }
 .takeinfo { padding: 4px 2px 2px; font: 600 11px var(--mono, monospace); color: #7fa6a2; }
 .takerow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0; }
 .takerow .takeolder { flex: 1 1 130px; min-width: 0; }
+/* Harmonics: bars for all notes, or extra bars for picked notes only */
+.harm-seg { display: flex; gap: 4px; padding: 0 4px 6px; }
+.harm-seg .btn.on { background: #2b3a46; border-color: #d6efec; color: #d6efec; }
+.harm-keys { display: flex; flex-wrap: wrap; gap: 3px; padding: 0 4px 6px; }
+.harm-key { min-width: 26px; padding: 3px 4px; border: 1px solid #364250; border-radius: 4px; background: #e9eef0; color: #0b0f13; font: 600 10px var(--mono, monospace); cursor: pointer; }
+.harm-key.black { background: #11161b; color: #cfe3e0; }
+.harm-key.on { background: #e8a85a; border-color: #fff; color: #1c1206; }
+.harm-ghost { position: absolute; left: 0; right: 0; bottom: 0; border-top: 2px solid #8bd49c; background: rgba(139, 212, 156, .12); pointer-events: none; }
+.harm-bars.some .harm-fill { background: linear-gradient(#ffd27a, #e0902a); }
+.harm-hint { padding: 0 4px 4px; font: 500 11px var(--mono, monospace); color: #7f9490; }
+.harm-hint[hidden], .harm-keys[hidden] { display: none; }
+.harm-col.cut { background: repeating-linear-gradient(135deg, #131a21 0 4px, #1d2630 4px 8px); }
+.harm-col.cut .harm-fill { opacity: .45; }
+.harm-ghost { display: none; }
+
+.g-mute { display: inline-flex; align-items: center; }
+.g-mute.on { color: #ff8a7a; }
+.gframe.muted { border-color: #6a3a36; opacity: .85; }
+.fgroup.muted { opacity: .6; }
+.fgroup .n-mute.on { color: #ff8a7a; }
+.g-name { flex: 0 1 140px; min-width: 40px; }
+.g-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-btn { flex: none; }

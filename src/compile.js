@@ -1,7 +1,7 @@
 // Graph -> idiomatic Strudel code. Pure. The returned `code` string is exactly what gets evaluated.
 // Alongside the code we return `segments`: which character ranges belong to which module (and which knob / step),
 // which is how highlighting, hover and "who made this event" work without any second representation of the sound.
-import { parseArrangeOrder, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas } from './modules.js';
+import { parseArrangeOrder, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas, SCALES, NOTE_NAMES, noteRank } from './modules.js';
 import { chordSymbol } from './chords.js';
 import { guardCalls, guardCode } from './guard.js';
 import { takeToPattern } from './takecode.js';
@@ -22,6 +22,14 @@ function chain(base, calls, depth, inline) {
 
 const q = (s) => JSON.stringify(String(s));
 
+const modp = (a, b) => ((a % b) + b) % b;
+// scale degree -> note name, the way Strudel's scale("C3:major") reads it
+export function degreeName(key, d) {
+  const iv = SCALES[key.scale] || SCALES.major, rootPc = NOTE_NAMES.indexOf(String(key.root).toLowerCase()), abs = (rootPc < 0 ? 0 : rootPc) + iv[modp(d, iv.length)] + 12 * Math.floor(d / iv.length);
+  return NOTE_NAMES[modp(abs, 12)] + (3 + Math.floor(abs / 12));
+}
+
+
 // text of one step, with repeats ([..]*2) and brackets ([a b]) and length (@2). leaf() renders one leaf value.
 export function stepText(t, leaf) {
   if (t.rest) return '~';
@@ -33,6 +41,33 @@ export function stepText(t, leaf) {
 }
 
 // what an empty patch shows in the code panel: the board's own hint, not the person's text
+// How high the sound can go before the Instrument's low-pass filter (and any Filter module before a Harmonics module) takes it away:
+// the cutoff, the lowest note that plays (or C3 when it cannot be read) and the highest harmonic of that note below about one and a half times the cutoff.
+export function audibleLimit(g, n, picked = null) {
+  let cutoff = 20000, cur = n, synth = null;
+  for (let hop = 0; hop < 8 && cur; hop++) {
+    const w = wiresInto(g, cur.id, 'in')[0], src = w && nodeById(g, w.from.node);
+    if (!src) break;
+    if (src.type === 'synth') { synth = src; const lp = Number(src.params.lpf); if (lp > 0 && lp < cutoff && !wiresInto(g, src.id, 'p:lpf').length) cutoff = lp; break; }
+    if (src.type === 'filter' && src.params.type === 'lpf' && !wiresInto(g, src.id, 'p:cutoff').length) { const c = Number(src.params.cutoff); if (c > 0 && c < cutoff) cutoff = c; }
+    cur = src;
+  }
+  let lowestHz = 130.81, lowestPickedHz = null;
+  const w2 = synth && wiresInto(g, synth.id, 'in')[0], s2 = w2 && nodeById(g, w2.from.node);
+  if (s2 && (s2.type === 'melody' || s2.type === 'notetext')) {
+    let names = [];
+    if (s2.type === 'notetext') names = String(s2.params.text || '').match(/[a-g][#b]?-?\d/gi) || [];
+    else { const key = effectiveKey(g, s2); for (const c of s2.params.cells || []) for (const lf of [c, ...(c.sub || [])]) for (const x of cellNotes(lf, !!key)) names.push(key ? degreeName(key, x) : String(x)); }
+    const toMidi = (nm) => { const m = /^([a-g])([#b]?)(-?\d+)$/i.exec(nm); return m ? 12 * (Number(m[3]) + 1) + ({ c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 })[m[1].toLowerCase()] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) : null; };
+    const midis = names.map(toMidi).filter((x) => x !== null), pm = picked ? midis.filter((x) => picked.has(x % 12)) : [];
+    if (midis.length) lowestHz = 440 * 2 ** ((Math.min(...midis) - 69) / 12);
+    if (pm.length) lowestPickedHz = 440 * 2 ** ((Math.min(...pm) - 69) / 12);
+  }
+  void noteRank;
+  const upTo = (hz) => (cutoff >= 20000 ? 99 : Math.max(1, Math.floor((1.5 * cutoff) / hz)));
+  return { cutoff, lowestHz: Math.round(lowestHz * 10) / 10, maxHarmonic: upTo(lowestHz), pickedHz: lowestPickedHz && Math.round(lowestPickedHz * 10) / 10, maxHarmonicPicked: lowestPickedHz ? upTo(lowestPickedHz) : upTo(lowestHz) };
+}
+
 export const EMPTY_NOTE = '// Add an Output module and wire a sound into it';
 export function compile(g) {
   const issues = [];
@@ -150,6 +185,40 @@ export function compile(g) {
       i += (rest ? 1 : len) - 1;
     }
     return { tokens, wrap: mode === 'turns' ? ['<', '>'] : paceWrap(n.params) };
+  }
+
+  // ---- harmonics on some notes only ----
+  const pcOfName = (w) => { const m = /^([a-g])([#b]?)(-?\d+)?$/i.exec(String(w)); return m ? (({ c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 })[m[1].toLowerCase()] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) + 12) % 12 : -1; };
+  // the notes that feed a Harmonics module, when the pattern can be read from the module itself: Harmonics <- effects <- Instrument <- Melody Sequencer or Note Pattern, with nothing that moves notes in time in between
+  function accentSource(n) {
+    let cur = n;
+    for (let hop = 0; hop < 8; hop++) {
+      const w = wiresInto(g, cur.id, 'in')[0], src = w && nodeById(g, w.from.node);
+      if (!src) return { ok: false, why: 'nothing is plugged in' };
+      if (src.type === 'synth') {
+        if (wiresInto(g, src.id, 'rhythm').length) return { ok: false, why: 'a rhythm cable moves the notes' };
+        const w2 = wiresInto(g, src.id, 'in')[0], s2 = w2 && nodeById(g, w2.from.node);
+        if (!s2) return { ok: false, why: 'the Instrument has no notes' };
+        if (s2.type === 'melody' || s2.type === 'notetext') return { ok: true, node: s2 };
+        return { ok: false, why: `${MODULES[s2.type].title} sits between the notes and the Instrument` };
+      }
+      if (MODULES[src.type]?.cat !== 'effect' || src.type === 'orbit' || src.type === 'duck') return { ok: false, why: `${MODULES[src.type]?.title || 'a module'} sits between the Instrument and Harmonics` };
+      cur = src;
+    }
+    return { ok: false, why: 'too many modules in between' };
+  }
+  // the same steps as the notes, with `hi` where the note is one of the picked pitch classes (a chord counts when any of its notes is) and `lo` elsewhere; rests stay rests. null when that cannot be done.
+  function noteMask(srcNode, picked, hi, lo) {
+    const word = (names) => (names.some((nm) => picked.has(pcOfName(nm))) ? fmt(hi) : fmt(lo));
+    if (srcNode.type === 'melody') {
+      const key = effectiveKey(g, srcNode), { tokens, wrap } = stepTokens(srcNode, !!key);
+      const leaf = (lf) => { const ns = cellNotes(lf, !!key); if (!ns.length) return '~'; return word(key ? ns.map((d) => degreeName(key, d)) : ns.map(String)); };
+      return wrap[0] + tokens.map((t) => stepText(t, leaf)).join(' ') + wrap[1];
+    }
+    const text = String(srcNode.params.text || '');
+    if (/(^|[\s\[<,])-?\d/.test(text) || /[a-z]{2,}/i.test(text.replace(/[a-g][#b]?-?\d/gi, ''))) return null;   // numbers or other words: not plain note names
+    if (/,/.test(text.replace(/\[[a-g][#b]?-?\d(?:\s*,\s*[a-g][#b]?-?\d)+\]/gi, ''))) return null;   // stacks that are not a plain chord
+    return text.replace(/\[([a-g][#b]?-?\d(?:\s*,\s*[a-g][#b]?-?\d)+)\]|([a-g][#b]?-?\d)/gi, (m0, chord, one) => word(chord ? chord.split(',').map((x) => x.trim()) : [one]));
   }
 
   function seqString(n, tokens, wrap, text, extra) {
@@ -355,6 +424,16 @@ export function compile(g) {
         if (bad) { issues.push({ node: n.id, msg: 'Strudel Code left out: ' + bad }); return up; }
         return chain(up, [[S(t, { ...m, role: 'fn', note: 'Strudel code kept exactly as written: this module holds method calls that have no module of their own.' })]], depth, inline);
       }
+      case 'notefilter': {   // only some notes (or all but them): the same steps as the notes, high where a picked note plays, written as .mask("...")
+        const up = input(n, 'in', depth, inline);
+        if (!up) return silent(n, 'input');
+        const pk = new Set((Array.isArray(p.pcs) ? p.pcs : []).map((v, i) => (v ? i : -1)).filter((i) => i >= 0));
+        if (!pk.size) { issues.push({ node: n.id, msg: 'Note filter: no notes are picked, so every note passes. Pick the notes on the little keyboard.' }); return up; }
+        const w0 = wiresInto(g, n.id, 'in')[0], src0 = w0 && nodeById(g, w0.from.node);
+        const txt = src0 && (src0.type === 'melody' || src0.type === 'notetext') ? (p.mode === 'except' ? noteMask(src0, pk, 0, 1) : noteMask(src0, pk, 1, 0)) : null;
+        if (!txt) { issues.push({ node: n.id, msg: `Note filter: it needs to be plugged straight into a Melody Sequencer or a Note Pattern with plain note names${src0 && !['melody', 'notetext'].includes(src0.type) ? ` (${MODULES[src0.type]?.title || 'this module'} is in the way)` : ''}, so every note passes.` }); return up; }
+        return chain(up, [[S('.mask(', { ...m, role: 'fn', note: 'mask("1 0 1") keeps the notes where it says 1 and silences the others. Here it is 1 on the picked notes.' }), S(q(txt), { ...m, role: 'mini' }), S(')', m)]], depth, inline);
+      }
       case 'rev': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'input');
@@ -545,14 +624,42 @@ export function compile(g) {
         const tag = S(`/* Take "${String(p.name || 'Take').replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 40)}" snap ${Number(p.grid) || 4} bpm ${Number(p.bpm) || 120} beats ${Number(p.beats) || 4} bars ${r.bars} */ `, { ...m, role: 'comment', note: 'A comment that says this pattern is a recording from a Take module, so pasting the code back brings the Take back.' });
         return [tag, ...r.pattern.split(/("(?:[^"\\]|\\.)*")/).filter((x) => x !== '').map((part) => S(part, part.startsWith('"') ? { ...m, role: 'mini', note: say } : { ...m, role: 'fn', note: say }))];
       }
-      case 'harmonics': {   // the loudness of each harmonic: .partials([1, 0.5, 0.33, ...])
+      case 'harmonics': {   // the loudness of each harmonic: .partials([1, 0.5, 0.33, ...]), optionally louder only on some notes
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'sound');
-        const arr = (Array.isArray(p.partials) ? p.partials : []).slice(0, 16).map((v) => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 100) / 100);
-        let last = arr.length; while (last > 1 && arr[last - 1] === 0) last--;
+        const cl = (v) => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 100) / 100;
+        const arr = (Array.isArray(p.partials) ? p.partials : []).slice(0, 16).map(cl), acc = (Array.isArray(p.accent) ? p.accent : []).slice(0, 16).map(cl);
+        const picked = new Set((Array.isArray(p.accentNotes) ? p.accentNotes : []).map((v, i) => (v ? i : -1)).filter((i) => i >= 0));
+        // extra harmonics on some notes only: the bar of that harmonic becomes a pattern with the same steps as the notes, high where the note is one of the picked ones
+        let maskOf = null;
+        // "Only some notes": the picked notes use their own bars and every other note keeps the Instrument's own sound (its natural harmonics)
+        let instWave = null;
+        { let cur = n; for (let hop = 0; hop < 8 && cur; hop++) { const w = wiresInto(g, cur.id, 'in')[0], src = w && nodeById(g, w.from.node); if (!src) break; if (src.type === 'synth') { instWave = src.params.wave; break; } cur = src; } }
+        const natural = (k) => (p.base !== 'user' ? 1 : instWave === 'sawtooth' ? 1 / k : instWave === 'square' ? (k % 2 ? 1 / k : 0) : instWave === 'triangle' ? (k % 2 ? 1 / (k * k) : 0) : k === 1 ? 1 : 0);
+        const some = p.scope === 'some' && picked.size > 0;
+        if (p.scope === 'some' && !picked.size) issues.push({ node: n.id, msg: 'Harmonics: "Only some notes" is on but no notes are picked, so every note keeps the bars of All notes. Pick the notes on the little keyboard.' });
+        if (some) {
+          const src = accentSource(n);
+          maskOf = src && src.ok ? (hi, lo) => noteMask(src.node, picked, hi, lo) : null;
+          if (!maskOf || maskOf(1, 0) === null) { issues.push({ node: n.id, msg: `Harmonics: "only some notes" needs the Instrument plugged straight into a Melody Sequencer or a Note Pattern with plain note names${src && !src.ok ? ' (' + src.why + ')' : ''}, so the extra harmonics are left out.` }); maskOf = null; }
+        }
+        {   // a low-pass filter in front takes the high harmonics away: say so, because then the bars seem to do nothing
+          const lim = audibleLimit(g, n, picked.size ? picked : null), useAcc = !!maskOf;
+          const loud = (useAcc ? acc.map((v, i) => [i + 1, v, lim.maxHarmonicPicked, lim.pickedHz || lim.lowestHz]) : arr.map((v, i) => [i + 1, v, lim.maxHarmonic, lim.lowestHz])).filter(([k, v, mx]) => v >= 0.05 && k > mx);
+          if (lim.cutoff < 20000 && loud.length) { const ks = [...new Set(loud.map((x) => x[0]))].sort((a, b) => a - b); issues.push({ node: n.id, msg: `Harmonics: the filter before this module cuts at ${Math.round(lim.cutoff)} Hz, so harmonic${ks.length === 1 ? '' : 's'} ${ks.join(', ')} (about ${Math.round(Math.min(...loud.map((x) => x[2] * x[3])))} Hz and up on the notes it plays) will come out much quieter or not at all. Raise the Instrument's lpf to hear ${ks.length === 1 ? 'it' : 'them'}.` }); }
+        }
+        // "All notes": the bars as drawn. "Only some notes": [the picked notes' bar, the Instrument's own bar] for every harmonic
+        const pairs = some && maskOf ? Array.from({ length: 16 }, (_, i) => [acc[i] ?? 0, cl(natural(i + 1))]) : arr.map((v) => [v, v]);
+        let last = Math.max(pairs.length, 1); while (last > 1 && pairs[last - 1][0] === 0 && pairs[last - 1][1] === 0) last--;
+        const items = pairs.slice(0, last).map(([own, other]) => (own === other ? String(own) : JSON.stringify(maskOf(own, other))));
         const calls = [];
+        if (p.base !== 'user') {   // filtering only works on the basic waves of the Instrument before this module
+          let cur = n, wave = null;
+          for (let hop = 0; hop < 8 && cur; hop++) { const w = wiresInto(g, cur.id, 'in')[0], src = w && nodeById(g, w.from.node); if (!src) break; if (src.type === 'synth') { wave = src.params.wave; break; } cur = src; }
+          if (wave && !['sawtooth', 'square', 'triangle'].includes(wave)) issues.push({ node: n.id, msg: `Harmonics: filtering only works on a sawtooth, square or triangle wave, and this Instrument plays "${wave}", so you will hear no change. Choose "made from the bars" instead.` });
+        }
         if (p.base === 'user') calls.push([S('.s("user")', { ...m, role: 'knob', key: 'base', note: 'sound("user") makes a wave out of nothing but the harmonics listed in partials.' })]);
-        calls.push([S(`.partials([${arr.slice(0, last).join(', ')}])`, { ...m, role: 'knob', key: 'partials', note: 'partials([...]) is how loud each harmonic is: the first number is the note itself, the second the octave above, the third the octave and a fifth, and so on. A harmonic that is not listed is silent.' })]);
+        calls.push([S(`.partials([${items.join(', ')}])`, { ...m, role: 'knob', key: 'partials', note: 'partials([...]) is how loud each harmonic is: the first number is the note itself, the second the octave above, the third the octave and a fifth, and so on. A harmonic that is not listed is silent. A quoted list of numbers is a pattern with the same steps as the notes: that harmonic is louder only on the notes that were picked.' })]);
         return chain(up, calls, depth, inline);
       }
       case 'delay': case 'reverb': case 'distortion': case 'pan': case 'vibrato': case 'pulsewidth': case 'vowel': case 'djf': case 'lofi': case 'pitchenv': case 'fm': {
@@ -644,8 +751,10 @@ export function compile(g) {
     const masterCalls = [];
     const mk = (key, name, say) => { if (o.params[key] > 0) masterCalls.push(S(`.${name}(${fmt(o.params[key])})`, { node: o.id, role: 'knob', key, note: say(o.params[key]) })); };
     const volWired = numInput(o, MODULES.output.params.find((s) => s.key === 'mvol'), o.params.mvol, 0);
-    if (volWired) masterCalls.push(S('.postgain(', { node: o.id, role: 'knob', key: 'mvol', note: 'postgain(…) is the master volume, driven by a number cable, so it changes while playing.' }), ...volWired, S(')', { node: o.id, role: 'knob', key: 'mvol' }));
-    else if (o.params.mvol !== 1) masterCalls.push(S(`.postgain(${fmt(o.params.mvol)})`, { node: o.id, role: 'knob', key: 'mvol', note: `postgain(${fmt(o.params.mvol)}) is the master volume: it scales everything after all effects, so every part keeps its balance (1 = unchanged).` }));
+    // a Mixer sets .postgain() on each strip, and a second .postgain() would replace it, not multiply: with a Mixer the master volume is written as .mul(postgain(v))
+    const viaMul = g.nodes.some((x) => x.type === 'mixer'), pgOpen = viaMul ? '.mul(postgain(' : '.postgain(', pgClose = viaMul ? '))' : ')';
+    if (volWired) masterCalls.push(S(pgOpen, { node: o.id, role: 'knob', key: 'mvol', note: 'postgain(…) is the master volume, driven by a number cable, so it changes while playing.' }), ...volWired, S(pgClose, { node: o.id, role: 'knob', key: 'mvol' }));
+    else if (o.params.mvol !== 1) masterCalls.push(S(`${pgOpen}${fmt(o.params.mvol)}${pgClose}`, { node: o.id, role: 'knob', key: 'mvol', note: `${viaMul ? 'mul(postgain(' + fmt(o.params.mvol) + '))' : 'postgain(' + fmt(o.params.mvol) + ')'} is the master volume: it scales everything after all effects, so every part keeps its balance (1 = unchanged).${viaMul ? ' It multiplies, so the Mixer faders still count.' : ''}` }));
     mk('mphaser', 'phaser', (v) => `phaser(${fmt(v)}) on everything: all() applies it to every pattern.`);
     mk('mtrem', 'tremolo', (v) => `tremolo(${fmt(v)}) on everything.`);
     if (acidNode && !parts.some((x) => x.acidHeader)) parts.push(NL(0), NL(0), { ...S("register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9).lps(.2).lpd(.12))", { node: acidNode.id, role: 'fn', note: 'register() teaches Strudel a new method: acidenv(x) = a 100 Hz low-pass whose cutoff opens by x × 9 on each note (lpenv), holds at 20% (lps) and falls over 0.12 s (lpd).' }), acidHeader: true });

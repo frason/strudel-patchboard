@@ -73,7 +73,10 @@ function routeSafeOutput() {
 // iPhones mute Web Audio when the ring/silent switch is on silent, unless the page counts as playing media. Two ways to say so, both
 // started from a tap: the audio session type (Safari 16.4+), and a looping silent <audio> element (older iOS).
 let keepAlive = null;
+// Only phones and tablets have a silent switch to get around; on a computer the keep-alive <audio> element is one more thing for the browser to run.
+const isTouchApple = () => { try { return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); } catch { return false; } };
 function unlockAudioSession() {
+  if (!isTouchApple()) return;
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* not supported */ }
   try {
     if (!keepAlive) {
@@ -216,7 +219,7 @@ export function createEngine() {
     lateNotes: () => ({ ...late }),
     // how the audio side looks right now, for the health line in Settings
     audioInfo() {
-      try { const c = getAudioContext(); return { state: c.state, sampleRate: c.sampleRate, baseLatencyMs: Math.round((c.baseLatency || 0) * 1000), outputLatencyMs: Math.round((c.outputLatency || 0) * 1000), seconds: Math.round(c.currentTime) }; }
+      try { const c = getAudioContext(); return { state: c.state, sampleRate: c.sampleRate, baseLatencyMs: Math.round((c.baseLatency || 0) * 1000), outputLatencyMs: Math.round((c.outputLatency || 0) * 1000), time: c.currentTime, seconds: Math.round(c.currentTime) }; }
       catch { return null; }
     },
     underruns() { try { const n = getAudioContext().playbackStats?.underrunEvents; return Number.isFinite(n) ? n : null; } catch { return null; } },

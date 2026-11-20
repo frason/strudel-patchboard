@@ -678,6 +678,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       } catch (e) { if (e instanceof Skip) report.skipped.push({ line: v.line, text: '.velocity(…)', reason: e.message }); else if (e instanceof Unsupported) report.skipped.push({ line: v.line, text: '.velocity(…)', reason: e.message }); else throw e; }
     }
 
+    if (S.userWave && S.fx.has('harmonics')) S.fx.get('harmonics').params.base = 'user';   // .s("user") with .partials([...]): the wave is made from the bars
     // assemble the chain: root -> [key] -> transformers -> instrument -> effects -> views
     const seq = [];
     const needsFilter = S.filterTouched;
@@ -773,13 +774,15 @@ export function importStrudel(code, { sounds = null } = {}) {
     if (n === 'scale') { if (S.keyNode || S.randNode) return; throw new Skip('scale() on something that is not an n() pattern'); }
     if (n === 'partials' && a[0] && a[0].type === 'ArrayExpression' && a[0].elements.length >= 1 && a[0].elements.length <= 16 && a[0].elements.every((e) => e && num(e) !== null && num(e) >= 0 && num(e) <= 1) && S.sources.some((x) => x.type === 'synth')) {
       const vals = a[0].elements.map((e) => Math.round(num(e) * 100) / 100);
-      fxFor('harmonics').params.partials = Array.from({ length: 16 }, (_, i) => vals[i] ?? 0);   // a list shorter than 16: the rest are silent
+      const hf = fxFor('harmonics'); hf.params.partials = Array.from({ length: 16 }, (_, i) => vals[i] ?? 0);   // a list shorter than 16: the rest are silent
+      hf.params.base = 'keep';
       return;
     }
     if (n === 'voicing') return;
     if (n === 'mode' && S.root?.type === 'chords') { const t = str(a[0]); if (t && ['above:c3', 'above:c4', 'above:c5'].includes(t)) { S.root.params.register = t; return; } throw new Skip('this voicing mode'); }
     if (n === 'anchor' || n === 'dict' || n === 'offset' || n === 'octaves') throw new Skip(`${n}() voicing setting`);
     if (n === 'velocity' && S.melody) { const t = str(a[0]); if (t === null) throw new Skip('velocity with something other than a pattern string'); velocity.push({ text: t, line: c.prop.loc.start.line }); return; }
+    if ((n === 's' || n === 'sound') && str(a[0]) === 'user' && S.kind === 'notes') { S.userWave = true; return; }   // sound("user") builds the wave from .partials([...]): that is the Harmonics module
     if (n === 's' || n === 'sound') {
       const t = str(a[0]);
       if (t === null) throw new Skip('a sound name that is not a plain string');
@@ -1008,7 +1011,10 @@ export function importStrudel(code, { sounds = null } = {}) {
           if (!body) throw new Skip('all() with something other than x => x.effect()');
           const { root, calls } = unwrap(body);
           if (!(root.type === 'Identifier')) throw new Skip('all() with something other than x => x.effect()');
-          for (const c of calls) {
+          for (const c0 of calls) {
+            // .mul(postgain(v)) is the master volume written so that it multiplies the Mixer faders instead of replacing them
+            const mulPg = c0.name === 'mul' && c0.args[0]?.type === 'CallExpression' && c0.args[0].callee.type === 'Identifier' && c0.args[0].callee.name === 'postgain' && c0.args[0].arguments.length === 1;
+            const c = mulPg ? { name: 'postgain', args: c0.args[0].arguments } : c0;
             const v = num(c.args[0]);
             const key = { phaser: 'mphaser', tremolo: 'mtrem', postgain: 'mvol' }[c.name];
             if (key && v !== null) out.master[key] = v;

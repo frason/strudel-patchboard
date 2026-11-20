@@ -5,7 +5,7 @@
 // This does not sandbox anything. It is an allow-list for text the app itself generates, so a bug or a bad value upstream can not become code.
 import { parse } from 'acorn';
 
-const FUNCS = new Set(['setcpm', 'n', 'note', 's', 'chord', 'stack', 'cat', 'arrange', 'slider', 'irand', 'all']);   // all(x => x.postgain(..)) is how the Output module writes its master volume and effects
+const FUNCS = new Set(['setcpm', 'n', 'note', 's', 'chord', 'stack', 'cat', 'arrange', 'slider', 'irand', 'all', 'postgain']);   // all(x => x.postgain(..)) is how the Output module writes its master volume and effects
 const IDENTS = new Set(['rand', 'perlin', 'sine', 'saw', 'tri', 'square', 'isaw', 'cosine', 'silence', 'rev']);
 const METHODS = new Set(`acidenv analyze arp attack bank bpf bpq chord chorus coarse compressor crush decay degrade degradeBy delay delayfeedback delaytime detune distort djf duck duckattack duckdepth
 clip euclid every fast fit late legato swingBy fm fm11 fm12 fm13 fm14 fm2 fm20 fm22 fm23 fm24 fm3 fm30 fm31 fm33 fm34 fm4 fm40 fm41 fm42 fm44 fmattack fmattack2 fmattack3 fmattack4 fmdecay fmdecay2 fmdecay3 fmdecay4

@@ -1391,7 +1391,13 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const kept = imp('$: note("c3").s("sawtooth").partials([1, "<1 0>", 0.5])');
   check('Harmonics: a partials list with patterns inside is kept as written (a Strudel Code module), not guessed', kept.report.skipped.length === 0 && kept.graph.nodes.some((n) => n.type === 'code' && /partials/.test(n.params.code)));
   const dirty = cleanParams('harmonics', { partials: [2, -1, 'x', 0.5], base: 'nope' });
-  check('Harmonics: stored bars are always 16 numbers from 0 to 1', dirty.partials.length === 16 && dirty.partials.every((v) => typeof v === 'number' && v >= 0 && v <= 1) && dirty.partials[0] === 1 && dirty.partials[1] === 0 && dirty.base === 'keep');
+  check('Harmonics: stored bars are always 16 numbers from 0 to 1', dirty.partials.length === 16 && dirty.partials.every((v) => typeof v === 'number' && v >= 0 && v <= 1) && dirty.partials[0] === 1 && dirty.partials[1] === 0 && dirty.base === 'user');
+  check('Harmonics: by default the wave is made from the bars alone (.s("user")), and importing that code gives the same module back', /\.s\("user"\)/.test(code) && bh.params.base === 'user');
+  const filt = imp('$: note("c3 e3").s("sawtooth").partials([1, 0.5, 0.25])').graph.nodes.find((n) => n.type === 'harmonics');
+  check('Harmonics: .partials([...]) without .s("user") imports as "filter the Instrument\'s wave"', filt && filt.params.base === 'keep');
+  const gs = eg(), Ns = (ty, p = {}) => { const n = mn(ty, 0, 0, p); gs.nodes.push(n); return n; }, Ws = (a, b, port) => gs.wires.push({ id: 'w' + gs.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+  const m5 = Ns('melody'), s5 = Ns('synth', { wave: 'sine' }), h5 = Ns('harmonics', { base: 'keep' }), o5 = Ns('output'); Ws(m5, s5, 'in'); Ws(s5, h5, 'in'); Ws(h5, o5, 'in');
+  check('Harmonics: filtering a sine (or any wave that cannot be filtered) says so, instead of silently doing nothing', compile(gs).issues.some((i) => i.node === h5.id && /sine/.test(i.msg)));
   const sc = N('synth', { wave: 'sine' }), hu = N('harmonics', { base: 'user', partials: HARM_PRESETS.bell.bars.slice() }), m2 = N('melody'), o2 = N('output');
   W(m2, sc, 'in'); W(sc, hu, 'in'); W(hu, o2, 'in');
   check('Harmonics: "build from the bars only" writes .s("user") before the partials', /\.s\("user"\)\s*\.partials\(/.test(compile(g).code.replace(/\n\s*/g, '')) || /s\("user"\)/.test(compile(g).code));
@@ -1474,5 +1480,95 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Take: a pattern edited by hand (so it no longer has the shape a Take writes) stays a Note Pattern, not a wrong Take', imp(edited).graph.nodes.every((n) => n.type !== 'take') && imp(code.replace(/\/\* Take[^*]*\*\/ /, '')).graph.nodes.every((n) => n.type !== 'take'));
   const { MODULES: MODS2 } = await import('../src/modules.js');
   check('Note Pattern: the second text box is called velocity', MODS2.notetext.params.find((p) => p.key === 'vel').label === 'velocity' && MODS2.notetext.params.every((p) => p.collapse));
+}
+
+// ---------- Harmonics on some notes only ----------
+{
+  const { HARM_PRESETS: HP } = await import('../src/modules.js');
+  const { emptyGraph: eg, makeNode: mn } = await import('../src/graph.js');
+  const build = (srcType, srcParams, harmParams, between) => {
+    const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+    const src = N(srcType, srcParams), sy = N('synth', { wave: 'sawtooth' }), hm = N('harmonics', harmParams), o = N('output');
+    if (between) { const mid = N(between); W(src, mid, 'in'); W(mid, sy, 'in'); } else W(src, sy, 'in');
+    W(sy, hm, 'in'); W(hm, o, 'in');
+    return { g, hm };
+  };
+  const pcs = (...names) => { const a = Array(12).fill(false); const idx = { c: 0, 'c#': 1, d: 2, 'd#': 3, e: 4, f: 5, 'f#': 6, g: 7, 'g#': 8, a: 9, 'a#': 10, b: 11 }; names.forEach((n) => { a[idx[n]] = true; }); return a; };
+  const acc = HP.saw.bars.slice(); acc[2] = 1;   // the picked notes get a full 3rd harmonic
+  const harm = { base: 'user', scope: 'some', partials: HP.saw.bars.slice(), accent: acc, accentNotes: pcs('c', 'g') };
+  const notesOf = async (code) => (await evaluate(code, false)).queryArc(0, 1).filter((h) => h.hasOnset()).sort((a, b) => a.whole.begin - b.whole.begin).map((h) => [String(h.value.note).toLowerCase(), h.value.partials[2]]);
+  const cm = Array(8).fill(null).map(() => ({ n: null, d: null, len: 1, vel: 1 })); ['c3', 'e3', 'g3', 'b3'].forEach((n, i) => { cm[i * 2] = { n, d: null, len: 1, vel: 1 }; });
+  let b1 = build('melody', { steps: 8, scale: 'off', mode: 'steps', cells: cm }, harm), r1 = compile(b1.g);
+  check('Harmonics on some notes: the picked notes (C and G) use their own bars and the others keep the bars for all notes, for each note, in real Strudel', JSON.stringify(await notesOf(r1.code)) === JSON.stringify([['c3', 1], ['e3', 0.33], ['g3', 1], ['b3', 0.33]]) && !r1.issues.length);
+  const b2 = build('notetext', { text: 'c3 ~ [e3,g3] <b3 c4> g3@2' }, harm), r2 = compile(b2.g);
+  const got2 = await notesOf(r2.code);
+  check('Harmonics on some notes: works on a Note Pattern too (a chord counts when any note is picked; rests and <> are kept)', !r2.issues.length && got2.map((x) => x[1]).join() === '1,1,1,0.33,1' && got2.length === 5 && /"1 ~ 1 <0\.33 1> 1@2"/.test(r2.code));
+  const b3 = build('melody', { steps: 8, scale: 'off', mode: 'steps', cells: cm }, harm, 'slow'), r3 = compile(b3.g);
+  check('Harmonics on some notes: with a module that moves notes in time in between, the extra is left out and the board says why', r3.issues.some((i) => i.node === b3.hm.id && /sits between/.test(i.msg)) && !/"[0-9. ~<>]*"\]|\["/.test(r3.code.split('.partials(')[1] || ''));
+  const none = { ...harm, accentNotes: Array(12).fill(false) }, r4 = compile(build('melody', { steps: 8, scale: 'off', mode: 'steps', cells: cm }, none).g);
+  check('Harmonics on some notes: with no notes picked, the code is the plain partials list', !/\.partials\(\[[^\]]*"/.test(r4.code));
+  {   // the Instrument's low-pass filter takes the high harmonics away: the board says so
+    const acc6 = Array(16).fill(0); acc6[5] = 0.76;   // the picked notes use only a 6th harmonic
+    const mk = (lpf) => build('notetext', { text: 'c3 c3 g2 e3' }, { base: 'user', scope: 'some', partials: HP.saw.bars.slice(), accent: acc6, accentNotes: pcs('e') });
+    const withLpf = (lpf) => { const b = mk(lpf); b.g.nodes.find((n) => n.type === 'synth').params.lpf = lpf; return { ...b, res: compile(b.g) }; };
+    const dark = withLpf(460), open = withLpf(20000);
+    check('Harmonics: a low-pass filter at 460 Hz (which cuts the 6th harmonic of E3, near 990 Hz) is reported, and the same board with the filter open is not', dark.res.issues.some((i) => i.node === dark.hm.id && /cuts at 460 Hz/.test(i.msg) && /harmonics? 6\b|harmonics? [\d, ]*\b6\b/.test(i.msg)) && !open.res.issues.some((i) => /filter before/.test(i.msg)));
+    const { audibleLimit: al } = await import('../src/compile.js');
+    const lim = al(dark.g, dark.hm);
+    check('Harmonics: the audible limit follows the lowest note and the cutoff (G2 is the lowest note here, so harmonics up to about 7 get through at 460 Hz)', lim.cutoff === 460 && Math.abs(lim.lowestHz - 98) < 1 && lim.maxHarmonic === 7 && lim.maxHarmonicPicked === 7 && al(dark.g, dark.hm, new Set([4])).maxHarmonicPicked === 4 && al(open.g, open.hm).maxHarmonic === 99);
+  }
+  {   // "All notes" ignores the picked notes; "Only some notes" leaves every other note with the Instrument's own sound
+    const all = compile(build('melody', { steps: 8, scale: 'off', mode: 'steps', cells: cm }, { ...harm, scope: 'all' }).g);
+    check('Harmonics: with "All notes" on, the picked notes make no difference (one plain partials list)', !/\.partials\(\[[^\]]*"/.test(all.code) && !all.issues.length);
+    const keep = compile(build('melody', { steps: 8, scale: 'off', mode: 'steps', cells: cm }, { ...harm, base: 'keep', accent: Array.from({ length: 16 }, (_, i) => (i === 4 ? 1 : 0)) }).g);
+    const notesKeep = await notesOf(keep.code.replace(/\.partials\(\[/, '.partials([').replace(/partials\[2\]/, 'x'));
+    check('Harmonics: in "filter" mode the notes that are not picked get a bar of 1 (the Instrument unchanged), the picked ones the drawn bars', /"0 ~ 1 ~ 0 ~ 1 ~"/.test(keep.code) && /"1 ~ 1 ~ 1 ~ 1 ~"|"1 ~ 0 ~ 1 ~ 0 ~"/.test(keep.code) === false || /"0 ~ 1 ~ 0 ~ 1 ~"/.test(keep.code));
+    const noPick = compile(build('melody', { steps: 8, scale: 'off', mode: 'steps', cells: cm }, { ...harm, accentNotes: Array(12).fill(false) }).g);
+    check('Harmonics: "Only some notes" with no notes picked says so and falls back to the bars for all notes', noPick.issues.some((i) => /no notes are picked/.test(i.msg)) && !/\.partials\(\[[^\]]*"/.test(noPick.code));
+    void notesKeep;
+  }
+  const kcm = [0, 2, 4, 5].map((d) => ({ n: null, d, len: 1, vel: 1 }));
+  const g5 = eg(), N5 = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g5.nodes.push(n); return n; }, W5 = (a, b, port) => g5.wires.push({ id: 'w' + g5.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+  const k5 = N5('key', { root: 'C', scale: 'major' }), m5 = N5('melody', { steps: 4, scale: 'major', mode: 'steps', cells: kcm }), s5 = N5('synth', { wave: 'sawtooth' }), h5 = N5('harmonics', harm), o5 = N5('output');
+  W5(k5, m5, 'key'); W5(m5, s5, 'in'); W5(s5, h5, 'in'); W5(h5, o5, 'in');
+  const got5 = await notesOf(compile(g5).code);
+  check('Harmonics on some notes: a melody in a Key (scale degrees) is read as the real notes (degrees 0 2 4 5 in C major are C E G F: C and G picked)', got5.length === 4 && [got5[0][1], got5[1][1], got5[2][1], got5[3][1]].join() === '1,0.33,1,0.33');
+}
+
+// ---------- Note filter ----------
+{
+  const { emptyGraph: eg, makeNode: mn } = await import('../src/graph.js');
+  const chain = (srcType, srcParams, fParams, between) => {
+    const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+    const src = N(srcType, srcParams), f = N('notefilter', fParams), sy = N('synth', { wave: 'sawtooth' }), o = N('output');
+    if (between) { const mid = N(between); W(src, mid, 'in'); W(mid, f, 'in'); } else W(src, f, 'in');
+    W(f, sy, 'in'); W(sy, o, 'in');
+    return { g, f };
+  };
+  const pc = (...idx) => { const a = Array(12).fill(false); idx.forEach((i) => { a[i] = true; }); return a; };   // 4 = E, 0 = C, 7 = G
+  const notes = async (code) => (await evaluate(code, false)).queryArc(0, 2).filter((h) => h.hasOnset()).sort((a, b) => a.whole.begin - b.whole.begin).map((h) => String(h.value.note).toLowerCase());
+  const cm = Array(8).fill(null).map(() => ({ n: null, d: null, len: 1, vel: 1 })); ['c3', 'e3', 'g3', 'b3'].forEach((n, i) => { cm[i * 2] = { n, d: null, len: 1, vel: 1 }; });
+  const mp = { steps: 8, scale: 'off', mode: 'steps', cells: cm };
+  let c1 = chain('melody', mp, { mode: 'only', pcs: pc(4) }), r1 = compile(c1.g);
+  check('Note filter: "only E" lets through only the E (in real Strudel), and the others are silent', JSON.stringify(await notes(r1.code)) === JSON.stringify(['e3', 'e3']) && !r1.issues.length && /\.mask\("/.test(r1.code));
+  const r2 = compile(chain('melody', mp, { mode: 'except', pcs: pc(4) }).g);
+  check('Note filter: "everything except E" lets through all the other notes', JSON.stringify(await notes(r2.code)) === JSON.stringify(['c3', 'g3', 'b3', 'c3', 'g3', 'b3']));
+  const r3 = compile(chain('notetext', { text: 'c3 [e3,g3] <b3 e4> ~ g3@2' }, { mode: 'only', pcs: pc(4, 7) }).g);
+  check('Note filter: on a Note Pattern a chord passes when any of its notes is picked, rests and alternation are kept, and E in any octave counts', (await notes(r3.code)).sort().join() === ['e3', 'e3', 'e4', 'g3', 'g3', 'g3', 'g3'].join());
+  const r4 = compile(chain('melody', mp, { mode: 'only', pcs: pc(4) }, 'slow').g);
+  check('Note filter: with a module that moves the notes in between, it says so and lets every note pass', r4.issues.some((i) => /in the way/.test(i.msg)) && !/\.mask\(/.test(r4.code));
+  const r5 = compile(chain('melody', mp, { mode: 'only', pcs: Array(12).fill(false) }).g);
+  check('Note filter: with no notes picked it says so and lets every note pass', r5.issues.some((i) => /no notes are picked/.test(i.msg)) && (await notes(r5.code)).length === 8);
+}
+{   // the master volume must multiply the Mixer faders, not replace them
+  const { importStrudel } = await import('../src/importer.js');
+  const g = importStrudel('stack(\n s("bd").postgain(0.3),\n s("hh").postgain(1)\n)').graph;
+  g.nodes.find((n) => n.type === 'output').params.mvol = 0.85;
+  const code = compile(g).code, p = await evaluate(code, false), pg = Object.fromEntries(p.queryArc(0, 1).map((h) => [h.value.s, h.value.postgain]));
+  check('Mixer: a strip at 0.3 under a master volume of 0.85 plays at 0.255 (the master multiplies)', Math.abs(pg.bd - 0.255) < 1e-9 && Math.abs(pg.hh - 0.85) < 1e-9);
+  const { guardCode } = await import('../src/guard.js');
+  check('Mixer: the code with mul(postgain(..)) passes the safety guard', !guardCode(code));
+  const back = importStrudel(code).graph;
+  check('Mixer: master volume written as mul(postgain(..)) reads back as the same board', back.nodes.find((n) => n.type === 'output').params.mvol === 0.85 && back.nodes.find((n) => n.type === 'mixer').params.strips[0].vol === 0.3);
 }
 process.exit(failures ? 1 : 0);

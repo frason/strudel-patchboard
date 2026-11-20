@@ -4,7 +4,7 @@
 //   Note Pattern     -> Melody Sequencer (when the text is a flat list of up to 16 steps)
 //   Hit Pattern      -> Rhythm Sequencer (same)
 // Each function returns { type, params, note } or { error }.
-import { stepText } from './compile.js';
+import { stepText, degreeName } from './compile.js';
 import { SCALES, NOTE_NAMES, noteRank, makeCells, defaultParams, fmt, cellNotes, stepHas } from './modules.js';
 import { effectiveKey } from './graph.js';
 import { parseEditable, notesOf } from './rolledit.js';
@@ -24,12 +24,6 @@ function tokensOf(p, deg, pitched) {
 }
 const wrapOf = (p) => (p.mode === 'turns' ? ['<', '>'] : p.mode === 'pace' && p.steps > 8 ? ['[', `]/${fmt(p.steps / 8)}`] : ['', '']);
 const join = (tokens, wrap, text) => wrap[0] + tokens.map(text).join(' ') + wrap[1];
-
-// scale degree -> note name, the way Strudel's scale("C3:major") reads it
-function degreeName(key, d) {
-  const iv = SCALES[key.scale] || SCALES.major, rootPc = NOTE_NAMES.indexOf(String(key.root).toLowerCase()), abs = (rootPc < 0 ? 0 : rootPc) + iv[mod(d, iv.length)] + 12 * Math.floor(d / iv.length);
-  return NOTE_NAMES[mod(abs, 12)] + (3 + Math.floor(abs / 12));
-}
 
 export function melodyToNotes(g, node) {
   const p = node.params, key = effectiveKey(g, node);

@@ -11,11 +11,11 @@ import { buildPulseDiagram } from './pulsediagram.js';
 import { FXPICS } from './fxpics.js';
 import { ROLLS } from './rollview.js';
 import { CONVERTERS } from './convert.js';
-import { HARMPICS } from './harmpic.js';
+import { HARMPICS, NOTEFILTERPICS } from './harmpic.js';
 import { TAKEPICS } from './takepic.js';
 const openText = new Set();   // text boxes the person pinned open (a long text otherwise folds to one line)
 const autosize = (ta) => { ta.style.height = 'auto'; if (ta.scrollHeight) ta.style.height = ta.scrollHeight + 2 + 'px'; };   // a text box that grows with its lines
-const PICS = { ...FXPICS, ...ROLLS, ...HARMPICS, ...TAKEPICS };   // every small picture a module can show, by the flag it sets in its data
+const PICS = { ...FXPICS, ...ROLLS, ...HARMPICS, ...NOTEFILTERPICS, ...TAKEPICS };   // every small picture a module can show, by the flag it sets in its data
 import { soundIconSvg, hasSoundIcon, soundGlyph } from './soundicons.js';
 import { icon } from './icons.js';
 import { buildFxRack } from './fxrack.js';
@@ -720,6 +720,7 @@ export function createBoard(root, store, hooks) {
   const flowGroupOpen = new Set();   // groups opened in the flow view; all start folded into one card
   const flowGroupEls = new Map();
   const groupOfNode = (id) => (store.graph.groups || []).find((gr) => gr.nodes.includes(id));
+  const groupMuted = (gr) => { const m = gr.nodes.map((id) => nodeById(store.graph, id)).filter((n) => n && MUTE_KIND[n.type]); return m.length > 0 && m.every((n) => n.muted); };
   function flowGroupCard(gr) {
     let e = flowGroupEls.get(gr.id);
     if (e) return e;
@@ -728,14 +729,15 @@ export function createBoard(root, store, hooks) {
     const count = h('span', { class: 'fg-count' });
     const tog = h('span', { class: 'fg-tog', 'aria-hidden': 'true' });
     const ung = h('button', { class: 'n-btn', type: 'button', title: 'Ungroup (keeps all the modules)', 'aria-label': 'Ungroup', onclick: (ev) => { ev.stopPropagation(); flowGroupOpen.delete(gr.id); hooks.ungroup(gr.id); } }, '×');
-    const head = h('div', { class: 'fg-head', role: 'button', tabindex: 0, 'aria-label': `Group ${gr.name || ''}: tap to open or fold` }, led, name, count, tog, ung);
+    const mute = h('button', { class: 'n-btn n-mute', type: 'button', onclick: (ev) => { ev.stopPropagation(); hooks.muteGroup(gr.id); } });
+    const head = h('div', { class: 'fg-head', role: 'button', tabindex: 0, 'aria-label': `Group ${gr.name || ''}: tap to open or fold` }, led, name, count, tog, mute, ung);
     const toggle = () => { if (flowGroupOpen.has(gr.id)) flowGroupOpen.delete(gr.id); else flowGroupOpen.add(gr.id); sync(); };
     head.addEventListener('click', (ev) => { if (!ev.target.closest('button')) toggle(); });
     head.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); toggle(); } });
     const chips = h('div', { class: 'fg-chips' });
     const el = h('div', { class: 'fgroup', dataset: { gid: gr.id } }, head, chips);
     world.append(el);
-    e = { el, led, name, count, tog, chips };
+    e = { el, led, name, count, tog, chips, mute };
     flowGroupEls.set(gr.id, e);
     return e;
   }
@@ -2098,8 +2100,9 @@ export function createBoard(root, store, hooks) {
         const count = h('span', { class: 'g-count' });
         const col = h('button', { class: 'g-btn', title: 'Collapse or expand the group', onclick: (ev) => { ev.stopPropagation(); hooks.toggleGroup(gr.id); } });
         const ung = h('button', { class: 'g-btn', title: 'Ungroup (keeps all modules)', onclick: (ev) => { ev.stopPropagation(); hooks.ungroup(gr.id); } }, '×');
-        col.addEventListener('pointerdown', (ev) => ev.stopPropagation()); ung.addEventListener('pointerdown', (ev) => ev.stopPropagation());
-        const head = h('div', { class: 'g-head' }, name, count, col, ung);
+        const mute = h('button', { class: 'g-btn g-mute', type: 'button', onclick: (ev) => { ev.stopPropagation(); hooks.muteGroup(gr.id); } });
+        col.addEventListener('pointerdown', (ev) => ev.stopPropagation()); ung.addEventListener('pointerdown', (ev) => ev.stopPropagation()); mute.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+        const head = h('div', { class: 'g-head' }, name, count, mute, col, ung);
         const el = h('div', { class: 'gframe' }, head);
         head.addEventListener('pointerdown', (ev) => {
           if (ev.target.closest('input, textarea, button')) return;
@@ -2120,7 +2123,7 @@ export function createBoard(root, store, hooks) {
           head.addEventListener('pointermove', move); head.addEventListener('pointerup', up);
         });
         world.prepend(el);
-        e = { el, name, count, col };
+        e = { el, name, count, col, mute };
         groupEls.set(gr.id, e);
       }
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -2133,6 +2136,10 @@ export function createBoard(root, store, hooks) {
       if (document.activeElement !== e.name) e.name.value = gr.name;
       e.count.textContent = mem.length + ' modules';
       e.col.textContent = gr.collapsed ? '▸' : '▾';
+      const gm = groupMuted(gr);
+      e.mute.replaceChildren(speakerSvg(gm)); e.mute.classList.toggle('on', gm);
+      e.mute.title = gm ? 'This group is muted: click to switch it back on' : 'Mute this group (silence its sounds, bypass its effects)';
+      e.el.classList.toggle('muted', gm);
       e.el.classList.toggle('collapsed', !!gr.collapsed);
       if (gr.collapsed) {
         mem.forEach((id) => views.get(id).el.classList.add('gh'));
@@ -2169,6 +2176,7 @@ export function createBoard(root, store, hooks) {
         e.name.textContent = gr.name || 'Group';
         e.count.textContent = mem.length + (mem.length === 1 ? ' module' : ' modules');
         e.tog.textContent = open ? '▾' : '▸';
+        { const gm = groupMuted(gr); e.mute.replaceChildren(speakerSvg(gm)); e.mute.classList.toggle('on', gm); e.mute.title = gm ? 'This group is muted: click to switch it back on' : 'Mute this group'; e.el.classList.toggle('muted', gm); }
         const sorted = ord.filter((x) => groupOf.get(x) === gr.id);
         e.chips.replaceChildren(...sorted.map((id) => { const n = nodeById(g, id); return h('button', { class: 'fg-chip', type: 'button', style: `border-left-color:${CAT_COLOR[MODULES[n.type].cat] || '#6b7886'}`, onclick: () => { flowGroupOpen.add(gr.id); sync(); requestAnimationFrame(() => scrollToNode(id)); } }, titleOf(n)); }));
         return;

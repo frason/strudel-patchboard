@@ -1,6 +1,6 @@
 // The learning path. Each starter is an ordinary graph built only from palette modules, so it can be rebuilt by hand.
 import { makeNode, normalize, emptyGraph } from './graph.js';
-import { makeCells, FM_PRESETS } from './modules.js';
+import { makeCells, FM_PRESETS, HARM_PRESETS } from './modules.js';
 import WHOLE_SONG_GRAPH from './wholesong.js';
 
 const mel = (notes, { vel = [], len = {}, steps, octave = 3, mode = 'steps' } = {}) => {
@@ -412,6 +412,16 @@ export const LESSONS = [
       ['rv', 'reverb', 1560, 60, { room: 0.35, size: 4 }],
       ['o', 'output', 1840, 140, { bpm: 110 }],
     ], [['m', 'sy'], ['sy', 'pw'], ['pw', 'vb'], ['vb', 'di'], ['di', 'rv'], ['rv', 'o']]),
+  },
+  {
+    id: 'harmonics', section: 'Sound design', title: '33 · Harmonics: draw the sound',
+    learned: 'A note is not one pitch but a stack of them: harmonic 1 is the note, 2 the octave above, 3 the octave and a fifth, and so on. Each bar in the Harmonics module is how loud one of them is, and the sound is built from the bars alone. Press Play, then try the presets while it plays (a change is heard from the next note on, so a note already ringing does not change): Sine is just the note, Saw is every harmonic (bright and buzzy), Square keeps only the odd ones (hollow), Bell is gaps and spikes. Then draw your own: make bar 1 low and bar 5 tall, and the high ring of the fifth harmonic takes over the note. Pull every other bar to zero and the sound turns thin and nasal.',
+    graph: () => build([
+      ['m', 'melody', 40, 60, mel(['c3', 'c3', 'g2', 'c3', 'c3', 'c3', 'g2', 'e3'])],
+      ['sy', 'synth', 380, 60, { wave: 'sawtooth', attack: 0.01, decay: 0.2, sustain: 0.9, release: 0.12, gain: 0.5 }],
+      ['hm', 'harmonics', 700, 60, { base: 'user', partials: HARM_PRESETS.square.bars.slice() }],
+      ['o', 'output', 1040, 140, { bpm: 72 }],
+    ], [['m', 'sy'], ['sy', 'hm'], ['hm', 'o']]),
   },
 ];
 
