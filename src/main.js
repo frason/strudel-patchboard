@@ -26,6 +26,8 @@ import { patternToDrums } from './todrums.js';
 import { CONVERTERS } from './convert.js';
 import { openRecorder } from './recordui.js';
 import { mergeGraph } from './recorder.js';
+import { noteName } from './takecode.js';
+import { parseMidi, pickGrid, isMidiFile } from './midifile.js';
 import { cleanParams } from './validate.js';
 import { getAI, setAI, clearAI, consumeAiNotice, AI_MODELS, askAI, extractCode, stripCode, reviewPrompt, parseReply, lintStarter, STARTER_SYSTEM, REFINE_SYSTEM, REVIEW_SYSTEM } from './ai.js';
 import { defaultParams, FM_ALGORITHMS, fmLinkKey, SCALES, MELODY_TEMPLATES, DRUM_PRESETS, FM_PRESETS, SOMETIMES_FNS, EVERY_FNS, pitchModel, X_STATES, parseX, leafAt, stepHas, CATEGORIES, MODULES, MUTE_KIND, NOTE_NAMES, MAX_TRACKS, resizeTracks, resizeCells, fmt, cellNotes, noteRank } from './modules.js';
@@ -137,7 +139,7 @@ const newBtn = h('button', { class: 'btn', id: 'new-btn', title: 'Start an empty
 const learnBtn = h('button', { class: 'btn', id: 'learn-btn' }, 'Learn ▾');
 const savesBtn = h('button', { class: 'btn', id: 'saves-btn' }, 'Saves ▾');
 const exportBtn = h('button', { class: 'btn', id: 'export-btn' }, 'Export ▾');
-const fileInput = h('input', { type: 'file', accept: '.json,.strudel,.txt,.js', style: 'display:none', id: 'import-file' });
+const fileInput = h('input', { type: 'file', accept: '.json,.strudel,.txt,.js,.mid,.midi', style: 'display:none', id: 'import-file' });
 const importBtn = h('button', { class: 'btn', id: 'import-btn', onclick: () => openImport() }, 'Import');
 const aiBtn = h('button', { class: 'btn', id: 'ai-btn', title: 'AI helper: make a starter patch, or get a review of yours (bring your own key)', onclick: () => openAI() }, 'AI');
 const popHost = h('div', { class: 'pop-host' });
@@ -909,10 +911,27 @@ engine.onHap(({ locations, delayMs, durMs }) => {
 });
 
 // ---------- engine / transport ----------
+let statusFull = null;
+function closeStatusFull() { statusFull?.remove(); statusFull = null; }
+function toggleStatusFull() {
+  if (statusFull) { closeStatusFull(); return; }
+  if (!/^(status )?(error|warn)/.test(statusEl.className)) return;
+  const r = statusEl.getBoundingClientRect();
+  statusFull = h('div', { class: 'status-full', role: 'alert', style: `left:${Math.max(8, Math.min(r.left, window.innerWidth - 448))}px;top:${r.bottom + 6}px` }, statusEl.textContent,
+    h('button', { class: 'btn sm', type: 'button', onclick: () => { try { navigator.clipboard.writeText(statusEl.textContent); } catch { /* no clipboard */ } } }, 'Copy'));
+  document.body.append(statusFull);
+}
+statusEl.addEventListener('click', toggleStatusFull);
+statusEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleStatusFull(); } });
+document.addEventListener('pointerdown', (e) => { if (statusFull && !statusFull.contains(e.target) && e.target !== statusEl) closeStatusFull(); }, true);
 engine.onStatus((s) => {
   if (s.state === 'playing') syncOutScope();
   statusEl.textContent = { idle: 'ready', loading: s.message, ok: 'ok', ready: 'stopped', playing: 'playing', error: 'error: ' + s.message, warn: s.message }[s.state] || s.state;
   statusEl.className = 'status ' + s.state;
+  const long = (s.state === 'error' || s.state === 'warn') && s.message;   // the toolbar cuts long messages short: hover shows all of it, a click opens it in a box
+  statusEl.title = long ? statusEl.textContent + '\n(click to read it in full)' : '';
+  statusEl.tabIndex = long ? 0 : -1; statusEl.setAttribute('role', long ? 'button' : 'status');
+  if (!long) closeStatusFull();
   setPlayUI(engine.playing);
 });
 playBtn.addEventListener('click', async () => {
@@ -1235,7 +1254,7 @@ function openImport() {
   const area = h('textarea', { class: 'imp-area', id: 'import-text', spellcheck: 'false', placeholder: 'Paste Strudel code here, e.g.\n\nsetcpm(120/4)\n\$: s("bd*2 ~ sd").bank("RolandTR909")' });
   area.addEventListener('keydown', (e) => e.stopPropagation());
   const body = h('div', {},
-    h('p', { class: 'imp-hint' }, 'Any Strudel code works: from strudel.cc, a .strudel file, or a patch exported from here. Parts that modules cannot express are listed, never guessed.'),
+    h('p', { class: 'imp-hint' }, 'Any Strudel code works: from strudel.cc, a .strudel file, or a patch exported from here. A MIDI file (.mid) works too: each part becomes a Take. Parts that modules cannot express are listed, never guessed.'),
     area,
     h('div', { class: 'modal-btns' },
       h('button', { class: 'btn', id: 'import-paste-go', onclick: () => importText(area.value, 'pasted code', openImport) }, 'Import this code'),
@@ -1246,12 +1265,55 @@ function openImport() {
   showModal('Import', body);
   setTimeout(() => area.focus(), 0);
 }
+// A MIDI file: each track (and channel) becomes a Take plugged into its own Instrument, so the notes play as written and can be edited on the Take's roll.
+function openMidiImport(name, r) {
+  if (r.error) return toast(`${name}: ${r.error}`, [], 8000);
+  const out = store.graph.nodes.find((n) => n.type === 'output'), rows = r.tracks.map((t) => ({ t, on: !t.drums && t.events.length > 0 }));
+  const boxes = rows.map((x, i) => h('input', { type: 'checkbox', id: 'midi-track-' + i, checked: x.on, onchange: (e) => { x.on = e.target.checked; sync(); } }));
+  const tempo = h('input', { type: 'checkbox', id: 'midi-tempo', checked: !!out });
+  const go = h('button', { class: 'btn', id: 'midi-add' }, 'Add to the board');
+  const nm = (n) => noteName(n);
+  const list = rows.map((x, i) => h('label', { class: 'field rec-field' }, boxes[i], h('span', {}, `${x.t.name}: ${x.t.total} notes, ${nm(x.t.low)} to ${nm(x.t.high)}, ${Math.max(1, Math.ceil(x.t.beats / r.beatsPerBar))} bar${Math.ceil(x.t.beats / r.beatsPerBar) > 1 ? 's' : ''}${x.t.drums ? ' (drums: they play as notes of a synth here)' : ''}${x.t.trimmed ? `, only the first ${x.t.events.length} kept` : ''}`)));
+  const sync = () => { const k = rows.filter((x) => x.on).length; go.disabled = !k; go.textContent = k > 1 ? `Add ${k} takes to the board` : 'Add to the board'; };
+  go.addEventListener('click', () => {
+    const picked = rows.filter((x) => x.on).map((x) => x.t); if (!picked.length) return;
+    const names = new Set(store.graph.nodes.filter((n) => n.type === 'take').map((n) => n.params.name));
+    const g = { v: 1, nodes: [], wires: [] }, o = makeNode('output', 0, 0); g.nodes.push(o);
+    picked.forEach((t, i) => {
+      let nmx = t.name, k = 2; while (names.has(nmx)) nmx = `${t.name} ${k++}`; names.add(nmx);
+      const tk = makeNode('take', 0, i * 200, cleanParams('take', { name: nmx, grid: pickGrid(t.events), bpm: r.bpm, beats: r.beatsPerBar, events: t.events, versions: [] })), sy = makeNode('synth', 300, i * 200, { wave: 'triangle' });
+      g.nodes.push(tk, sy);
+      g.wires.push({ id: uid('w'), from: { node: tk.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: uid('w'), from: { node: sy.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+    });
+    let added = [];
+    store.update((cur) => {
+      added = mergeGraph(cur, g);
+      const co = cur.nodes.find((n) => n.type === 'output');
+      if (tempo.checked && co) { co.params.bpm = r.bpm; co.params.beats = r.beatsPerBar; }
+    }, { label: 'import a MIDI file' });
+    closeModal();
+    requestAnimationFrame(() => added[0] && board.reveal?.(added[0]));
+    toast(`Added ${picked.length} take${picked.length === 1 ? '' : 's'} from ${name}.${tempo.checked ? '' : ` The file is at ${r.bpm} BPM; the board keeps its own tempo.`}`, [undoAction], 7000);
+  });
+  const body = h('div', { class: 'rec' },
+    h('p', { class: 'imp-hint' }, `${name}: ${r.tracks.length} part${r.tracks.length === 1 ? '' : 's'}, ${r.bpm} BPM, ${r.beatsPerBar} beats a bar. Pick the parts to add; each becomes a Take on its own Instrument.`),
+    ...list,
+    out ? h('label', { class: 'field rec-field' }, tempo, h('span', {}, `set the board's tempo to ${r.bpm} BPM, ${r.beatsPerBar} beats a bar`)) : '',
+    ...r.warnings.map((w) => h('p', { class: 'imp-hint' }, w)),
+    h('div', { class: 'modal-btns' }, go, h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel')));
+  sync();
+  showModal('Import a MIDI file', body);
+}
 fileInput.addEventListener('change', async () => {
   const f = fileInput.files[0];
   fileInput.value = '';
   if (!f) return;
   if (f.size > 2_000_000) return toast(`That file is too large (${Math.round(f.size / 1000)} KB; the limit is 2000 KB).`, [], 7000);
-  try { importText(await f.text(), f.name, openImport); }
+  try {
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    if (isMidiFile(f.name, bytes)) return openMidiImport(f.name, parseMidi(bytes));
+    importText(new TextDecoder().decode(bytes), f.name, openImport);
+  }
   catch (e) { toast('Could not read that file: ' + e.message, [], 8000); }
 });
 

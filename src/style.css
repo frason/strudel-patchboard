@@ -1104,3 +1104,6 @@ html, body { overscroll-behavior: none; }
 .g-name { flex: 0 1 140px; min-width: 40px; }
 .g-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .g-btn { flex: none; }
+
+.status.error, .status.warn { cursor: pointer; }
+.status-full { position: fixed; z-index: 60; width: 440px; max-width: calc(100vw - 16px); background: var(--panel2); border: 1px solid #6a3a36; border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.55); color: #ffb3a8; font-size: 12.5px; line-height: 1.45; padding: 10px 12px; white-space: normal; user-select: text; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }

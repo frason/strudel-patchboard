@@ -1571,4 +1571,34 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const back = importStrudel(code).graph;
   check('Mixer: master volume written as mul(postgain(..)) reads back as the same board', back.nodes.find((n) => n.type === 'output').params.mvol === 0.85 && back.nodes.find((n) => n.type === 'mixer').params.strips[0].vol === 0.3);
 }
+
+// ---------- MIDI file import ----------
+{
+  const { parseMidi, pickGrid, isMidiFile } = await import('../src/midifile.js');
+  const { cleanParams } = await import('../src/validate.js');
+  const { takeToPattern } = await import('../src/takecode.js');
+  const vl = (v) => { const b = [v & 0x7f]; while ((v >>= 7)) b.unshift((v & 0x7f) | 0x80); return b; };
+  const trk = (...evs) => { const d = evs.flat(); return [0x4d, 0x54, 0x72, 0x6b, (d.length >>> 24) & 255, (d.length >>> 16) & 255, (d.length >>> 8) & 255, d.length & 255, ...d]; };
+  const hdr = (fmt, n, ppq) => [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, fmt, 0, n, ppq >> 8, ppq & 255];
+  const meta = (dt, type, ...body) => [...vl(dt), 0xff, type, body.length, ...body];
+  const name = (t) => [...t].map((c) => c.charCodeAt(0));
+  // format 1, 96 ticks a beat: a tempo track (90 bpm, 3/4) and a piano track using running status: c4 for a beat, then e4 and g4 together for two beats, and a drum hit on channel 10
+  const tempo = trk(meta(0, 0x51, 0x0a, 0x2c, 0x2a), meta(0, 0x58, 3, 2, 24, 8), meta(0, 0x2f));
+  const piano = trk(meta(0, 0x03, ...name('Piano')), [0, 0x90, 60, 100], [96, 60, 0], [0, 64, 80], [0, 67, 80], [...vl(192), 0x80, 64, 0], [0, 67, 0], meta(0, 0x2f));
+  const drum = trk([0, 0x99, 36, 127], [48, 0x89, 36, 0], meta(0, 0x2f));
+  const file = new Uint8Array([...hdr(1, 3, 96), ...tempo, ...piano, ...drum]);
+  const r = parseMidi(file);
+  check('MIDI: a file is read into a tempo, a time signature and one take for each track that has notes', !r.error && r.bpm === 90 && r.beatsPerBar === 3 && r.tracks.length === 2 && r.tracks[0].name === 'Piano' && r.tracks[1].drums && r.tracks[1].name === 'Drums');
+  const ev = r.tracks[0].events;
+  check('MIDI: notes come out in beats with their length and loudness (running status and a note-on of velocity 0 as the note-off are understood)', ev.length === 3 && ev[0].n === 60 && ev[0].t === 0 && ev[0].d === 1 && Math.abs(ev[0].v - 0.79) < 0.01 && ev[1].t === 1 && ev[1].d === 2 && ev[2].n === 67 && ev[2].d === 2);
+  check('MIDI: the drum channel is marked as drums, and its half-beat hit is half a beat long', r.tracks[1].events[0].d === 0.5 && r.tracks[1].channel === 10);
+  const tk = cleanParams('take', { name: 'x', grid: pickGrid(ev), bpm: r.bpm, beats: r.beatsPerBar, events: ev });
+  check('MIDI: an imported track passes the Take module\'s checks unchanged and becomes a pattern', tk.events.length === 3 && takeToPattern({ bpm: r.bpm, beatsPerBar: r.beatsPerBar, events: tk.events }, { grid: tk.grid }).notes === 3 && pickGrid(ev) === 4);
+  check('MIDI: notes off the 16th grid choose the triplet grid', pickGrid([{ t: 0.33, d: 1, n: 60, v: 1 }]) === 12);
+  check('MIDI: a file that is not MIDI, a frames-based file and a file with no notes are refused with a reason', !!parseMidi(new Uint8Array([1, 2, 3])).error && /frames/.test(parseMidi(new Uint8Array([...hdr(1, 1, 96).slice(0, 12), 0xe7, 0x28, ...trk(meta(0, 0x2f))])).error) && /no notes/.test(parseMidi(new Uint8Array([...hdr(0, 1, 96), ...trk(meta(0, 0x2f))])).error));
+  const held = parseMidi(new Uint8Array([...hdr(0, 1, 96), ...trk([0, 0x90, 60, 90], [96, 0x90, 62, 90], meta(192, 0x2f))]));
+  check('MIDI: a note never released ends with the track, and a cut-off file still gives the notes before the cut', held.tracks[0].events[0].d === 3 && held.tracks[0].events[1].d === 2 && parseMidi(file.slice(0, 66)).tracks?.[0]?.events.length >= 1);
+  check('MIDI: file names and the MThd marker are both recognised', isMidiFile('a.MID') && isMidiFile('noname', file) && !isMidiFile('a.txt', new Uint8Array([1, 2, 3, 4, 5])));
+}
+
 process.exit(failures ? 1 : 0);
