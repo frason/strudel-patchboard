@@ -64,8 +64,11 @@ export const QUALITY_INTERVALS = {
   '': [0, 4, 7], m: [0, 3, 7], 7: [0, 4, 7, 10], '^7': [0, 4, 7, 11], m7: [0, 3, 7, 10], m7b5: [0, 3, 6, 10], o: [0, 3, 6], o7: [0, 3, 6, 9],
   aug: [0, 4, 8], sus: [0, 5, 7], 6: [0, 4, 7, 9], 9: [0, 4, 7, 10, 14], '^9': [0, 4, 7, 11, 14], m9: [0, 3, 7, 10, 14], '7b9': [0, 4, 7, 10, 13],
 };
+// Strudel reads Eb, Db, Bb ... as well as D#, C#, A#. The chord module names its roots with sharps, so a flat root is written as the same note with a sharp (Ebm is D#m).
+const FLAT = { Cb: 'B', Db: 'C#', Eb: 'D#', Fb: 'E', Gb: 'F#', Ab: 'G#', Bb: 'A#' };
+export const sharpSym = (sym) => String(sym ?? '').replace(/^([A-G])b/, (m) => FLAT[m] ?? m);
 export function parseChord(sym) {
-  const m = /^([A-G]#?)(.*)$/.exec(sym || '');
+  const m = /^([A-G]#?)(.*)$/.exec(sharpSym(sym));
   return m ? { root: m[1], q: m[2] } : null;
 }
 // semitones above C for each note of the chord, e.g. 'Am7' -> [9, 12, 16, 19]

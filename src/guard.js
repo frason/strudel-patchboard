@@ -9,11 +9,11 @@ const FUNCS = new Set(['setcpm', 'n', 'note', 's', 'chord', 'stack', 'cat', 'arr
 const IDENTS = new Set(['rand', 'perlin', 'sine', 'saw', 'tri', 'square', 'isaw', 'cosine', 'silence', 'rev']);
 const METHODS = new Set(`acidenv analyze arp attack bank bpf bpq chord chorus coarse compressor crush decay degrade degradeBy delay delayfeedback delaytime detune distort djf duck duckattack duckdepth
 clip euclid every fast fit late legato swingBy fm fm11 fm12 fm13 fm14 fm2 fm20 fm22 fm23 fm24 fm3 fm30 fm31 fm33 fm34 fm4 fm40 fm41 fm42 fm44 fmattack fmattack2 fmattack3 fmattack4 fmdecay fmdecay2 fmdecay3 fmdecay4
-fmh fmh2 fmh3 fmh4 fmsustain fmsustain2 fmsustain3 fmsustain4 fmwave fmwave2 fmwave3 fmwave4 ftype gain hpf hpq leslie lpa lpd lpenv lpf lpq lps lrate lsize mode mul orbit pan phaser phasercenter
+fmh fmh2 fmh3 fmh4 fmsustain fmsustain2 fmsustain3 fmsustain4 fmwave fmwave2 fmwave3 fmwave4 ftype gain hpf hpq leslie lpa lpd lpe lpenv lpf lpq lps lrate lsize mode mul orbit pan phaser phasercenter
 phaserdepth phasersweep ply postgain pow pattack pdecay penv range release repeat rev ribbon ring ringf room roomsize round s scale scramble segment shape shuffle slow sometimesBy speed squiz
 struct sustain pw pwrate pwsweep tremolo tremolosync tremolodepth tremoloshape transpose velocity vib vibmod voicing vowel _scope _pianoroll _punchcard _spiral _pitchwheel
 add sub div mask seg palindrome adsr someCycles someCyclesBy sometimes often rarely almostNever almostAlways always never superimpose off jux juxBy chunk chunkBack linger iter iterBack hurry inside outside
-early press pressBy rolled rolledBy slice splice chop striate begin end loopAt cut unit accelerate nudge cutoff resonance hcutoff hresonance bandf bandq sz rsize roomfade roomlp roomdim lpattack lprelease hpattack hprelease
+early dict set when cpm press pressBy rolled rolledBy slice splice chop striate begin end loopAt cut unit accelerate nudge cutoff resonance hcutoff hresonance bandf bandq sz rsize roomfade roomlp roomdim lpattack lprelease hpattack hprelease
 delayfb delayt dt dfb att dec sus rel amp vel sound freq stut echo euclidRot euclidLegato euclidInv euclidLegatoRot fastGap compress zoom focus rangex inv bite squeeze toggle pick scaleTranspose trans rootNotes
 degradeBy undegradeBy brak ply plyWith fastchunk slowchunk run gap legato note n s ftype color colour anchor echoWith rib offset partials phases`.split(/\s+/).filter(Boolean));
 // helper definitions the compiler writes word for word (nothing in them depends on the patch): allowed only when they match exactly
@@ -57,10 +57,10 @@ function expr(node, code, ctx) {
     default: throw new Refuse(`${at(node, code)}: "${node.type}" is not allowed in a patch`);
   }
 }
-// x => x.method(...): the only kind of function a pattern may be given, and only as an argument
+// x => x.method(...): the only kind of function a pattern may be given, and only as an argument (one inside another is fine, up to three deep: x => x.superimpose(x => x.late(.01)))
 function arrow(node, code, ctx) {
-  if (ctx.arrow || node.async || node.generator || node.params.length !== 1 || node.params[0].type !== 'Identifier' || node.params[0].name !== 'x' || node.body.type !== 'CallExpression') throw new Refuse(`${at(node, code)}: only x=>x.method(...) functions are allowed`);
-  expr(node.body, code, { ...ctx, arrow: 'x' });
+  if ((ctx.depth || 0) >= 3 || node.async || node.generator || node.params.length !== 1 || node.params[0].type !== 'Identifier' || node.params[0].name !== 'x' || node.body.type !== 'CallExpression') throw new Refuse(`${at(node, code)}: only x=>x.method(...) functions are allowed`);
+  expr(node.body, code, { ...ctx, arrow: 'x', depth: (ctx.depth || 0) + 1 });
 }
 function numeric(node, code, ctx) {
   if (node.type === 'Literal' && typeof node.value === 'number') return;

@@ -1624,4 +1624,119 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Fold: lines with different instruments are left alone', other.graph.nodes.filter((n) => n.type === 'synth').length === 2);
 }
 
+
+// ---------- a whole song from strudel.cc keeps all its parts ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const src = readFileSync(new URL('../tools/coastline.strudel', import.meta.url), 'utf8').replace(/^samples\(.*\)\n/m, '');
+  const r = imp(src), code = compile(r.graph).code;
+  const sig = async (c) => (await evaluate(c, false)).queryArc(0, 16).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(4)} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).sort()))}`).sort();
+  const a = await sig(src), b = await sig(code);
+  check('Coastline: a song with chords, a bass line, kept-as-written lines and a stack-wide bank imports with nothing skipped', !r.report.skipped.length && r.graph.nodes.some((n) => n.type === 'codesource') && !gc(code));
+  check('Coastline: the imported board plays what the original plays over 16 cycles (drums, chords and bass; each hit with its sound, bank and effects)', a.length > 100 && a.length === b.length && a.every((x, i) => x === b[i]));
+}
+
+
+// ---------- sample packs and the audio recording file ----------
+{
+  const { validPack } = await import('../src/packs.js');
+  const { wavBytes, recordingSeconds, recordingName } = await import('../src/wav.js');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  check('Packs: github:user/repo (and a branch) are accepted; anything else (other hosts, paths, scripts) is refused', validPack('github:eddyflux/crate') && validPack('github:a-b/c.d/main') && !validPack('https://evil.example/x.json') && !validPack('github:../x') && !validPack('github:a/b/c/d') && !validPack('github:a/b c') && !validPack("github:a/b'); x('") && !validPack(5));
+  const r = imp("samples('github:eddyflux/crate')\nsamples('https://evil.example/s.json')\n$: s(\"bd\").bank('crate')\n");
+  check('Packs: the importer reports the GitHub pack it was asked for and ignores any other address', r.report.packs.length === 1 && r.report.packs[0] === 'github:eddyflux/crate' && r.report.notes.some((n) => /evil/.test(n) && /ignored/.test(n)));
+  const w = wavBytes([Int16Array.from([0, 0, 32767, -32768]), Int16Array.from([1, -1])], 48000, 2), dv = new DataView(w.buffer);
+  check('WAV: a recording becomes a 16-bit stereo file with the right header, length and samples', String.fromCharCode(...w.slice(0, 4)) === 'RIFF' && String.fromCharCode(...w.slice(8, 12)) === 'WAVE' && dv.getUint16(22, true) === 2 && dv.getUint32(24, true) === 48000 && dv.getUint32(40, true) === 12 && w.length === 56 && dv.getInt16(48, true) === 32767 && dv.getInt16(50, true) === -32768 && dv.getInt16(52, true) === 1);
+  check('WAV: length in seconds and the file name', recordingSeconds([new Int16Array(96000)], 48000) === 1 && /^patchboard-\d{8}-\d{6}\.wav$/.test(recordingName(new Date(2026, 10, 21, 9, 5, 7))) && recordingName(new Date(2026, 10, 21, 9, 5, 7)) === 'patchboard-20261121-090507.wav');
+}
+
+
+// ---------- flat chords, piano-roll calls and double .s() in a song from strudel.cc ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const { noteToMidi } = await import('@strudel/core');
+  const text = readFileSync(new URL('../tools/feel-good.strudel', import.meta.url), 'utf8');
+  const r = imp(text), code = compile(r.graph).code;
+  const norm = (v) => { const o = { ...v }; delete o.color; if (typeof o.note === 'string') o.note = noteToMidi(o.note); if (o.gain === 1) delete o.gain; return JSON.stringify(Object.fromEntries(Object.entries(o).sort())); };
+  const sig = async (c) => (await evaluate(c.replace(/\._pianoroll\(\)/g, ''), false)).queryArc(0, 16).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(4)} ${norm(h.value)}`).sort();
+  const a = await sig(text), b = await sig(code);
+  check('Feel Good: flat chords (Ebm, Db, Abm7, Bb7) become Chords modules, and nothing is skipped', !r.report.skipped.length && r.graph.nodes.some((n) => n.type === 'chords' && n.params.cells.some((c) => c.sym === 'D#m')));
+  check('Feel Good: piano-roll calls become view modules and are not left in the code (the browser player has no _pianoroll), and the code passes the guard', !/_pianoroll/.test(code) && r.graph.nodes.filter((n) => n.type === 'pianoroll').length >= 3 && !gc(code));
+  check('Feel Good: the imported board plays what the original plays over 16 cycles (chords with voicing, melody, bass and drums)', a.length > 300 && a.length === b.length && a.every((x, i) => x === b[i]));
+}
+
+
+// ---------- a patch with random and sweeping effect values ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const text = readFileSync(new URL('../tools/bell.strudel', import.meta.url), 'utf8');
+  const r = imp(text, { sounds: () => true }), code = compile(r.graph).code;
+  const sig = async (c) => (await evaluate(c, false)).queryArc(0, 12).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(4)} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).sort().map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v])))}`).sort();
+  const a = await sig(text), b = await sig(code);
+  check('Bell: euclid patterns in sound names are not reported as missing sounds, and nothing is skipped', !r.report.skipped.length && !r.report.notes.some((n) => /silent/.test(n)));
+  check('Bell: a call whose value is a random or sweeping signal Patchboard cannot show is kept as written (no stray default effect, no repeated calls), and passes the guard', !/distort/.test(code) && (code.match(/\.dt\(/g) || []).length === 1 && (code.match(/\.dfb\(/g) || []).length === 1 && !gc(code));
+  check('Bell: the imported board plays what the original plays over 12 cycles, random values included', a.length > 100 && a.length === b.length && a.every((x, i) => x === b[i]));
+}
+
+
+// ---------- a long song: long notes in brackets, when() with nested functions, a tempo on the whole stack ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const text = readFileSync(new URL('../tools/riding-46.strudel', import.meta.url), 'utf8');
+  const strip = (t) => t.replace(/^samples\(.*\)\n/m, '').replace(/\)\.cpm\(cpm\)/, ')');
+  const r = imp(text, { sounds: () => true }), code = compile(r.graph).code;
+  const sig = async (c) => (await evaluate(strip(c), false)).queryArc(0, 48).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(4)} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).filter(([k, v]) => !((k === 'gain' || k === 'fmh') && v === 1)).sort().map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v])))}`).sort();
+  const a = await sig(text), b = await sig(code);
+  check('46 Cycles: nothing is skipped, the tempo set with .cpm(cpm) is the Output tempo (30 cycles a minute is 120 BPM), and the code passes the guard (nested when() functions included)', !r.report.skipped.length && r.graph.nodes.find((n) => n.type === 'output').params.bpm === 120 && !gc(code) && /\.when\(/.test(code));
+  check('46 Cycles: a crush with no distort does not bring a distort(2) with it', !/distort/.test(code));
+  check('46 Cycles: a rhythm with euclid steps among others ("x(8,8)!8 x(11,16)") stays as written, and no kept call is written twice', /x\(11,16\)/.test(code) && (code.match(/\.when\(/g) || []).length === 2 && (code.match(/\.struct\(/g) || []).length === 1);
+  check('46 Cycles: the imported board plays what the original plays over 48 cycles', a.length > 500 && a.length === b.length && a.every((x, i) => x === b[i]));
+}
+
+
+// ---------- a patch with named lines (bateria00:), - rests and an object passed to _pianoroll ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const text = readFileSync(new URL('../tools/oleander.strudel', import.meta.url), 'utf8');
+  const r = imp(text, { sounds: (n) => ['bd', 'sd', 'hh'].includes(n) }), code = compile(r.graph).code;
+  const sig = async (c) => (await evaluate(c.replace(/\._pianoroll\([^)]*\)/g, ''), false)).queryArc(0, 16).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(4)} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).filter(([k]) => k !== 'color').sort().map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v])))}`).sort();
+  const a = await sig(text), b = await sig(code);
+  check('Oleander: - is a rest, so a pattern with - rests is not reported as having a silent sound called "-"', !r.report.notes.some((n) => /silent/.test(n)) && !r.report.skipped.length && !gc(code));
+  check('Oleander: the imported board plays what the original plays over 16 cycles (drums, rests, a bass with sweeping filter and random resonance)', a.length > 100 && a.length === b.length && a.every((x, i) => x === b[i]));
+}
+
+
+// ---------- code kept as written must not carry // comments (they would hide the rest of the line) ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const text = readFileSync(new URL('../tools/dash-train.strudel', import.meta.url), 'utf8');
+  const r = imp(text), code = compile(r.graph).code;
+  const sig = async (c) => (await evaluate(c, false)).queryArc(0, 8).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.valueOf().toFixed(4)} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).sort().map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v])))}`).sort();
+  const a = await sig('setcpm(120/4)\n' + text), b = await sig(code);   // .cpm() is relative to the tempo the player is at, so both start from the same one
+  check('Dash: a pattern with // comments between its calls is kept as written without the comments, so none of it is hidden, and it passes the guard', !r.report.skipped.length && !/\/\//.test(code) && /sawtooth/.test(code) && !gc(code));
+  check('Dash: the imported board plays what the original plays (a rate pattern, .cpm on one pattern, sweeping filter and pan)', a.length > 5 && a.length === b.length && a.every((x, i) => x === b[i]) && a.every((x) => /sawtooth/.test(x)));
+}
+
+
+// ---------- evaluations never overlap ----------
+{
+  const { exclusive } = await import('../src/evallock.js');
+  const log = [];
+  const job = (name, ms, fail = false) => exclusive(async () => { log.push('start ' + name); await new Promise((r) => setTimeout(r, ms)); log.push('end ' + name); if (fail) throw new Error('x'); });
+  const rs = await Promise.allSettled([job('a', 30), job('b', 5, true), job('c', 1)]);
+  check('Evaluation lock: the player and the offline evaluator take turns (one finishes before the next starts, and a failure does not block the rest)', log.join(',') === 'start a,end a,start b,end b,start c,end c' && rs[1].status === 'rejected' && rs[2].status === 'fulfilled');
+}
+
 process.exit(failures ? 1 : 0);

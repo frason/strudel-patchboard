@@ -1,5 +1,9 @@
 // Strudel is the only clock. We hand it the compiled code string and tap the events it schedules.
-import { initStrudel, initAudio, webaudioOutput, getAudioContext, samples, evalScope, ref, getAnalyzerData, superdough, getSuperdoughAudioController } from '@strudel/web';
+import { initStrudel, initAudio, webaudioOutput, getAudioContext, samples, evalScope, ref, getAnalyzerData, superdough, getSuperdoughAudioController, soundMap, getSampleBuffer, aliasBank } from '@strudel/web';
+import { approvedPacks, validPack, cleanPack } from './packs.js';
+import DRUM_ALIASES from './drum-aliases.json';
+import { REC_MAX_SECONDS } from './wav.js';
+import { exclusive } from './evallock.js';
 import { getPrefs, onPrefs } from './prefs.js';
 import { makeSliderWithID, sliderValues } from './slider.js';
 import { registerSoundfonts } from './soundfonts.js';
@@ -52,7 +56,8 @@ function ensureSafeOutput() {
     const shaper = ctx.createWaveShaper(); shaper.curve = softCurve(); shaper.oversample = '2x';
     const meter = ctx.createAnalyser(); meter.fftSize = 1024;
     shaper.connect(ctx.destination);
-    safe = { ctx, dg, comp, trim, pre, shaper, meter, buf: new Float32Array(meter.fftSize), on: null };
+    const tap = ctx.createGain(); shaper.connect(tap);   // what the speakers get, for recording (a recording hears the limiter too)
+    safe = { ctx, dg, comp, trim, pre, shaper, tap, meter, buf: new Float32Array(meter.fftSize), on: null };
   } catch { safe = null; }
   return safe;
 }
@@ -64,7 +69,7 @@ function routeSafeOutput() {
   try {
     s.dg.disconnect();
     s.dg.connect(s.meter);                       // the meter always listens to the signal as Strudel makes it
-    if (on) s.dg.connect(s.comp); else s.dg.connect(s.ctx.destination);
+    if (on) s.dg.connect(s.comp); else { s.dg.connect(s.ctx.destination); s.dg.connect(s.tap); }
     s.pre.disconnect(); if (on) s.pre.connect(s.shaper);
     s.on = on;
   } catch { /* leave the output as it was */ }
@@ -91,6 +96,24 @@ function unlockAudioSession() {
   } catch { /* the sound still plays when the switch is on ring */ }
 }
 
+
+// The recorder: an audio worklet that turns what reaches the speakers into 16-bit stereo pieces and posts them to the page (the page never touches the audio thread).
+const REC_WORKLET = `class PbRec extends AudioWorkletProcessor {
+  constructor() { super(); this.on = true; this.n = 0; this.buf = new Int16Array(8192); this.port.onmessage = (e) => { if (e.data === 'stop') { this.flush(); this.on = false; } }; }
+  flush() { if (!this.n) return; this.port.postMessage(this.buf.slice(0, this.n)); this.n = 0; }
+  process(inputs) {
+    if (!this.on) return false;
+    const x = inputs[0];
+    if (x && x.length) {
+      const l = x[0], r = x[1] || x[0], q = (v) => (v > 1 ? 32767 : v < -1 ? -32768 : Math.round(v * 32767));
+      for (let i = 0; i < l.length; i++) { this.buf[this.n++] = q(l[i]); this.buf[this.n++] = q(r[i]); }
+      if (this.n >= 8192 - 256) this.flush();
+    }
+    return true;
+  }
+}
+registerProcessor('pb-rec', PbRec);`;
+
 export function createEngine() {
   const late = { count: 0, at: 0, by: 0 };   // notes that reached the audio player after their moment had passed (they are skipped, with only a console message)
   let repl = null;
@@ -100,6 +123,7 @@ export function createEngine() {
   const statusSubs = new Set();
   let status = { state: 'idle', message: '' };
   let evalSeq = 0;
+  const packsLoaded = new Set();
 
   const setStatus = (state, message = '') => {
     status = { state, message };
@@ -150,7 +174,10 @@ export function createEngine() {
               samples('github:tidalcycles/dirt-samples'),
               samples('github:switchangel/breaks'), // public-domain break loops: s("breaks")
               samples('github:switchangel/pad'),    // public-domain pad: s("swpad")
+              ...approvedPacks().map((spec) => { packsLoaded.add(spec); return samples(spec); }),   // packs the person said yes to when importing code that asked for them
             ]);
+            // short names for the drum machines (dr550_bd, tr808_cp, linn_sd ...), the same ones strudel.cc has: s("dr550_bd") plays BossDR550_bd. The list is kept in this app, because the page may only fetch from GitHub.
+            try { await aliasBank({ ...DRUM_ALIASES }); } catch (e) { console.warn('[patchboard] drum machine names failed', String(e)); }
             const failed = results.filter((r) => r.status === 'rejected');
             if (failed.length) console.warn('[patchboard] sample maps failed to load', failed.map((f) => String(f.reason)));
           },
@@ -169,14 +196,81 @@ export function createEngine() {
     onHap(f) { hapSubs.add(f); return () => hapSubs.delete(f); },
     onStatus(f) { statusSubs.add(f); return () => statusSubs.delete(f); },
     // must be called from the click handler: initAudio has to run inside the user gesture
-    async start(code) {
+    async start(code, { prepare } = {}) {
       unlockAudioSession();                // inside the click: lets sound play with the iPhone silent switch on
       const audio = initAudio();           // inside the click, before any await that could lose the gesture
       await audio;
       await ensure();
       routeSafeOutput();
+      // prepare() runs before the first note: it downloads the sounds the piece will use, so playing starts only once they are here. It may return false to cancel.
+      if (prepare && (await prepare()) === false) { setStatus('ready', ''); return; }
       playing = true;
       if ((await api.evaluate(code)) === false) playing = false;
+    },
+    // Sample packs the person approved (github:user/repo): their sound lists are fetched and registered. The sound files themselves come with download().
+    async addPacks(specs) {
+      await ensure();
+      for (const spec of specs.map(cleanPack).filter(validPack)) {
+        if (packsLoaded.has(spec)) continue;
+        await samples(spec); packsLoaded.add(spec);
+      }
+    },
+    // The sample files that playing these events needs and that are not in memory yet. events: { s, n, bank } from the offline query of the piece.
+    soundNeeds(events) {
+      const map = soundMap.get(), need = new Map();
+      for (const e of events) {
+        const s = typeof e.s === 'string' ? e.s.toLowerCase() : null; if (!s) continue;
+        const bank = typeof e.bank === 'string' && e.bank ? e.bank.toLowerCase() : '';
+        const key = bank && map[`${bank}_${s}`] ? `${bank}_${s}` : s, entry = map[key], data = entry && entry.data;
+        if (!data || data.type !== 'sample' || !data.samples) continue;
+        const n = Number.isFinite(Number(e.n)) ? Number(e.n) : 0;
+        need.set(`${key}:${n}:${e.note ?? ''}`, { key, hap: { s: key, n, ...(e.note !== undefined ? { note: e.note } : {}) }, samples: data.samples });
+      }
+      return [...need.values()];
+    },
+    // Download and decode them, a few at a time. onProgress(done, total); stop() returning true cancels. Resolves to how many failed.
+    async download(needs, onProgress, stop = () => false) {
+      let done = 0, failed = 0, next = 0;
+      const total = needs.length; onProgress?.(0, total);
+      const worker = async () => {
+        while (next < total && !stop()) {
+          const it = needs[next++];
+          try { await getSampleBuffer(it.hap, it.samples); } catch { failed++; }
+          done++; onProgress?.(done, total);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, total) }, worker));
+      return failed;
+    },
+    // Record what comes out of the speakers. Resolves to { stop() -> Promise<{ chunks, sampleRate }> }; onLimit() is called when the recording reaches its longest length.
+    async record(onLimit) {
+      const sf = ensureSafeOutput(); if (!sf) throw new Error('The audio has not started yet. Press play first.');
+      routeSafeOutput();
+      const ctx = sf.ctx;
+      if (!sf.recReady) {
+        const url = URL.createObjectURL(new Blob([REC_WORKLET], { type: 'text/javascript' }));
+        try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+        sf.recReady = true;
+      }
+      const node = new AudioWorkletNode(ctx, 'pb-rec', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }), mute = ctx.createGain(), chunks = [];
+      mute.gain.value = 0; node.connect(mute); mute.connect(ctx.destination);   // a node nothing listens to may not be run: this one feeds a muted path
+      let samples = 0, finished = null, hitLimit = false;
+      node.port.onmessage = (e) => {
+        chunks.push(e.data); samples += e.data.length;
+        if (!hitLimit && samples / 2 / ctx.sampleRate >= REC_MAX_SECONDS) { hitLimit = true; onLimit?.(); }
+      };
+      sf.tap.connect(node);
+      return {
+        stop() {
+          if (!finished) finished = new Promise((resolve) => {
+            node.port.onmessage = (e) => { chunks.push(e.data); };
+            node.port.postMessage('stop');
+            setTimeout(() => { try { sf.tap.disconnect(node); node.disconnect(); mute.disconnect(); } catch { /* already gone */ } resolve({ chunks, sampleRate: ctx.sampleRate }); }, 120);
+          });
+          return finished;
+        },
+        get seconds() { return samples / 2 / ctx.sampleRate; },
+      };
     },
     async evaluate(code) {
       if (!repl) return false;
@@ -190,7 +284,7 @@ export function createEngine() {
         const ctrl = getSuperdoughAudioController();
         for (const m of code.matchAll(/\.duck\(\s*["'`]?([\d:\s]+)/g)) for (const n of m[1].split(/[:\s]+/).filter(Boolean)) ctrl.getOrbit(Number(n), [0, 1]);
       } catch { /* the sound will still play; at worst the first hit is not ducked */ }
-      await repl.evaluate(code, playing);
+      await exclusive(() => repl.evaluate(code, playing));   // never while the offline evaluator is mid-evaluation (see evallock.js)
       if (seq === evalSeq && repl.state.evalError) setStatus('error', repl.state.evalError.message);
       else if (seq === evalSeq) setStatus(playing ? 'playing' : 'ready', '');
       return true;

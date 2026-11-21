@@ -1,10 +1,11 @@
 // Strudel code -> patch. Reads ordinary Strudel scripts (the same JavaScript Strudel itself runs) and builds modules for
 // what the module list can express. Anything else is reported with its line number and a reason: never silently dropped.
+import { validPack } from './packs.js';
 import { parse } from 'acorn';
 import { makeNode, normalize, validateShape } from './graph.js';
 import { parseMini, Unsupported } from './mini.js';
 import { MODULES, SCALES, makeCells, EVERY_FNS, SOMETIMES_FNS, NOTE_NAMES } from './modules.js';
-import { parseChord, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
+import { parseChord, sharpSym, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
 import { melodyToNotes } from './convert.js';
 import { guardCalls, guardCode } from './guard.js';
 import { cleanParams } from './validate.js';
@@ -13,6 +14,8 @@ import { takeToPattern } from './takecode.js';
 class Skip extends Error {}
 
 const pwGiven = new WeakMap();
+// sounds Strudel makes itself (no sample files behind them): they play anywhere, so they are never reported as missing
+const BUILT_IN_SYNTHS = new Set(['crackle', 'white', 'pink', 'brown', 'sine', 'sawtooth', 'square', 'triangle', 'pulse', 'user', 'supersaw', 'bytebeat', 'zzfx', 'z_sine', 'z_sawtooth', 'z_triangle', 'z_square', 'z_tan', 'z_noise']);
 const implicitSynths = new WeakSet();   // instruments the importer made only because a note pattern needs one: a later .s() on the whole stack can set their sound
 // effects the code can name that the audio engine bundled with Patchboard has no code to play: skipped with a reason, never turned into a module that is silent
 const NO_BROWSER_FX = { chorus: 'a chorus', ring: 'ring modulation', ringf: 'ring modulation', ringdf: 'ring modulation', leslie: 'a rotating-speaker effect', lrate: 'a rotating-speaker effect', lsize: 'a rotating-speaker effect' };
@@ -190,7 +193,7 @@ function splitTop(t) {
 // sounds: a Set of the plain sound names, or a function (name, bank) => boolean that knows each drum machine's own list
 export function importStrudel(code, { sounds = null } = {}) {
   CONSTS = new Map();
-  const report = { done: [], skipped: [], notes: [] };
+  const report = { done: [], skipped: [], notes: [], packs: [] };
   if (typeof code !== 'string') return { error: 'There is no code to read.' };
   if (code.length > 300_000) return { error: `This code is too large to read (${Math.round(code.length / 1000)} KB; the limit is 300 KB).` };
   const lines = code.split('\n');
@@ -548,11 +551,13 @@ export function importStrudel(code, { sounds = null } = {}) {
     } else if (name === 'chord') {
       const text = str(root.arguments?.[0]);
       if (text === null) throw new Skip('chord() with something other than a plain pattern string');
-      const { items, mode, fast } = readSteps(text, 'rhythm', (l) => l);
+      if (!calls.some((c) => c.name === 'voicing')) throw new Skip('chord() without voicing() plays nothing by itself in Strudel, so it is kept as written');
+      const { items, mode, fast, slow } = readSteps(text, 'rhythm', (l) => l);
       void items;
       const parsed = parseMiniChords(text);
       S.root = add('chords', { steps: parsed.cells.length, mode: parsed.mode, cells: parsed.cells }, stmt);
       if (parsed.fast !== 1) S.pre.push({ type: 'fast', params: { n: parsed.fast } });
+      if (slow !== 1) S.pre.push({ type: 'slow', params: { n: slow } });   // <Am Dm>/4: each chord lasts four cycles
       S.kind = 'notes';
       S.instrument = add('synth', { wave: 'triangle' }, stmt);
       S.sources.push(S.instrument);
@@ -654,8 +659,12 @@ export function importStrudel(code, { sounds = null } = {}) {
       try { applyCall(S, c, fxFor, pending, velocity); }
       catch (e) {
         if (!(e instanceof Skip)) throw e;
-        const taken = keepAsCode(S, c, calls.slice(ci + 1));
-        if (taken) { taken.forEach((k) => absorbed.add(ci + 1 + k)); return; }
+        // a call that changes how the chords are voiced cannot be kept as code after the Chords module (which voices them itself, so they would be voiced twice), and must not be dropped: the whole line stays as written
+        if (S.root?.type === 'chords' && /^(offset|anchor|dict|octaves|mode)$/.test(c.name)) throw new Skip(e.message);
+        const idxs = [], rest = [];   // the later calls that are still free: ones an earlier kept call already took along are not written a second time
+        calls.forEach((x, j) => { if (j > ci && !absorbed.has(j)) { idxs.push(j); rest.push(x); } });
+        const taken = keepAsCode(S, c, rest);
+        if (taken) { taken.forEach((k) => absorbed.add(idxs[k])); return; }
         report.skipped.push({ line: c.prop.loc.start.line, text: `.${c.name}(…)  in  ${lineText(c.prop)}`, reason: e.message });
       }
     });
@@ -717,7 +726,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       else {
         const pc = parseChord(it.v);
         if (!pc || !(pc.q in QUALITY_INTERVALS)) throw new Skip(`the chord "${it.v}" is not one of the kinds offered`);
-        cell = { sym: it.v, d: null, len: w };
+        cell = { sym: sharpSym(it.v), d: null, len: w };
       }
       cells.push(cell);
       for (let k = 1; k < w; k++) cells.push({ sym: null, d: null, len: 1 });
@@ -731,7 +740,7 @@ export function importStrudel(code, { sounds = null } = {}) {
   // (gain, filters, reverb and so on never change when things happen, so those can still become modules). Names of numbers and text that the file declares with const
   // are replaced by their values. Returns the offsets (into `rest`) of the later calls it took, or null when it cannot be kept: the call is not one Strudel offers
   // (the guard's list), or the browser player cannot play it, or it needs something only a module can do (a scale).
-  const COMMUTES = new Set(['gain', 'pan', 'lpf', 'hpf', 'bpf', 'lpq', 'hpq', 'cutoff', 'resonance', 'hcutoff', 'hresonance', 'room', 'roomsize', 'size', 'rsize', 'sz', 'delay', 'delaytime', 'delayfeedback', 'delayfb', 'delayt', 'distort', 'shape', 'crush', 'coarse', 'attack', 'decay', 'sustain', 'release', 'adsr', 'postgain', 'orbit', 'speed', 'bank', 'vowel', 'phaser', 'phaserdepth', 'phasercenter', 'phasersweep', 'tremolo', 'fm', 'fmh', 'duck', 'duckattack', 'duckdepth', 'color', 'colour', 'legato', 'clip', 'velocity', 'lps', 'lpa', 'lpd', 'lpenv', 'detune', 'acidenv', 'compressor', 'djf', 'ftype', 'roomfade', 'roomlp', 'roomdim', 'att', 'rel', 'dec', 'sus', 'amp', 'vel', 'unit', 'cut', 'accelerate', 'begin', 'end']);
+  const COMMUTES = new Set(['gain', 'pan', 'lpf', 'hpf', 'bpf', 'lpq', 'hpq', 'cutoff', 'resonance', 'hcutoff', 'hresonance', 'room', 'roomsize', 'size', 'rsize', 'sz', 'delay', 'delaytime', 'delayfeedback', 'delayfb', 'delayt', 'distort', 'shape', 'crush', 'coarse', 'attack', 'decay', 'sustain', 'release', 'adsr', 'postgain', 'orbit', 'speed', 'bank', 'vowel', 'phaser', 'phaserdepth', 'phasercenter', 'phasersweep', 'tremolo', 'fm', 'fmh', 'duck', 'duckattack', 'duckdepth', 'color', 'colour', 'legato', 'clip', 'velocity', 'lps', 'lpa', 'lpd', 'lpenv', 'detune', 'acidenv', 'compressor', 'djf', 'ftype', 'roomfade', 'roomlp', 'roomdim', 'att', 'rel', 'dec', 'sus', 'amp', 'vel', 'unit', 'cut', 'accelerate', 'begin', 'end', 'dt', 'dfb', 'lpe']);
   // the source of an expression with every name the file declared with const written out as its value (numbers and text, and patterns too), so it stands on its own
   function inlineSrc(node, depth = 0) {
     const ids = [];
@@ -743,6 +752,8 @@ export function importStrudel(code, { sounds = null } = {}) {
     };
     walk(node, null, '');
     let txt = code.slice(node.start, node.end);
+    // a // comment inside the text would swallow everything after it once the lines are joined into one: blank those out (same length, so the offsets below still fit)
+    for (const cm of comments) if (cm.type === 'Line' && cm.start >= node.start && cm.end <= node.end) txt = txt.slice(0, cm.start - node.start) + ' '.repeat(cm.end - cm.start) + txt.slice(cm.end - node.start);
     ids.sort((p, q) => q.start - p.start).forEach((id) => {
       const init = CONSTS.get(id.name) || vars.get(id.name);
       txt = txt.slice(0, id.start - node.start) + '(' + inlineSrc(init, depth + 1) + ')' + txt.slice(id.end - node.start);
@@ -753,10 +764,16 @@ export function importStrudel(code, { sounds = null } = {}) {
   function keepAsCode(S, c, rest) {
     if (NO_BROWSER_FX[c.name] || c.name === 'squiz') return null;   // the browser player cannot play these at all: left out with the reason
     const took = [];
-    rest.forEach((r, k) => { if (!COMMUTES.has(r.name)) took.push(k); });
+    // A later call can stay a module only when its value is a plain number or a plain name. A signal (sine.range(..)) or a pattern ("<1 .5>") is read at the moment of each note,
+    // so it gives other values once a kept call (euclidRot, chop, struct ...) has changed when the notes happen: it has to stay behind that call, written out with it.
+    const plainValue = (r) => r.args.every((x) => num(x) !== null || (str(x) !== null && /^[\w#.-]+$/.test(str(x))));
+    rest.forEach((r, k) => { if (!COMMUTES.has(r.name) || !plainValue(r)) took.push(k); });
     if (took.some((k) => rest[k].name === 'scale' || NO_BROWSER_FX[rest[k].name] || rest[k].name === 'squiz')) return null;
-    const text = callText(c) + took.map((k) => callText(rest[k])).join('');
+    // Strudel's own _pianoroll() / _scope() ... draw inside strudel.cc's editor and do not exist in the browser player: they become the board's view modules instead of text
+    const viz = took.filter((k) => VIZ.has(rest[k].name)), plain = took.filter((k) => !VIZ.has(rest[k].name));
+    const text = callText(c) + plain.map((k) => callText(rest[k])).join('');
     if (guardCalls(text)) return null;
+    for (const k of viz) { const v = rest[k].name; S.viz.push(v.includes('scope') ? 'scope' : v.includes('punchcard') ? 'punchcard' : v.includes('spiral') ? 'spiral' : v.includes('pitchwheel') ? 'pitchwheel' : 'pianoroll'); }
     S.codeCalls.push(text);
     report.notes.push(`line ${c.prop.loc.start.line}: ${text.length > 70 ? text.slice(0, 70) + '…' : text} has no module of its own, so it is kept as written in a Strudel Code module.`);
     return took;
@@ -780,6 +797,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     }
     if (n === 'voicing') return;
     if (n === 'mode' && S.root?.type === 'chords') { const t = str(a[0]); if (t && ['above:c3', 'above:c4', 'above:c5'].includes(t)) { S.root.params.register = t; return; } throw new Skip('this voicing mode'); }
+    if (n === 'dict' && str(a[0]) === 'ireal') return;   // the voicing dictionary the Chords module already uses
     if (n === 'anchor' || n === 'dict' || n === 'offset' || n === 'octaves') throw new Skip(`${n}() voicing setting`);
     if (n === 'velocity' && S.melody) { const t = str(a[0]); if (t === null) throw new Skip('velocity with something other than a pattern string'); velocity.push({ text: t, line: c.prop.loc.start.line }); return; }
     if ((n === 's' || n === 'sound') && str(a[0]) === 'user' && S.kind === 'notes') { S.userWave = true; return; }   // sound("user") builds the wave from .partials([...]): that is the Harmonics module
@@ -795,7 +813,9 @@ export function importStrudel(code, { sounds = null } = {}) {
       }
       throw new Skip('a second .s() on this pattern');
     }
-    if (n === 'bank') { const t = str(a[0]); if (t === null) throw new Skip('bank with something other than a name'); const targets = src.filter((s) => s.type === 'sample'); if (!targets.length) throw new Skip('bank() needs a sample'); targets.forEach((s) => { s.params.bank = t; }); return; }
+    if (n === 'bank') { const t = str(a[0]); if (t === null) throw new Skip('bank with something other than a name'); const targets = src.filter((s) => s.type === 'sample'), coded = src.filter((s) => s.type === 'codesource'); if (!targets.length && !coded.length) throw new Skip('bank() needs a sample'); targets.forEach((s) => { s.params.bank = t; });
+      coded.forEach((s) => { s.params.code = (s.params.code + '.bank(' + JSON.stringify(t) + ')').slice(0, 4000); });   // kept-as-written code takes the bank too, written after the code so it applies the same way
+      return; }
     if (n === 'fit') { src.filter((s) => s.type === 'sample').forEach((s) => { s.params.fit = 'on'; }); return; }
     if (n === 'struct') {
       const root = S.root;
@@ -821,7 +841,11 @@ export function importStrudel(code, { sounds = null } = {}) {
       const t = str(a[0]);
       if (t === null) throw new Skip('struct() with something other than a pattern string');
       let parsed = null;
-      try { const rs = readSteps(t, 'rhythm', (l) => l, { euclid: true }); parsed = { ...rs, cells: rs.items.length === 1 && rs.items[0].euclid ? null : cellsFromItems(rs.items, 'rhythm', (l) => l) }; }
+      try {
+        const rs = readSteps(t, 'rhythm', (l) => l, { euclid: true }), onlyEuclid = rs.items.length === 1 && rs.items[0].euclid;
+        if (!onlyEuclid && JSON.stringify(rs.items).includes('"euclid"')) throw new Skip('a euclidean rhythm inside a longer pattern (x(3,8) among other steps)');   // the step grid would lose the (pulses, steps): it stays as text
+        parsed = { ...rs, cells: onlyEuclid ? null : cellsFromItems(rs.items, 'rhythm', (l) => l) };
+      }
       catch (e) { if (!(e instanceof Skip)) throw e; parsed = { err: e.message }; }
       if (hitTag || parsed.err || (parsed.cells && (parsed.cells.length < 1 || parsed.cells.length > 16)) || (onNotes && parsed.cells === null)) {   // too long or too fine for the Rhythm Sequencer: keep it exactly as written, as a Hit Pattern
         if (t.length > 8000) throw new Skip(parsed.err || `${parsed.cells.length} steps (1 to 16 are supported)`);
@@ -881,7 +905,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     if (n === 'every') { const k = num(a[0]); if (k === null) throw new Skip('every() with something other than a number'); S.pre.push({ type: 'every', params: { n: k, fn: everyFn(a[1]) } }); return; }
     if (n === 'arp') { const t = str(a[0]); if (t === null) throw new Skip('arp() with something other than a pattern string'); const st = ARP_STYLES.find(([v]) => v === t); S.pre.push({ type: 'arp', params: st ? { style: t } : { style: 'custom', custom: t } }); return; }
     // routing and views
-    if (n === 'orbit' || n === 'o') { const v = num(a[0]); if (v === null) throw new Skip('orbit with something other than a number'); S.meta.orbit = v; return; }
+    if (n === 'orbit' || n === 'o') { const v = num(a[0]); if (v === null) throw new Skip('orbit with something other than a number'); if (!Number.isInteger(v) || v < 1 || v > 8) throw new Skip('orbit ' + v + ' (the Orbit module holds 1 to 8)'); S.meta.orbit = v; return; }
     if (n === 'duck' || n === 'duckorbit') { const t = a[0] ? (num(a[0]) !== null ? String(num(a[0])) : str(a[0])) : null; if (!t) throw new Skip('duck() with something other than orbit numbers'); S.meta.duck = S.meta.duck || {}; S.meta.duck.targets = t.split(/[:,\s]+/).map(Number).filter(Number.isFinite); return; }
     if (n === 'duckdepth') { const v = num(a[0]); if (v === null) throw new Skip('duckdepth with something other than a number'); S.meta.duck = S.meta.duck || {}; S.meta.duck.depth = v; return; }
     if (n === 'duckattack' || n === 'duckatt') { const v = num(a[0]); if (v === null) throw new Skip('duckattack with something other than a number'); S.meta.duck = S.meta.duck || {}; S.meta.duck.attack = v; return; }
@@ -902,8 +926,11 @@ export function importStrudel(code, { sounds = null } = {}) {
     // everything else becomes an effect module
     const fx = FX[n];
     if (fx) {
+     const existedBefore = S.fx.has(fx[0]);
+     try {   // a call that cannot become a module must not leave an empty effect module behind (it would write its default setting into the code)
       const [type, key, fixed] = fx;
       const f = fxFor(type);
+      if (type === 'distortion' && f.params.amount === undefined) f.params.amount = 0;   // crush() or shape() alone must not bring distort(2) with it
       if (type === 'pulsewidth') {   // Strudel sweeps only when pwrate or pwsweep is given: pwrate alone sweeps by 0.3, pwsweep alone swings at 1 Hz
         const g = pwGiven.get(f) || pwGiven.set(f, new Set()).get(f);
         g.add(n);
@@ -925,6 +952,7 @@ export function importStrudel(code, { sounds = null } = {}) {
       const spec = MODULES[type].params.find((p) => p.key === key);
       if (sig && spec && spec.wire) { f.signals.push([key, sig]); return; }
       throw new Skip(`${n} with something other than a plain number${spec && spec.wire ? ', slider or signal' : ''}`);
+     } catch (e) { if (!existedBefore && e instanceof Skip) S.fx.delete(fx[0]); throw e; }
     }
     if (n === 'compressor') {
       const t = str(a[0]);
@@ -996,7 +1024,12 @@ export function importStrudel(code, { sounds = null } = {}) {
         continue;
       }
       if (cn === 'setcps' || cn === 'setCps') { const v = num(expr.arguments[0]); if (v !== null) { out.bpm = Math.round(v * 60 * 4); out.beats = 4; } else skip(st, 'a tempo that is not a plain number'); continue; }
-      if (cn === 'samples') { report.notes.push(`${lineText(st)}: the app loads its own sound libraries, so this line is ignored`); continue; }
+      if (cn === 'samples') {
+        const spec = str(expr.arguments[0]);
+        if (spec !== null && validPack(spec)) { if (!report.packs.includes(spec.trim())) report.packs.push(spec.trim()); report.notes.push(`${lineText(st)}: a sample pack from GitHub. It downloads only if you say so when importing.`); }
+        else report.notes.push(`${lineText(st)}: the app loads its own sound libraries (and GitHub packs written github:user/repo), so this line is ignored`);
+        continue;
+      }
       if (cn === 'register') {
         const nm = str(expr.arguments[0]);
         const body = expr.arguments[1] ? code.slice(expr.arguments[1].start, expr.arguments[1].end).replace(/\s+/g, '') : '';
@@ -1029,7 +1062,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     } else if (st.type === 'VariableDeclaration') {
       for (const d of st.declarations) {
         if (d.id.type === 'Identifier' && d.init && d.init.type === 'CallExpression') vars.set(d.id.name, d.init);
-        else if (st.kind === 'const' && d.id.type === 'Identifier' && d.init && (num(d.init) !== null || str(d.init) !== null)) CONSTS.set(d.id.name, d.init);   // a plain number or text: where it is used, the value is used
+        else if (d.id.type === 'Identifier' && d.init && (num(d.init) !== null || str(d.init) !== null)) CONSTS.set(d.id.name, d.init);   // a plain number or text: where it is used, the value is used
         else skip(st, 'a variable that is not a pattern');
       }
       continue;
@@ -1038,6 +1071,9 @@ export function importStrudel(code, { sounds = null } = {}) {
     } else if (st.type === 'EmptyStatement') continue;
     else { skip(st, `${st.type.replace(/Statement|Declaration/, '').toLowerCase()} code`); continue; }
 
+    // a tempo set on the whole pattern, stack(...).cpm(30): cycles a minute for the whole patch, which is the Output module's tempo (cpm 30 is 120 BPM at 4 beats)
+    { const u = unwrap(expr), last = u.calls[u.calls.length - 1];
+      if (last && last.name === 'cpm' && last.args.length === 1 && num(last.args[0]) !== null && num(last.args[0]) > 0) { out.bpm = Math.round(num(last.args[0]) * 4 * 100) / 100; out.beats = 4; expr = last.node.callee.object; } }
     stmtNo++;
     try {
       const r = chainOrCode(expr, stmtNo);
@@ -1186,7 +1222,7 @@ export function importStrudel(code, { sounds = null } = {}) {
   // sounds the app does not have
   if (sounds) {
     const missing = new Set();
-    for (const nd of g.nodes) if (nd.type === 'sample') String(nd.params.name).split(/[\s\[\]<>~*!@,]+/).map((w) => w.split(':')[0]).filter((w) => w && !/^\d/.test(w) && !(typeof sounds === 'function' ? sounds(w, nd.params.bank || '') : sounds.has(w))).forEach((w) => missing.add(w));
+    for (const nd of g.nodes) if (nd.type === 'sample') String(nd.params.name).replace(/\([^()]*\)/g, '').split(/[\s\[\]<>~*!@,]+/).map((w) => w.split(':')[0]).filter((w) => w && w !== '-' && !/^\d/.test(w) && !BUILT_IN_SYNTHS.has(w) && !(typeof sounds === 'function' ? sounds(w, nd.params.bank || '') : sounds.has(w))).forEach((w) => missing.add(w));
     if (missing.size) report.notes.push(`these sound names are not in the built-in libraries and will be silent: ${[...missing].join(', ')}`);
   }
   report.done = finalHeads.map((h) => ({ line: h.line, text: h.text }));

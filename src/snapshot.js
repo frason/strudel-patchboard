@@ -3,14 +3,23 @@
 //  layoutSnapshot  turns events into lanes and time positions (pure, tested without a browser)
 //  drawSnapshot    paints a layout on a canvas
 import { guardCode } from './guard.js';
+import { exclusive } from './evallock.js';
 
 let offline = null, queue = Promise.resolve();
 // Evaluate compiled code without sound. Only code that passes the same guard as playback is ever run.
 const initOffline = () => (async () => {
-      const [core, mini, tonal, transpiler, slider] = await Promise.all([import('@strudel/core'), import('@strudel/mini'), import('@strudel/tonal'), import('@strudel/transpiler'), import('./slider.js')]);
-      await core.evalScope(core, mini, tonal, { sliderWithID: slider.makeSliderWithID(core.ref) });
-      return core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } });
-    })();
+  // In the browser this uses the very same Strudel as the audio player (the one inside @strudel/web). A second copy would take the shared names (stack, note ...) from the
+  // player on first use and break its next evaluation ("stack(...).p is not a function"). Node (the tests) has no player, so it uses the plain packages.
+  const web = typeof window === 'undefined' ? null : await import('@strudel/web');
+  const slider = await import('./slider.js');
+  if (web) {
+    await web.evalScope(web, { sliderWithID: slider.makeSliderWithID(web.ref) });
+    return web.repl({ defaultOutput() {}, getTime: () => 0, transpiler: web.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } });
+  }
+  const [core, mini, tonal, transpiler] = await Promise.all([import('@strudel/core'), import('@strudel/mini'), import('@strudel/tonal'), import('@strudel/transpiler')]);
+  await core.evalScope(core, mini, tonal, { sliderWithID: slider.makeSliderWithID(core.ref) });
+  return core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } });
+})();
 export async function queryPatch(code, cycles) {
   const refused = guardCode(code);
   if (refused) throw new Error('Not drawn: ' + refused);
@@ -18,7 +27,7 @@ export async function queryPatch(code, cycles) {
   // one at a time: the engine keeps the pattern it just evaluated in one shared place, so two pictures asking together could be handed each other's notes
   // The audio engine and this offline evaluator share Strudel's global names. If the engine was still starting up when this ran, the names can briefly belong to a
   // half-built engine ("... .p is not a function"): build the offline evaluator again and ask once more before giving up.
-  const run = async () => { const { evaluate } = await offline; return (await evaluate(code, false)).queryArc(0, cycles); };
+  const run = () => exclusive(async () => { const { evaluate } = await offline; return (await evaluate(code, false)).queryArc(0, cycles); });
   const turn = queue.then(() => run().catch(async (e) => {
     if (!/is not a function|is not defined/.test(String((e && e.message) || e))) throw e;
     offline = null; await new Promise((r) => setTimeout(r, 400));

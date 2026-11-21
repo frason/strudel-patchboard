@@ -26,6 +26,8 @@ import { patternToDrums } from './todrums.js';
 import { CONVERTERS } from './convert.js';
 import { openRecorder } from './recordui.js';
 import { mergeGraph } from './recorder.js';
+import { approvePacks, approvedPacks } from './packs.js';
+import { wavBytes, recordingSeconds, recordingName } from './wav.js';
 import { noteName } from './takecode.js';
 import { parseMidi, pickGrid, isMidiFile } from './midifile.js';
 import { cleanParams } from './validate.js';
@@ -59,7 +61,38 @@ let current = compile(store.graph);
 // ---------- layout ----------
 const app = document.getElementById('app');
 const playBtn = h('button', { class: 'play-btn', id: 'play', title: 'Start (Space)', 'aria-label': 'Start' });
-function setPlayUI(on) { playBtn.replaceChildren(icon(on ? 'stop' : 'play', 20)); playBtn.classList.toggle('on', on); playBtn.title = on ? 'Stop (Space)' : 'Start (Space)'; playBtn.setAttribute('aria-label', on ? 'Stop' : 'Start'); }
+const recDot = h('i', { class: 'rec-dot' }), recText = h('span', { class: 'rec-text' }, 'rec');
+const recBtn = h('button', { class: 'rec-btn', id: 'rec-audio', title: 'Record the sound to a WAV file. It starts the piece if it is not playing; press again to stop and save.', 'aria-label': 'Record the sound' }, recDot, recText);
+let dl = null;   // while the sounds of a piece download: { cancelled }
+function setPlayUI(on) {
+  if (dl) return;   // the button is a progress bar until the download is done
+  playBtn.classList.remove('loading'); playBtn.style.removeProperty('--pct');
+  playBtn.replaceChildren(icon(on ? 'stop' : 'play', 20)); playBtn.classList.toggle('on', on); playBtn.title = on ? 'Stop (Space)' : 'Start (Space)'; playBtn.setAttribute('aria-label', on ? 'Stop' : 'Start');
+}
+// The play button turns into a progress bar while the sounds the piece needs download, and turns back into play when they are all here
+function playLoading(done, total) {
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  playBtn.classList.add('loading'); playBtn.classList.remove('on'); playBtn.style.setProperty('--pct', pct + '%');
+  playBtn.replaceChildren(h('span', { class: 'play-fill' }), h('span', { class: 'play-label' }, `${done}/${total}`));
+  playBtn.title = `Downloading sounds: ${done} of ${total} (click to cancel)`; playBtn.setAttribute('aria-label', playBtn.title); playBtn.setAttribute('role', 'progressbar');
+  playBtn.setAttribute('aria-valuenow', String(pct));
+  statusEl.className = 'status loading'; statusEl.textContent = `downloading sounds ${done} of ${total}`;
+}
+// Download every sample file the piece will play (found by running its code offline, as the pictures do). Resolves to false when the person cancelled.
+async function downloadPiece(code) {
+  let events = [];
+  try { events = await queryPatch(code, 64); } catch { return true; }   // a piece that cannot be read offline simply plays, as before
+  const needs = engine.soundNeeds(events);
+  if (!needs.length) return true;
+  dl = { cancelled: false }; const mine = dl;
+  playLoading(0, needs.length);
+  const failed = await engine.download(needs, playLoading, () => mine.cancelled);
+  dl = null; setPlayUI(false); playBtn.removeAttribute('role'); playBtn.removeAttribute('aria-valuenow');
+  statusEl.className = 'status ready'; statusEl.textContent = 'stopped';
+  if (mine.cancelled) return false;
+  if (failed) toast(`${failed} of ${needs.length} sounds could not be downloaded, so those parts will be silent. The pack may be offline or the name may be wrong.`, [], 9000);
+  return true;
+}
 setPlayUI(false);
 const statusEl = h('span', { class: 'status', id: 'status' }, 'ready');
 const scopeCv = h('canvas', { class: 'out-scope', id: 'out-scope', width: 280, height: 64, title: 'The sound coming out, live (before the limiter). A pure tone is a smooth wave; flat tops mean the sound is too loud and is clipping.' });
@@ -180,7 +213,7 @@ iconify(learnBtn, 'book', 'Learning path'); iconify(savesBtn, 'folder', 'Saves a
 iconify(addBtn, 'plus', 'Add a module (Ctrl/⌘ K)'); iconify(codeBtn, 'code', 'Show or hide the Strudel code (Ctrl/⌘ \\)'); iconify(settingsBtn, 'sliders', 'Display settings');
 const top = h('header', { class: 'topbar' },
   h('div', { class: 'brand' }, h('b', {}, 'Strudel'), ' Patchboard'),
-  h('div', { class: 'transport' }, playBtn, bpmBox, tapBtn, beatsBox, scopeCv, statusEl, overEl, busyEl),
+  h('div', { class: 'transport' }, playBtn, recBtn, bpmBox, tapBtn, beatsBox, scopeCv, statusEl, overEl, busyEl),
   h('div', { class: 'toolbar' }, addBtn, newBtn, undoBtn, redoBtn, learnBtn, savesBtn, exportBtn, importBtn, aiBtn, settingsBtn, codeBtn), fileInput);
 
 const paletteEl = h('aside', { class: 'palette' }, h('div', { class: 'pal-head' },
@@ -934,11 +967,45 @@ engine.onStatus((s) => {
   if (!long) closeStatusFull();
   setPlayUI(engine.playing);
 });
-playBtn.addEventListener('click', async () => {
-  if (engine.playing) { engine.stop(); panel.clearFlashes(); board.clearPulses(); setPlayUI(false); return; }
-  evaluated = current;
-  try { await engine.start(current.code); } catch (e) { toast('Could not start audio: ' + e.message, [], 8000); }
+async function startPlayback() {
+  evaluated = current; const code = current.code;
+  try { await engine.start(code, { prepare: () => downloadPiece(code) }); } catch (e) { dl = null; toast('Could not start audio: ' + e.message, [], 8000); }
   setPlayUI(engine.playing);
+}
+playBtn.addEventListener('click', async () => {
+  if (dl) { dl.cancelled = true; return; }   // clicking the progress bar cancels the download and the start
+  if (engine.playing) { engine.stop(); panel.clearFlashes(); board.clearPulses(); setPlayUI(false); return; }
+  await startPlayback();
+});
+
+// ---------- record the audio output ----------
+// Press record to start the piece (if it is not playing) and write what comes out of the speakers to a WAV file; press it again to stop and save.
+let recording = null, recTimer = 0, startedForRec = false;
+const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+async function finishRecording() {
+  const r = recording; if (!r) return;
+  recording = null; clearInterval(recTimer);
+  recBtn.classList.remove('on'); recText.textContent = 'rec'; recBtn.title = 'Record the sound to a WAV file. It starts the piece if it is not playing; press again to stop and save.';
+  let out = null; try { out = await r.stop(); } catch { out = null; }
+  if (startedForRec && engine.playing) { engine.stop(); panel.clearFlashes(); board.clearPulses(); setPlayUI(false); }
+  startedForRec = false;
+  const secs = out ? recordingSeconds(out.chunks, out.sampleRate) : 0;
+  if (!out || secs < 0.2) return toast('Nothing was recorded.', [], 4000);
+  download(recordingName(), wavBytes(out.chunks, out.sampleRate), 'audio/wav');
+  toast(`Saved ${mmss(secs)} of sound as a WAV file (${Math.round(secs * out.sampleRate * 4 / 1e5) / 10} MB).`, [], 7000);
+}
+recBtn.addEventListener('click', async () => {
+  if (recording) return finishRecording();
+  if (dl) return;
+  startedForRec = !engine.playing;
+  if (startedForRec) await startPlayback();
+  if (!engine.playing) { startedForRec = false; return; }
+  try {
+    recording = await engine.record(() => { toast('The recording reached its longest length (15 minutes) and was saved.', [], 6000); finishRecording(); });
+  } catch (e) { recording = null; return toast('Could not record: ' + e.message, [], 8000); }
+  recBtn.classList.add('on'); recBtn.title = 'Stop recording and save the WAV file';
+  const t0 = performance.now(); recText.textContent = '0:00';
+  recTimer = setInterval(() => { recText.textContent = mmss((performance.now() - t0) / 1000); }, 250);
 });
 
 // ---------- undo / redo ----------
@@ -1159,7 +1226,18 @@ function reportDialog(r, label, back) {
     ? h('div', { class: 'imp-list' }, rep.skipped.slice(0, 40).map((s) => h('div', { class: 'imp-row' }, h('span', { class: 'imp-line' }, s.line ? 'line ' + s.line : ''), h('code', {}, s.text), h('span', { class: 'imp-why' }, s.reason))))
     : null;
   const notes = rep.notes.length ? h('div', { class: 'imp-notes' }, rep.notes.map((n) => h('div', {}, '• ' + n))) : null;
-  const go = h('button', { class: 'btn', id: 'import-go', onclick: () => { closeModal(); loadImported(r.graph, label); } }, rep.skipped.length ? 'Import what I can' : 'Import');
+  // a sample pack the code asks for (samples('github:user/repo')) downloads only when this box is ticked; the answer is remembered for that pack in this browser
+  const packs = rep.packs || [];
+  const packBox = packs.length ? h('input', { type: 'checkbox', id: 'import-packs', checked: true }) : null;
+  const packRow = packs.length ? h('label', { class: 'field rec-field imp-packs' }, packBox, h('span', {}, `Download the sounds this code uses from ${packs.join(', ')} (sample packs on GitHub, fetched by your browser). Without them those sounds are silent. The play button turns into a progress bar until they are here.`)) : null;
+  const go = h('button', { class: 'btn', id: 'import-go', onclick: async () => {
+    const want = packBox?.checked;
+    closeModal(); loadImported(r.graph, label);
+    if (!want) return;
+    approvePacks(packs); engine.warm();
+    try { await engine.addPacks(packs); await downloadPiece(compile(store.graph).code); }
+    catch (e) { dl = null; setPlayUI(engine.playing); toast('Could not load the sound pack: ' + (e && e.message ? e.message : e) + '. Is the name right, and are you online?', [], 9000); }
+  } }, rep.skipped.length ? 'Import what I can' : 'Import');
   const copySkipped = rep.skipped.length ? h('button', { class: 'btn ghost', id: 'import-copy-skipped', title: 'Copy the code that was left out, so nothing is lost', onclick: async () => { try { await navigator.clipboard.writeText([...new Set(rep.skipped.map((s) => s.full || s.text))].join('\n\n')); toast('Skipped code copied', [], 2500); } catch { toast('Could not copy the code.', [], 4000); } } }, 'Copy the skipped code') : null;
   const note = aiNote; aiNote = null;
   const still = (note?.left || []).filter((x) => !/cannot read this/.test(x));
@@ -1170,7 +1248,7 @@ function reportDialog(r, label, back) {
   const body = h('div', {},
     aiBox,
     h('p', { class: 'imp-sum' }, r.empty ? 'Nothing in this code could be turned into modules.' : `Built ${r.graph.nodes.filter((n) => n.type !== 'output').length} modules from ${rep.done.length} pattern${rep.done.length === 1 ? '' : 's'}.`, rep.skipped.length ? ` ${rep.skipped.length} part${rep.skipped.length === 1 ? '' : 's'} could not be shown as modules:` : ' Everything was converted.'),
-    list, notes,
+    list, notes, packRow,
     h('p', { class: 'imp-hint' }, 'Skipped parts are left out, not guessed. Importing replaces the board (Undo brings it back).'),
     h('div', { class: 'modal-btns' }, r.empty ? null : go, copySkipped, h('button', { class: 'btn ghost', onclick: back }, 'Back')));
   void total;

@@ -138,6 +138,7 @@ export function compile(g) {
       : opts.say || `${name}(${fmt(value)}) — the "${spec.label}" knob.`;
     if (wired) return [S(`.${name}(`, { ...meta, note: say }), ...wired.map((x) => ({ ...x, role: x.role })), S(')', meta)];
     if (!(spec.always || value !== spec.def)) return null;
+    if (n.type === 'distortion' && spec.key === 'amount' && value === 0) return null;   // distort(0) is not "no distortion" (it turns the sound down): 0 means the knob is not used, so nothing is written
     const txt = spec.str ? q(value) : fmt(value);
     return [S(`.${name}(${txt})`, { ...meta, note: say })];
   }
