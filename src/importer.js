@@ -1066,6 +1066,111 @@ export function importStrudel(code, { sounds = null } = {}) {
   for (const h of finalHeads) { wire(h.head, outNode, 'in'); connected.add(h.head.id); for (const x of h.extra || []) wire(x, outNode, 'in'); }
   if (!finalHeads.length) { /* nothing playable */ }
 
+  // ---- many lines that play one sound: share the instrument and the note patterns ----
+  // Lines like  $: note("..").s("triangle").late(.013).gain(.1)  that differ only in their notes, their .gain and their .late each came in as their own
+  // Note Pattern + Instrument. A line's gain is written down as the velocity of its notes instead (velocity multiplies gain, so it sounds the same), which lets
+  //   1. lines with the same instrument and the same late share one Note Pattern when no two of them play on the same step, and
+  //   2. lines with different lates run side by side into one Stack and one Instrument.
+  // Only plain lines are touched: every note on its own step, same step count in every cycle, no velocity yet. A line that does not fit stays exactly as it was.
+  function foldVoices() {
+    const WORD = /^(~|[a-g][#b]?-?\d)$/i, byId = new Map(nodes.map((n) => [n.id, n]));
+    const into = (n) => wires.filter((w) => w.to.node === n.id), outOf = (n) => wires.filter((w) => w.from.node === n.id);
+    const parse = (text) => {   // "<[a ~ b] [c d e]>" or "a ~ b" -> [[words]] (one array per cycle), or null
+      let t = String(text).trim(); const cyc = [];
+      if (/^<.*>$/.test(t)) {
+        t = t.slice(1, -1).trim();
+        for (const m of t.matchAll(/\[([^\[\]]*)\]|(\S+)/g)) cyc.push((m[1] ?? m[2]).trim().split(/\s+/));
+        if (t.replace(/\[[^\[\]]*\]|\s+|[^\s\[\]]+/g, '') !== '') return null;
+      } else cyc.push(t.split(/\s+/));
+      const W = Math.max(...cyc.map((c) => c.length)), wide = cyc.map((c) => (c.length === 1 && c[0] === '~' ? Array(W).fill('~') : c));   // a lone ~ is a whole silent cycle
+      return cyc.length && wide.every((c) => c.length === W && c.every((w) => WORD.test(w))) ? wide : null;
+    };
+    const chains = [];
+    for (const N of nodes) {
+      if (N.type !== 'notetext' || String(N.params.vel || '').trim() || into(N).length) continue;
+      const cyc = parse(N.params.text); if (!cyc) continue;
+      const lates = []; let cur = N, S = null, tgt = null;
+      for (;;) {   // N, then Lates and exactly one Instrument in any order (Late and the sound do not depend on each other), then the Output
+        const o = outOf(cur); if (o.length !== 1 || o[0].to.port !== 'in') break;
+        const nx = byId.get(o[0].to.node); if (!nx) break;
+        if (nx.type === 'output') { tgt = o[0]; break; }
+        if (into(nx).length !== 1) break;
+        if (nx.type === 'late' && !wires.some((w) => w.to.node === nx.id && w.to.port !== 'in')) { lates.push(nx); cur = nx; continue; }
+        if (nx.type === 'synth' && !S) { S = nx; cur = nx; continue; }
+        break;
+      }
+      if (!S || !tgt || typeof S.params.gain !== 'number') continue;
+      const real = lates.filter((l) => l.params.n !== 0);   // a Late of 0 does nothing
+      chains.push({ N, cyc, lates, real, S, tgt, gain: S.params.gain, vel: cyc.map((c) => c.map((w) => (w === '~' ? null : 1))) });
+    }
+    const { gain: _g, ...none } = {}; void none;
+    const sansGain = (c) => JSON.stringify({ ...c.S.params, gain: 0 });
+    const bySound = new Map();
+    for (const c of chains) { const k = sansGain(c); (bySound.get(k) || bySound.set(k, []).get(k)).push(c); }
+    // N -> Lates -> Instrument -> Output (the same sound as Instrument -> Lates, which is how a line writes .s(..).late(..))
+    const reorder = (c) => {
+      const path = []; let cur = c.N;
+      for (;;) { const o = outOf(cur)[0]; const nx = byId.get(o.to.node); if (nx.type === 'output') break; path.push(nx); cur = nx; }
+      for (const w of wires.filter((x) => path.some((n) => n.id === x.from.node) || x.from.node === c.N.id)) if (path.some((n) => n.id === w.to.node) || w.to.node === c.tgt.to.node) wires.splice(wires.indexOf(w), 1);
+      const seq = [c.N, ...c.lates, c.S];
+      for (let i = 0; i + 1 < seq.length; i++) wires.push({ id: 'iw' + wid++, from: { node: seq[i].id, port: 'out' }, to: { node: seq[i + 1].id, port: 'in' } });
+      c.tgt = { id: 'iw' + wid++, from: { node: c.S.id, port: 'out' }, to: { node: c.tgt.to.node, port: 'in' } }; wires.push(c.tgt);
+    };
+    let folded = 0;
+    for (const grp of bySound.values()) {
+      if (grp.length > 1) grp.forEach(reorder);
+      if (grp.length < 2) continue;
+      // 1. one instrument loudness, and each line's own gain as velocity
+      const G = Math.max(...grp.map((c) => c.gain));
+      if (!(G > 0)) continue;
+      for (const c of grp) { const r = Math.round((c.gain / G) * 10000) / 10000; c.vel = c.vel.map((cy) => cy.map((v) => (v === null ? null : r))); c.gain = G; }
+      // 2. lines with the same late and no step in common share a Note Pattern
+      const byLate = new Map();
+      for (const c of grp) { const k = JSON.stringify(c.real.map((l) => l.params)); (byLate.get(k) || byLate.set(k, []).get(k)).push(c); }
+      const kept = [];
+      for (const lg of byLate.values()) {
+        const hosts = [];
+        for (const c of lg) {
+          const host = hosts.find((h) => h.cyc.length === c.cyc.length && h.cyc[0].length === c.cyc[0].length && h.cyc.every((cy, k) => cy.every((w, i) => w === '~' || c.cyc[k][i] === '~')));
+          if (!host) { hosts.push(c); continue; }
+          host.cyc = host.cyc.map((cy, k) => cy.map((w, i) => (w === '~' ? c.cyc[k][i] : w)));
+          host.vel = host.vel.map((cy, k) => cy.map((v, i) => (v === null ? c.vel[k][i] : v)));
+          drop(c.N); drop(c.S); c.lates.forEach(drop); folded++;
+        }
+        kept.push(...hosts);
+      }
+      for (const c of kept) {
+        const allOne = c.vel.every((cy) => cy.every((v) => v === null || v === 1));
+        const fmtCycles = (m) => (m.length === 1 ? m[0].join(' ') : '<' + m.map((cy) => '[' + cy.join(' ') + ']').join(' ') + '>');
+        c.N.params.text = fmtCycles(c.cyc);
+        c.N.params.vel = allOne ? '' : fmtCycles(c.vel.map((cy) => cy.map((v) => (v === null ? '~' : String(v)))));
+        c.S.params.gain = G;
+        c.lates.filter((l) => l.params.n === 0).forEach((l) => { const i = into(l)[0], o = outOf(l)[0]; if (i && o) { wires.push({ id: 'iw' + wid++, from: i.from, to: o.to }); } drop(l); });
+      }
+      // 3. several lines left (different lates): one Stack and one Instrument for all of them
+      if (kept.length > 1) {
+        const keep = kept[0], ends = [];
+        for (const c of kept) {   // the last Late of each line (or its Note Pattern), cut loose from the line's own Instrument
+          const lastNode = (() => { let n = c.N; for (;;) { const o = outOf(n)[0]; const nx = o && byId.get(o.to.node); if (!nx || nx.type !== 'late' || !nodes.includes(nx)) return n; n = nx; } })();
+          const last = outOf(lastNode).find((w) => byId.get(w.to.node)?.id === c.S.id);
+          if (last) wires.splice(wires.indexOf(last), 1);
+          ends.push(lastNode);
+          if (c !== keep) { drop(c.S); folded++; }
+        }
+        // a Stack takes up to 6 inputs: more lines go into several Stacks that a last Stack joins
+        const join = (list) => {
+          if (list.length <= 6) { const st = add('stack', { n: Math.max(2, list.length) }, keep.N.__stmt); list.forEach((e, j) => wire(e, st, 'in' + (j + 1))); return st; }
+          const parts = []; for (let i = 0; i < list.length; i += 6) parts.push(list.slice(i, i + 6).length > 1 ? join(list.slice(i, i + 6)) : list[i]);
+          return join(parts);
+        };
+        wire(join(ends), keep.S, 'in');
+      }
+    }
+    return folded;
+  }
+  const foldedLines = foldVoices();
+  if (foldedLines) report.notes.push(`${foldedLines} lines that play the same sound were merged: one Instrument, with each line's .gain written as the velocity of its notes, and lines that start on different steps sharing a Note Pattern.`);
+
   // positions: statement order down the page, chain left to right (the board tidies them afterwards)
   const order = new Map();
   nodes.forEach((nd) => { const s = nd.__stmt ?? 0; order.set(s, (order.get(s) || 0) + 1); });

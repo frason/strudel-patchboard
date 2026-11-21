@@ -6,18 +6,25 @@ import { guardCode } from './guard.js';
 
 let offline = null, queue = Promise.resolve();
 // Evaluate compiled code without sound. Only code that passes the same guard as playback is ever run.
-export async function queryPatch(code, cycles) {
-  const refused = guardCode(code);
-  if (refused) throw new Error('Not drawn: ' + refused);
-  if (!offline) {
-    offline = (async () => {
+const initOffline = () => (async () => {
       const [core, mini, tonal, transpiler, slider] = await Promise.all([import('@strudel/core'), import('@strudel/mini'), import('@strudel/tonal'), import('@strudel/transpiler'), import('./slider.js')]);
       await core.evalScope(core, mini, tonal, { sliderWithID: slider.makeSliderWithID(core.ref) });
       return core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } });
     })();
-  }
+export async function queryPatch(code, cycles) {
+  const refused = guardCode(code);
+  if (refused) throw new Error('Not drawn: ' + refused);
+  if (!offline) offline = initOffline();
   // one at a time: the engine keeps the pattern it just evaluated in one shared place, so two pictures asking together could be handed each other's notes
-  const turn = queue.then(async () => { const { evaluate } = await offline; return (await evaluate(code, false)).queryArc(0, cycles); });
+  // The audio engine and this offline evaluator share Strudel's global names. If the engine was still starting up when this ran, the names can briefly belong to a
+  // half-built engine ("... .p is not a function"): build the offline evaluator again and ask once more before giving up.
+  const run = async () => { const { evaluate } = await offline; return (await evaluate(code, false)).queryArc(0, cycles); };
+  const turn = queue.then(() => run().catch(async (e) => {
+    if (!/is not a function|is not defined/.test(String((e && e.message) || e))) throw e;
+    offline = null; await new Promise((r) => setTimeout(r, 400));
+    offline = initOffline();
+    return run();
+  }));
   queue = turn.catch(() => {});
   return (await turn).filter((h) => h.hasOnset()).map((h) => {
     const v = h.value || {}, begin = h.whole.begin.valueOf(), dur = h.duration.valueOf();

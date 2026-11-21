@@ -1601,4 +1601,27 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('MIDI: file names and the MThd marker are both recognised', isMidiFile('a.MID') && isMidiFile('noname', file) && !isMidiFile('a.txt', new Uint8Array([1, 2, 3, 4, 5])));
 }
 
+
+// ---------- many lines that play one sound are folded ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const src = readFileSync(new URL('../tools/made-to-stray.strudel', import.meta.url), 'utf8');
+  const r = imp(src);
+  const sig = async (code) => {   // what plays: when, which note, how loud (gain times velocity), over four cycles
+    const ev = (await evaluate(code, false)).queryArc(0, 4).filter((h) => h.hasOnset());
+    return ev.map((h) => `${h.whole.begin.valueOf().toFixed(4)} ${h.value.note} ${((h.value.gain ?? 1) * (h.value.velocity ?? 1)).toFixed(3)}`).sort();
+  };
+  const code = compile(r.graph).code, a = await sig(src), b = await sig(code);
+  check('Fold: the 17 near-identical lines of a rhythm come in as 24 modules instead of 49 (one Instrument, ten Note Patterns, nine Lates, three Stacks)', r.graph.nodes.length === 24 && r.graph.nodes.filter((n) => n.type === 'synth').length === 1);
+  check('Fold: it still plays the same notes at the same moments and loudness, and passes the guard', a.length === b.length && a.length > 20 && a.every((x, i) => x === b[i]) && !gc(code));
+  const gainOnly = imp('$: cat(note("c4 ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~"), note("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")).s("triangle").gain(0.5)\n$: cat(note("~ ~ e4 ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~"), note("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ g4")).s("triangle").gain(0.25)\n');
+  check('Fold: two lines that differ only in notes and gain become one Note Pattern with velocities and one Instrument', gainOnly.graph.nodes.length === 3 && gainOnly.graph.nodes.some((n) => n.type === 'notetext' && /0\.5/.test(n.params.vel) && /e4/.test(n.params.text) && /g4/.test(n.params.text) && /c4/.test(n.params.text)));
+  const clash = imp('$: cat(note("c4 ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~"), note("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")).s("triangle").gain(0.5)\n$: cat(note("e4 e4 ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~"), note("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")).s("triangle").gain(0.25)\n');
+  check('Fold: lines that play on the same step are not mixed into one pattern', clash.graph.nodes.filter((n) => n.type === 'notetext').length === 2);
+  const other = imp('$: cat(note("c4 ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~"), note("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")).s("triangle")\n$: cat(note("~ ~ e4 ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~"), note("~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")).s("sawtooth")\n');
+  check('Fold: lines with different instruments are left alone', other.graph.nodes.filter((n) => n.type === 'synth').length === 2);
+}
+
 process.exit(failures ? 1 : 0);
