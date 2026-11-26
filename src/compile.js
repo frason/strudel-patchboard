@@ -791,6 +791,34 @@ export function compile(g) {
   return flatten(parts, issues, played);
 }
 
+// The code for what travels on ONE cable: the pattern that comes out of module `nodeId`, written as its own $: line. It is the same compiler, run on a copy of the board in which
+// only that module is wired to the Output (everything upstream stays: its parameter cables, the Key, shared branches). This is a RAW TAP, not a final voice: what happens
+// further down is deliberately left out, and `outside` says which of it exists, so nobody mistakes the tap for what you hear.
+//   { code, issues, outside: { downstream: [titles], master: bool, mixer: bool, orbit: bool } } or { error }
+export function compileTap(g, nodeId) {
+  const node = nodeById(g, nodeId), out = g.nodes.find((n) => n.type === 'output');
+  if (!node || !out || node.type === 'output') return { error: 'there is no cable to tap here' };
+  if (!MODULES[node.type].out) return { error: 'this module has no output' };
+  const after = new Set(), todo = [nodeId];
+  while (todo.length) { const id = todo.pop(); for (const w of g.wires) if (w.from.node === id && !after.has(w.to.node)) { after.add(w.to.node); todo.push(w.to.node); } }
+  const downstream = [...after].filter((id) => id !== out.id).map((id) => nodeById(g, id)).filter(Boolean);
+  const copy = {
+    ...g,
+    nodes: g.nodes.map((n) => (n.id === out.id ? { ...n, params: { ...n.params, mvol: 1, mphaser: 0, mtrem: 0, mchorus: 0 } } : n)),   // no master volume or master effect on a raw tap
+    wires: [...g.wires.filter((w) => !(w.to.node === out.id && w.to.port === 'in')), { id: '_tap', from: { node: nodeId, port: 'out' }, to: { node: out.id, port: 'in' } }],
+  };
+  const r = compile(copy);
+  return {
+    code: r.code, issues: r.issues,
+    outside: {
+      downstream: downstream.map((n) => MODULES[n.type].title),
+      master: out.params.mvol !== 1 || out.params.mphaser > 0 || out.params.mtrem > 0,
+      mixer: downstream.some((n) => n.type === 'mixer'),
+      orbit: downstream.some((n) => n.type === 'orbit' || n.type === 'duck'),
+    },
+  };
+}
+
 const FM_SAY = {
   fm3: (v) => `fm3(${fmt(v)}) adds a third modulator that shakes the second: four-operator FM.`,
   fm4: (v) => `fm4(${fmt(v)}) adds a fourth modulator that shakes the third.`,

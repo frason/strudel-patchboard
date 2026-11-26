@@ -11,3 +11,9 @@
   X-Frame-Options: DENY
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), midi=(), display-capture=()
   Cross-Origin-Opener-Policy: same-origin-allow-popups
+
+# the plain-text files for AI assistants: say the text encoding explicitly
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+/llms-full.txt
+  Content-Type: text/plain; charset=utf-8

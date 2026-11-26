@@ -1123,3 +1123,13 @@ html, body { overscroll-behavior: none; }
 @media (prefers-reduced-motion: reduce) { .rec-btn.on .rec-dot { animation: none; } }
 @media (max-width: 760px) { .rec-btn .rec-text { display: none; } .rec-btn.on .rec-text { display: inline; } .rec-btn { height: 42px; } }
 .imp-packs { margin: 10px 0; align-items: flex-start; gap: 8px; }
+
+/* the cable x-ray: a small pinned panel */
+.xray { position: fixed; right: 14px; bottom: 14px; z-index: 40; width: min(400px, calc(100vw - 24px)); background: #171c22; border: 1px solid #2f3944; border-radius: 10px; padding: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, .45); }
+.xray canvas { display: block; border-radius: 6px; max-width: 100%; }
+.xr-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.xr-line { font-size: 13px; margin-top: 8px; color: #e6ebf0; }
+.xr-note { font-size: 12px; color: #9aa6b2; margin-top: 3px; }
+.xr-note:empty { display: none; }
+.xr-fine { opacity: .85; margin-top: 6px; }
+@media (max-width: 760px) { .xray { right: 12px; left: 12px; width: auto; bottom: 70px; } }

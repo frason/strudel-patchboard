@@ -27,6 +27,8 @@ import { CONVERTERS } from './convert.js';
 import { openRecorder } from './recordui.js';
 import { mergeGraph } from './recorder.js';
 import { approvePacks, approvedPacks } from './packs.js';
+import { chatPack } from './aidocs.js';
+import { createXray } from './xray.js';
 import { wavBytes, recordingSeconds, recordingName } from './wav.js';
 import { noteName } from './takecode.js';
 import { parseMidi, pickGrid, isMidiFile } from './midifile.js';
@@ -148,6 +150,7 @@ const healthText = () => {
     au ? `audio ${au.state} · ${au.sampleRate} Hz · latency ${au.baseLatencyMs} ms (output ${au.outputLatencyMs} ms) · running ${au.seconds} s` : 'audio not started yet',
     (au && clk0 && performance.now() - clk0.p > 10000 ? `audio clock ${(((au.time - clk0.t) / ((performance.now() - clk0.p) / 1000))).toFixed(3)}× the page clock (1.000 is right)` : null),
     storageLine(),
+    (() => { const u = engine.underruns(); return u === null ? null : `audio underruns ${u}`; })(),   // the speakers ran dry (Chrome-based browsers only)
     `notes skipped ${ln.count}${ln.count ? ' (last ' + ago(ln.at) + ')' : ''}`,
     `page stalls over 0.15 s: ${stalls.length}${stalls.length ? ', longest ' + Math.max(...stalls.map((x) => x.ms)) + ' ms, while playing ' + playingStalls.length + (playingStalls.length ? ' (last ' + ago(playingStalls[playingStalls.length - 1].at) + ')' : '') : ''}`,
   ].filter(Boolean).join('\n');
@@ -777,6 +780,7 @@ const hooks = {
     if (merge) store.amend(apply, { label: 'tidy' }); else store.update(apply, { label: 'tidy' });
     requestAnimationFrame(() => board.fit());
   },
+  xray(id) { xray.open(id); },   // pin a small panel showing what comes out of this module (src/xray.js)
   duplicate(id) {
     const src = nodeById(store.graph, id);
     if (!src || MODULES[src.type].single) return toast(`Only one ${MODULES[src.type].title} is allowed.`);
@@ -896,6 +900,9 @@ function liveSlider() {
   }
 }
 store.subscribe(liveSlider);
+const xray = createXray({ h, getGraph: () => store.graph });
+store.subscribe(() => xray.update());
+try { if (localStorage.getItem('pb.perf') === '1') window.__xrayStress = xray.stress; } catch { /* storage unavailable */ }   // the performance harness (scripts/perf-play.mjs) asks the x-ray to read over and over
 // the browser can refuse to save (its storage is full, or blocked): say so, because a refresh would lose the work
 let lastSaveWarn = 0;
 store.onSave((ok) => { if (!ok && Date.now() - lastSaveWarn > 300000) { lastSaveWarn = Date.now(); toast('This board could not be saved: the browser\'s storage is full or blocked. Export it now to keep your work.', [{ label: 'Export', fn: () => exportBtn.click() }], 25000); } });
@@ -1212,7 +1219,12 @@ function download(filename, text, type = 'text/plain') {
 exportBtn.addEventListener('click', () => {
   showPop(exportBtn, h('div', { class: 'menu' },
     h('button', { class: 'menu-item', id: 'export-json', onclick: () => { download('patch.patchboard.json', JSON.stringify(store.graph, null, 2), 'application/json'); closePop(); } }, 'Patch file (.json) — exact graph'),
-    h('button', { class: 'menu-item', id: 'export-strudel', onclick: () => { download('patch.strudel', strudelFile(store.graph)); closePop(); } }, 'Strudel code (.strudel) — with the patch embedded')));
+    h('button', { class: 'menu-item', id: 'export-strudel', onclick: () => { download('patch.strudel', strudelFile(store.graph)); closePop(); } }, 'Strudel code (.strudel) — with the patch embedded'),
+    h('button', { class: 'menu-item', id: 'export-ai', title: 'Copies a short account of how Patchboard works, the list of modules, and this board as Strudel code, ready to paste into an AI chat', onclick: async () => {
+      closePop();
+      try { await navigator.clipboard.writeText(chatPack(compile(store.graph).code)); toast('Copied. Paste it into an AI chat and ask your question.', [], 5000); }
+      catch { toast('Could not copy to the clipboard.', [], 5000); }
+    } }, 'Copy for an AI chat — how Patchboard works + this board')));
 });
 // ---------- import: paste code or choose a file ----------
 function loadImported(graph, label) {
@@ -1598,7 +1610,7 @@ function showIntro() {
       h('div', { class: 'intro-tools', role: 'group', 'aria-label': 'The toolbar' },
         h('div', { class: 'intro-tools-h', id: 'intro-where' }, toolbarWhere()),
         h('div', { class: 'intro-icons' }, TOOL_TOUR.map(([name, label, on]) => h('div', { class: 'intro-ic' + (on ? ' on' : '') }, h('span', { class: 'intro-ic-box' }, icon(name, on ? 26 : 20)), h('small', {}, label)))),
-        h('p', { class: 'intro-tools-note' }, h('b', {}, 'Learning path: '), `${LESSONS.length} short lessons teach Strudel one idea at a time, from a single drum sound to layering, harmony, FM synthesis and effects. Each lesson is a patch you can open, change and rebuild by hand.`)),
+        h('p', { class: 'intro-tools-note' }, h('b', {}, 'Learning path: '), `${LESSONS.filter((l) => l.id !== 'feature-test').length} short lessons teach Strudel one idea at a time, from a single drum sound to layering, harmony, FM synthesis and effects. Each lesson is a patch you can open, change and rebuild by hand.`)),
       h('div', { class: 'intro-btns' },
         h('button', { class: 'btn primary', id: 'intro-start', type: 'button', onclick: () => { closeIntro(); loadLesson(LESSONS[0]); requestAnimationFrame(() => board.tidy({ merge: true })); } }, 'Start the first lesson'),
         h('button', { class: 'btn', type: 'button', onclick: closeIntro }, 'Look around')),

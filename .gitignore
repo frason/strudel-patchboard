@@ -5,3 +5,13 @@ dist/
 .wrangler/
 scripts/corpus/
 docs/handoff/CONTEXT.md
+public/about/
+public/modules/
+public/import-from-strudel/
+public/sample-packs-and-recording/
+public/privacy/
+public/llms.txt
+public/llms-full.txt
+public/robots.txt
+public/sitemap.xml
+.perf/

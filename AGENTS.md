@@ -25,9 +25,12 @@ Short version:
 
 ## Commands
 
+In a fresh worktree run `npm ci --ignore-scripts` first (a worktree has no `node_modules`; `npm test` needs `acorn` and the Strudel packages).
+
 ```bash
 npm run dev            # Vite on http://localhost:5174
 npm test               # verify + reconcile + guard suites (all must pass)
+npm run perf:play      # playback performance on real boards (needs Chrome and `npm run build`); see docs/PERF.md
 npm run handoff:list   # state of every handoff
 npm run handoff:check  # validate the handoff files
 ```

@@ -1836,7 +1836,142 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Handoff: a well-formed open handoff validates; the front matter, id, status and from/to are checked', ok('', file({})) && ok('', file({ id: '0008' }), /does not match the file name/) && ok('', file({ status: 'maybe' }), /not one of/) && ok('', file({ to: 'claude' }), /same/) && ok('', file({ created: 'today' }), /YYYY-MM-DD/) && ok('', file({ refs: 'nope/missing.md' }), /does not exist/));
   check('Handoff: answered needs a real Response, ingested needs a Disposition that decides each finding, and an unfilled template is refused', ok('', file({ status: 'answered' }), /Response is empty/) && ok('', file({ status: 'answered' }, 'A real answer with enough words to count as written text.')) && ok('', file({ status: 'ingested' }, 'A real answer with enough words to count as written text.'), /Disposition is empty/) && ok('', file({ status: 'ingested' }, 'A real answer with enough words to count as written text.', 'F1: reviewed, will think about it later maybe'), /accepted, rejected, deferred/) && ok('', file({ status: 'ingested' }, 'A real answer with enough words to count as written text.', 'F1: accepted - it goes into ROADMAP section 4.')) && ok('', file({}, '', '', '<one paragraph: the question>' + req), /still the template/));
   const text = file({ status: 'open' }, '', ''), r = H.parseHandoff(text);
+  check('Handoff: dates are the local calendar date, not UTC', H.localDate(new Date(2026, 10, 25, 23, 30)) === '2026-11-25' && H.localDate(new Date(2026, 0, 5, 0, 10)) === '2026-01-05');
   check('Handoff: sections and the status line can be replaced without touching the rest, ids count up, names are slugs, the index lists every file', r.order.join() === 'Request,Response,Disposition' && H.setMeta(text, 'status', 'answered').includes('status: answered') && H.parseHandoff(H.replaceSection(text, 'Response', 'New answer here.')).sections.Response.includes('New answer here.') && H.parseHandoff(H.replaceSection(text, 'Response', 'New answer here.')).sections.Request.includes(req) && H.nextId(['0001-a.md', '0004-b.md']) === '0005' && H.nextId([]) === '0001' && H.slug('Roadmap: review!') === 'roadmap-review' && /\| \[0001\]\(0001-a.md\) \| T \| claude -> codex \| open \|/.test(H.indexMarkdown([{ id: '0001', file: '0001-a.md', title: 'T', from: 'claude', to: 'codex', status: 'open', created: '2026-11-25' }])));
+}
+
+
+// ---------- documentation for people, search engines and AI assistants ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const A = await import('../src/aidocs.js');
+  const { MODULES: MM } = await import('../src/modules.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const site = 'https://example.test', files = A.siteFiles(site), byUrl = new Map(files.filter((f) => f.url).map((f) => [f.url, f]));
+  const docs = A.allModuleDocs();
+  check('Docs: every module has its own page and a plain-language description in the full text', Object.keys(MM).every((t) => byUrl.has(`/modules/${A.slugOf(t)}/`)) && docs.length === Object.keys(MM).length && docs.every((d) => d.blurb.length > 20) && Object.values(MM).every((d) => A.llmsFullTxt(site).includes(d.title)));
+  const llms = A.llmsTxt(site), links = [...llms.matchAll(/\]\((https:\/\/example\.test([^)]*))\)/g)].map((m) => m[2]);
+  check('Docs: llms.txt is a title, a one-paragraph summary and links, and every link points at a file the site really has', /^# Strudel Patchboard\n\n> /.test(llms) && links.length >= 6 && links.every((u) => u === '/' || byUrl.has(u)) && /unofficial/i.test(llms));
+  const sm = files.find((f) => f.path === 'sitemap.xml').content, locs = [...sm.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
+  check('Docs: the sitemap lists every page once, and robots.txt points at it and welcomes crawlers', files.filter((f) => f.path.endsWith('.html')).every((f) => locs.includes(site + f.url)) && new Set(locs).size === locs.length && /^<\?xml/.test(sm) && /Sitemap: https:\/\/example\.test\/sitemap\.xml/.test(files.find((f) => f.path === 'robots.txt').content) && /Allow: \//.test(files.find((f) => f.path === 'robots.txt').content));
+  const pages = files.filter((f) => f.path.endsWith('.html'));
+  const ldOk = (html) => { const m = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html); try { return !!m && JSON.parse(m[1])['@context'] === 'https://schema.org'; } catch { return false; } };
+  check('Docs: every page has a title, description, canonical address, valid structured data and the unofficial notice, and text from modules is escaped', pages.every((f) => /<title>[^<]+<\/title>/.test(f.content) && /<meta name="description" content="[^"]{10,}"/.test(f.content) && new RegExp(`<link rel="canonical" href="${site}${f.url}"`).test(f.content) && ldOk(f.content) && /unofficial/i.test(f.content) && !/<script(?! type="application\/ld\+json")/i.test(f.content)));
+  const idx = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  check('Docs: the app page itself describes the app to crawlers that do not run scripts (structured data, canonical, a noscript summary with links)', ldOk(idx) && /<link rel="canonical"/.test(idx) && /<noscript>[\s\S]*href="\/about\/"[\s\S]*<\/noscript>/.test(idx) && /"@type":"SoftwareApplication"/.test(idx));
+  const withEx = docs.filter((d) => d.example);
+  check('Docs: the code examples are really what the board writes, and they pass the guard', withEx.length > 55 && withEx.every((d) => !gc(d.example)) && docs.find((d) => d.type === 'mask').example.includes('.mask('));
+  const pack = A.chatPack('$: s("bd*4").bank("RolandTR909")');
+  check('Docs: the Copy-for-an-AI-chat text holds the board code, how it works and the module list, and nothing private', pack.includes('s("bd*4").bank("RolandTR909")') && /unofficial/i.test(pack) && pack.includes(`Modules (${docs.length})`) && pack.length < 20000 && !/sk-ant|api[_ -]?key|localStorage/i.test(pack) && A.chatPack('').includes('the board is empty'));
+  const all = files.map((f) => f.content).join('\n');
+  check('Docs: no generated file mentions a key, a token or the owner\'s files', !/sk-ant|localStorage\.|Users\/frason|jfrasier/i.test(all));
+}
+
+
+// ---------- a picture or a download list must never touch a live Slider ----------
+{
+  const { queryPatch } = await import('../src/snapshot.js');
+  const { sliderValues } = await import('../src/slider.js');
+  const code = 'setcpm(120/4)\n$: note("c3").s("sine").lpf(slider(800,20,20000))';
+  await evaluate(code, false);   // the player has the slider: its value is in the player's store
+  const id = Object.keys(sliderValues).pop();
+  sliderValues[id] = 4321;       // the person has moved it
+  const original = globalThis.sliderWithID, player = (n) => `player:${n}`; globalThis.sliderWithID = player;
+  const ev = await queryPatch(code, 1);
+  check('Slider: an offline query (pictures, sound lists) leaves the live Slider where the person put it', sliderValues[id] === 4321 && ev.length === 1);
+  check('Slider: and it puts the player\'s own sliderWithID back, so the live Slider stays connected to the sound', globalThis.sliderWithID === player);
+  globalThis.sliderWithID = original;   // the rest of the suite evaluates sliders with the one it set up
+}
+
+
+// ---------- the event record and the raw cable tap ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const E = await import('../src/events.js');
+  const { compileTap } = await import('../src/compile.js');
+  const { queryEvents } = await import('../src/snapshot.js');
+  const { LESSONS: LS } = await import('../src/starters.js');
+  const { emptyGraph: eg, makeNode: mn, wiresInto: wi } = await import('../src/graph.js');
+  const hapsOf = async (code, a, b) => (await evaluate(code, false)).queryArc(a, b);
+  const code1 = '$: note("c3 e3 g3").s("sine").lpf(800).clip(.5).release(.2).pan(.25).orbit(3)';
+  const rec = E.recordFromHaps(await hapsOf(code1, 0, 1), { from: 0, to: 1, code: code1 });
+  check('Events: positions are exact fractions (a triplet is 1/3, not 0.333...), and every control is kept (filter, release, pan, orbit), with the span, kind and revision', rec.events.length === 3 && rec.events[1].at[0] === 1 && rec.events[1].at[1] === 3 && rec.events.every((e) => e.controls.release === 0.2 && e.controls.pan === 0.25 && e.controls.orbit === 3 && e.controls.cutoff === 800 && e.controls.clip === 0.5) && rec.v === 1 && rec.kind === 'queried' && rec.span.to === 1 && rec.revision === E.revisionOf(code1) && E.revisionOf(code1) !== E.revisionOf(code1 + ' ') && JSON.parse(JSON.stringify(rec)).events.length === 3);
+  const core = JSON.parse(readFileSync(new URL('../node_modules/@strudel/core/package.json', import.meta.url))).version, web = JSON.parse(readFileSync(new URL('../node_modules/@strudel/web/package.json', import.meta.url))).version;
+  check('Events: the record names the Strudel build it was made with (and that name is kept in step with the installed packages)', E.ENGINE_ID.includes(core) && E.ENGINE_ID.includes(web));
+  const slow = '$: note("c3").s("sine").slow(2)', c2 = E.recordFromHaps(await hapsOf(slow, 0.5, 1.5), { from: 0.5, to: 1.5, code: slow });
+  check('Events: an event that began before the span, or ends after it, is reported as carried in or out, never silently cut', c2.events.length === 1 && c2.events[0].carry === 'both' && E.onsets(c2).length === 0 && E.bounds(c2).carryIn === 1 && E.bounds(c2).carryOut === 1 && c2.events[0].dur[0] / c2.events[0].dur[1] === 2);
+  const t1 = E.recordToTake(rec, { bpm: 120, beatsPerBar: 4, grid: 4 });
+  check('Events -> Take: a lossy conversion says so (filter and release are lost, the triplet is snapped and by how much), and the note gate stays the length of the event', !t1.report.lossless && t1.report.controlsLost.includes('cutoff') && t1.report.controlsLost.includes('release') && t1.report.snapped >= 2 && t1.report.maxSnapBeats > 0.08 && Math.abs(t1.take.events[0].d - 4 / 3) < 1e-9 && Math.abs(t1.take.events[1].t - 4 / 3) < 1e-9);
+  const clean = E.recordFromHaps(await hapsOf('$: note("c3 e3 g3 b3").s("sine")', 0, 1), { from: 0, to: 1 }), t2 = E.recordToTake(clean, { grid: 4 });
+  check('Events -> Take: a plain melody on the grid converts with nothing lost, and the report says lossless', t2.report.lossless && t2.take.events.length === 4 && t2.take.events.map((e) => e.n).join() === '48,52,55,59' && t2.take.events.map((e) => e.t).join() === '0,1,2,3');
+  const hits = E.recordToTake(E.recordFromHaps(await hapsOf('$: s("bd sd")', 0, 1), { from: 0, to: 1 }), {});
+  check('Events -> Take: sample hits have no note, so none are invented: they are counted as left out', hits.take.events.length === 0 && hits.report.noNote === 2 && !hits.report.lossless);
+  const live = await queryEvents('setcpm(120/4)\n$: note("c3 e3").s("sine").release(.3)', { from: 2, to: 4 });
+  check('Events: the offline query returns a full record for any range (positions inside the range, every control, the revision)', live.events.length === 4 && live.events.every((e) => E.num(e.at) >= 2 && E.num(e.at) < 4 && e.controls.release === 0.3) && live.span.from === 2 && live.revision.length === 8);
+
+  // ---- the raw tap ----
+  const evs = async (c) => (await evaluate(c, false)).queryArc(0, 4).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).filter(([k]) => k !== 'color').sort().map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v])))}`).sort().join('|');
+  const mk = () => { const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port = 'in') => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } }); return { g, N, W }; };
+  {
+    const { g, N, W } = mk(), a = N('notetext', { text: 'c3 e3 g3 b3' }), sl = N('slow', { n: 2 }), sy = N('synth', { wave: 'sawtooth' }), out = N('output');
+    W(a, sl); W(sl, sy); W(sy, out);
+    const t = compileTap(g, sl.id), t2 = compileTap(g, sy.id);
+    check('Tap: the tap after a module is exactly that module\'s pattern (before the instrument), and the one after the instrument has the sound; what lies downstream is named', (await evs(t.code)) === (await evs('$: note("c3 e3 g3 b3").slow(2)')) && (await evs(t2.code)) === (await evs('$: note("c3 e3 g3 b3").slow(2).s("sawtooth")')) && t.outside.downstream.join() === 'Instrument' && t2.outside.downstream.length === 0);
+  }
+  {
+    const { g, N, W } = mk(), a = N('notetext', { text: 'c3 e3' }), sl = N('slow', { n: 2 }), fa = N('fast', { n: 2 }), s1 = N('synth', { wave: 'sawtooth' }), s2 = N('synth', { wave: 'triangle' }), out = N('output');
+    W(a, sl); W(a, fa); W(sl, s1); W(fa, s2); W(s1, out); W(s2, out);
+    check('Tap: a source that feeds two chains gives the same events whichever chain you look at, and each chain\'s tap is its own', (await evs(compileTap(g, a.id).code)) === (await evs('$: note("c3 e3")')) && (await evs(compileTap(g, sl.id).code)) === (await evs('$: note("c3 e3").slow(2)')) && (await evs(compileTap(g, fa.id).code)) === (await evs('$: note("c3 e3").fast(2)')));
+  }
+  {
+    const { g, N, W } = mk(), a = N('notetext', { text: 'c3 e3' }), b = N('notetext', { text: 'g2' }), s1 = N('synth', { wave: 'sawtooth' }), s2 = N('synth', { wave: 'sawtooth' }), mx = N('mixer', { n: 2 }), out = N('output', { mvol: 0.5 });
+    mx.params.strips[0].mute = true; mx.params.strips[1].vol = 0.2;
+    W(a, s1); W(b, s2); W(s1, mx, 'in1'); W(s2, mx, 'in2'); W(mx, out);
+    const t = compileTap(g, s1.id), ev = (await hapsOf(t.code, 0, 1)).filter((h) => h.hasOnset());
+    check('Tap: a raw tap ignores the Mixer strip (muted, quiet) and the master volume, and says that they exist outside it', ev.length === 2 && ev.every((h) => h.value.postgain === undefined) && t.outside.mixer && t.outside.master && (await evs(t.code)) === (await evs('$: note("c3 e3").s("sawtooth")')));
+  }
+  {
+    const { g, N, W } = mk(), a = N('notetext', { text: 'c3 e3 g3 b3' }), sy = N('synth', { wave: 'sawtooth' }), wv = N('wave', { shape: 'sine', min: 0.25, max: 0.75, slow: 4 }), out = N('output');
+    W(a, sy); W(sy, out); g.wires.push({ id: 'pw', from: { node: wv.id, port: 'out' }, to: { node: sy.id, port: 'p:gain' } });
+    const t = compileTap(g, sy.id);
+    check('Tap: parameter cables upstream are followed (a Wave driving the gain is in the tap and moves the gain in step)', /gain\(sine\.range\(0\.25, 0\.75\)\.slow\(4\)\)/.test(t.code) && (await evs(t.code)) === (await evs(compile(g).code)));
+  }
+  {   // every lesson that has one neutral master and no Mixer or Duck: the taps of its voices together are exactly what the whole board plays
+    let checked = 0, bad = [];
+    for (const l of LS) {
+      const g = l.graph(), out = g.nodes.find((n) => n.type === 'output');
+      if (!out || out.params.mvol !== 1 || out.params.mphaser > 0 || out.params.mtrem > 0 || g.nodes.some((n) => ['mixer', 'duck'].includes(n.type))) continue;
+      const voices = wi(g, out.id, 'in').map((w) => w.from.node); if (!voices.length) continue;
+      const whole = await evs(compile(g).code), parts = [];
+      for (const id of voices) { const t = compileTap(g, id); if (t.error) { bad.push(l.id + ': ' + t.error); continue; } parts.push(...(await evs(t.code)).split('|').filter(Boolean)); }
+      checked++;
+      if (parts.sort().join('|') !== whole) bad.push(l.id);
+    }
+    check(`Tap: for the ${checked} lessons with a neutral master and no Mixer or Duck, the raw taps of the voices together play exactly what the whole board plays`, checked > 10 && bad.length === 0);
+    if (bad.length) console.log('   differs:', bad.slice(0, 5).join(', '));
+  }
+}
+
+
+// ---------- the test board keeps working ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { validateShape: vs, normalize: nz, wiresInto: wi } = await import('../src/graph.js');
+  const { compileTap } = await import('../src/compile.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const g = JSON.parse(readFileSync(new URL('../tools/test-board.patchboard.json', import.meta.url), 'utf8'));
+  vs(g);
+  const removed = nz(g), types = new Set(g.nodes.map((n) => n.type));
+  const out = g.nodes.find((n) => n.type === 'output'), r = compile(g);
+  g.nodes.forEach((n) => { n.muted = false; });
+  const all = compile(g);
+  const counts = [];
+  for (const gr of g.groups) { const head = wi(g, out.id, 'in').find((w) => gr.nodes.includes(w.from.node)).from.node; counts.push((await evaluate(compileTap(g, head).code, false)).queryArc(0, 4).filter((h) => h.hasOnset()).length); }
+  check('Test board: loads with no cable removed, uses all ten new modules and the multi-input Slow and Fast, and the guard accepts its code', !removed.length && ['mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes', 'slow', 'fast', 'djf'].every((t) => types.has(t)) && !gc(r.code) && !gc(all.code) && g.groups.length === 9);
+  const FT = (await import('../src/starters.js')).LESSONS.find((l) => l.id === 'feature-test'), ftGraph = FT && FT.graph(), LL = (await import('../src/starters.js')).LESSONS;
+  const idxHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8'), teaching = LL.filter((l) => l.id !== 'feature-test').length;
+  check('Test board: it is also the last lesson, "34 · Feature test", with the same board as the file, and the lesson counts in the docs ignore it', !!FT && LL[LL.length - 1] === FT && FT.title === `${LL.length} · Feature test` && JSON.stringify(ftGraph.nodes.map((n) => n.type)) === JSON.stringify(JSON.parse(readFileSync(new URL('../tools/test-board.patchboard.json', import.meta.url), 'utf8')).nodes.map((n) => n.type)) && ftGraph.groups.length === 9 && idxHtml.includes(`${teaching} short lessons`));
+  check('Test board: every group plays something, and the DJ filter warns once its group is unmuted', counts.length === 9 && counts.every((n) => n > 0) && all.issues.some((i) => /DJ filter filters the whole orbit/.test(i.msg)));
 }
 
 process.exit(failures ? 1 : 0);

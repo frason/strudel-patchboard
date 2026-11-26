@@ -2,6 +2,7 @@
 import { makeNode, normalize, emptyGraph } from './graph.js';
 import { makeCells, FM_PRESETS, HARM_PRESETS } from './modules.js';
 import WHOLE_SONG_GRAPH from './wholesong.js';
+import FEATURE_TEST_GRAPH from './featuretest.js';
 
 const mel = (notes, { vel = [], len = {}, steps, octave = 3, mode = 'steps' } = {}) => {
   const n = steps || notes.length;
@@ -422,6 +423,11 @@ export const LESSONS = [
       ['hm', 'harmonics', 700, 60, { base: 'user', partials: HARM_PRESETS.square.bars.slice() }],
       ['o', 'output', 1040, 140, { bpm: 72 }],
     ], [['m', 'sy'], ['sy', 'hm'], ['hm', 'o']]),
+  },
+  {
+    id: 'feature-test', section: 'Feature test', title: '34 · Feature test',
+    learned: 'A tour board for the newer features, in nine labelled groups. Groups 1 and 2 play; the rest start muted, so click the speaker on a group\'s frame to hear it. 1 Mask + When, 2 Iter, 3 Add notes + Superimpose + Off, 4 Jux (headphones), 5 Loop at + Chop on a break, 6 Echo on drums, 7 and 8 Slow and Fast with two cables into one input, 9 chords with flats and a DJ filter that warns because it filters the whole orbit (put an Orbit module in front of it). Also try: the three-dots menu on a module, "Show what comes out" (the cable x-ray), the rec button, and Export, "Copy for an AI chat".',
+    graph: () => JSON.parse(JSON.stringify(FEATURE_TEST_GRAPH)),
   },
 ];
 

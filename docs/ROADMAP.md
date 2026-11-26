@@ -59,8 +59,7 @@ Order of work (rationale in each section):
 **Idea.** The user presses Grab, picks a voice (a cable/module output) and a span ("the last 4 cycles", "the next 8"), and gets a **Take** (notes) or a hit/sample pattern (drums)
 plugged into its own Instrument, repeating. Typical use: a random note generator produces something good; grab it and keep it.
 
-**Why it is Strudel-specific.** No audio recording: the live pattern is queried for a cycle range (`engine.haps(a, b)` already exists, as does `engine.nowCycle()`), and because
-`rand`, `sometimes`, `degradeBy` and friends are deterministic functions of time, **re-querying the past gives exactly what was heard** (if the patch has not changed since).
+**Why it is Strudel-specific.** No audio recording: the live pattern is queried for a cycle range (`engine.haps(a, b)` already exists, as does `engine.nowCycle()`), and `rand`, `sometimes`, `degradeBy` and friends are deterministic functions of time, so a fixed range can be queried again and again with the same events. *Review correction (handoff 0001, F5):* this is **not a recording of what was heard**. Patch revisions, Slider gestures, tempo, skipped scheduling, missing samples and effect tails are outside it. Grab captures **pattern events over an explicit fixed range under a frozen revision and control snapshot**, and says so; three pure cases were tested at cycles 17 to 21, not every module.
 
 **Design.**
 - New `queryPatch(code, cycles, { from })` (currently always starts at cycle 0), and a way to compile **only the sub-chain feeding a chosen node**
@@ -111,7 +110,7 @@ sample pattern) of exactly what it plays over that range (same mechanism as A, b
 
 ### D. Audio to pattern
 
-**Idea.** Drop a WAV/MP3; get a drum pattern or Note Pattern. Precedent: the Codex script that made the "Made to Stray" rhythm from a recording (onset detection, 16th-grid snapping, per-hit velocity, recurring offsets).
+**Idea.** Drop a WAV/MP3; get a drum pattern or Note Pattern. Precedent: the Codex work that made the "Made to Stray" rhythm from a recording went beyond a 16th-grid snap (recurring offsets, per-hit velocity); a separate research project (`experiments/youtube-strudel`, not in this repo) explores microphone recording, local separation and pitch/onset estimation. Heavy models stay outside the static app.
 
 **Design (research first).**
 - In-browser: decode with Web Audio, onset detection (spectral flux) for rhythm; pitch tracking (autocorrelation/YIN) for monophonic melody; no polyphonic transcription in scope.
@@ -174,6 +173,8 @@ sample pattern) of exactly what it plays over that range (same mechanism as A, b
 
 ## 7. Definition of done for each feature
 
+- **Performance is the first gate** (handoff 0001, F1; the owner's number-one KPI): playback must not miss deadlines while the feature runs. Measure before and after: playback deadline misses and underruns, p95/p99 interaction and evaluation latency, main-thread long tasks, queue depth, heap and decoded-audio growth, compressed bundle delta, on a desktop and a phone baseline. Optional work is bounded, cancellable or coalesced, visibility-aware and idle when unused; a feature that exceeds its budget is simplified or deferred.
+
 - Works in the browser pane (verified by actually driving it, not only by tests), on desktop and a phone-width viewport.
 - New code paths covered in `scripts/verify.mjs` (or a new suite) with real-song or seeded-random replays where the feature touches imports or queries.
 - `npm test` green (verify, reconcile, guard); guard accepts everything the compiler writes.
@@ -211,3 +212,30 @@ Ranking also uses how prominent each function is in everyday Strudel patches (my
 - `applyCall` in `src/importer.js` reads each call back into a module only in the exact shapes the module can write. Anything else stays as written in a Strudel Code module. Echo (sets the volume) and Jux (sets the pan) are never made modules on a line that also sets gain/pan, because the order of such calls decides the result; Chop and Loop at likewise when `begin`/`end`/`speed`/`unit` or each other are on the line.
 - `scripts/verify.mjs`: each module plays exactly what the same call written by hand plays, its code reads back into the same module and settings, and the order-sensitive cases play the same as the original.
 - Known weakness: transforms import into the chain *before* the instrument (the existing design), which is why the order-sensitive cases above fall back to code.
+
+## 8. Changes from review (handoff 0001, ingested 2026-11-26)
+
+Codex reviewed this roadmap on `codex/youtube-strudel` (commit 16f3cde). The full answer and the decision on each finding are in `docs/handoff/0001-roadmap-review.md`. What changed:
+
+1. **Fixed already:** offline queries no longer share the live Slider store (finding F2; `src/slider.js`, `src/snapshot.js`, tests, browser check).
+2. **Performance baseline first.** Extend `scripts/perf.mjs` (today it measures pictures with nothing playing) to measure playback under inspection load before building any feature that queries.
+3. **Event contract before Grab and Bake.** A small versioned event record: cycle positions kept rational, the queried span, resolved controls, provenance (queried, inferred, hand-corrected), gate length kept separate from release, defined carry-in/out at range edges, and a report of every lossy conversion. Take is reused where compatible and is not claimed lossless (an overlapping Take note is shortened today).
+4. **Two tap views.** `compileUpTo` becomes a raw cable tap and a contextual final voice, from one compiler. It must follow parameter inputs and keys, the effective Mixer/Output state, Duck and orbit relationships, and must preserve call order for the new transforms. Fixture matrix before use.
+5. **Query cost.** Cache identity includes the range, a control snapshot and the engine version. Work is coalesced, bounded and visibility-aware. Deferred: all-cable thumbnails, 128-cycle scans. Task: bound expanded mini-notation in the guard (`bd*1000000` passes today). Research only: a Worker query realm (D4 stands).
+6. **Project document before sharing** (G1): a versioned envelope, size caps before parsing, allow-list export, graph-only export described honestly, last-valid playable revision.
+7. **Rooms** (G2): authoritative operation stream in a Durable Object, conflict-checked inverse undo, capability roles and limits; Yjs only if offline merge becomes a requirement. **Jam clock** (G3): one transport epoch, revision-tagged apply boundaries, fixed global tempo first; the earlier "within about 50 ms" figure is withdrawn until measured.
+8. **Proposed order (not yet adopted; needs the owner):** performance baseline + event contract + audio-parity check (Corporeal) -> one pinned read-only x-ray (with cycle-based modulation) -> Grab and Bake -> file sharing and curated library with evidence labels -> bounded form map -> co-editing -> jam. Audio-to-pattern continues as separate research.
+9. **Evidence labels for the library:** guard accepted; event round trip passed over N cycles on a named engine; required samples available; audio auditioned. Finite replay is not proof for all cycles or identical sound.
+10. **Performer needs added to the definition of done:** stable playback during inspection, a visible last-valid revision, edits applied at musical boundaries, headroom feedback, missing-sample recovery, keyboard access.
+
+### H. Sample Source module for audio files (proposed, needs the owner)
+A Sample Source from a local WAV or a GitHub audio-file link: replay, waveform, trim, then separate actions to play/loop/chop it or to analyse it into editable events. Extends the consented asset registry; no user JavaScript that fetches. GitHub file/raw links only, validated host and type, size caps for download and decoded audio, one cached buffer and waveform per content hash, saved URL + trim + pinned revision or hash (not local bytes), explicit Refresh and Pin, no silent polling, no tokens in shared boards. Untested: CORS, codecs, private repos.
+
+## Appendix B. Event-centred ideas (ranked research list, none authorised)
+1. Event explanation: "why this note?" (source step through transpose/repeat/nudge in a few supported chains; unknown lineage marked). 2. Musical diff and protected parts (added/removed/moved events before an edit applies; lock a voice). 3. Direct editing of the result with a preview of the source edit, or an explicit override or Bake where the chain is not invertible. 4. Constrained variation (keep these hits, change the last cycle, stay below C3). 5. Rhythm borrowing from corrected attack markers. 6. Future pattern relationships (alignments, collisions, gaps) over a bounded horizon. Event explanation and musical diff extend the x-ray first; keyboard access and a phone interaction are required, not hover-only.
+
+## 9. Built since the review (2026-11-26)
+- Playback performance harness: `scripts/cdp.mjs` (shared headless-Chrome plumbing, also used by `scripts/perf.mjs`) and `scripts/perf-play.mjs` (`npm run perf:play`): presses play on real boards and measures skipped notes, audio underruns, page stalls, long tasks, CPU, frame time and heap, with an optional load running while it plays and a `--compare` against a saved run. Numbers and method: `docs/PERF.md`. Audio health in Settings now shows underruns.
+- Event record (`src/events.js`, `queryEvents` in `src/snapshot.js`), raw cable tap (`compileTap` in `src/compile.js`), and a pinned read-only x-ray (`src/xray.js`, "Show what comes out" in a module's menu). Tests in `scripts/verify.mjs`.
+- Still to do from section 8: the contextual final-voice tap, the guard cap on expanded mini-notation, audio-parity check (Corporeal; the song itself is not in the repo, so it needs the code from the owner), then Grab and Bake.
+

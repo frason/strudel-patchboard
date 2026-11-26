@@ -4,30 +4,39 @@
 //  drawSnapshot    paints a layout on a canvas
 import { guardCode } from './guard.js';
 import { exclusive } from './evallock.js';
+import { makeSliderWithID } from './slider.js';
+import { recordFromHaps } from './events.js';
 
 let offline = null, queue = Promise.resolve();
+const offlineSliders = {};   // the offline evaluator's own Slider values
 // Evaluate compiled code without sound. Only code that passes the same guard as playback is ever run.
 const initOffline = () => (async () => {
   // In the browser this uses the very same Strudel as the audio player (the one inside @strudel/web). A second copy would take the shared names (stack, note ...) from the
   // player on first use and break its next evaluation ("stack(...).p is not a function"). Node (the tests) has no player, so it uses the plain packages.
   const web = typeof window === 'undefined' ? null : await import('@strudel/web');
-  const slider = await import('./slider.js');
   if (web) {
-    await web.evalScope(web, { sliderWithID: slider.makeSliderWithID(web.ref) });
-    return web.repl({ defaultOutput() {}, getTime: () => 0, transpiler: web.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } });
+    await web.evalScope(web);   // sliderWithID is not part of this: it is put in place only while a query runs (see below), so the player keeps its own
+    return { ref: web.ref, repl: web.repl({ defaultOutput() {}, getTime: () => 0, transpiler: web.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
   }
   const [core, mini, tonal, transpiler] = await Promise.all([import('@strudel/core'), import('@strudel/mini'), import('@strudel/tonal'), import('@strudel/transpiler')]);
-  await core.evalScope(core, mini, tonal, { sliderWithID: slider.makeSliderWithID(core.ref) });
-  return core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } });
+  await core.evalScope(core, mini, tonal);
+  return { ref: core.ref, repl: core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
 })();
-export async function queryPatch(code, cycles) {
+// the raw haps of a stretch of cycles of this code (see evallock.js for why queries take turns)
+async function queryHaps(code, from, to) {
   const refused = guardCode(code);
   if (refused) throw new Error('Not drawn: ' + refused);
   if (!offline) offline = initOffline();
   // one at a time: the engine keeps the pattern it just evaluated in one shared place, so two pictures asking together could be handed each other's notes
   // The audio engine and this offline evaluator share Strudel's global names. If the engine was still starting up when this ran, the names can briefly belong to a
   // half-built engine ("... .p is not a function"): build the offline evaluator again and ask once more before giving up.
-  const run = () => exclusive(async () => { const { evaluate } = await offline; return (await evaluate(code, false)).queryArc(0, cycles); });
+  // The Slider values of a query live in a store of their own, and the global sliderWithID that the evaluated code calls is swapped in for the length of the query and put
+  // back after: a picture or a download list must never reset a Slider (or replace the player's sliderWithID, which would cut the live Slider from the sound).
+  const run = () => exclusive(async () => {
+    const o = await offline, saved = globalThis.sliderWithID;
+    globalThis.sliderWithID = makeSliderWithID(o.ref, offlineSliders);
+    try { return (await o.repl.evaluate(code, false)).queryArc(from, to); } finally { globalThis.sliderWithID = saved; }
+  });
   const turn = queue.then(() => run().catch(async (e) => {
     if (!/is not a function|is not defined/.test(String((e && e.message) || e))) throw e;
     offline = null; await new Promise((r) => setTimeout(r, 400));
@@ -35,10 +44,20 @@ export async function queryPatch(code, cycles) {
     return run();
   }));
   queue = turn.catch(() => {});
-  return (await turn).filter((h) => h.hasOnset()).map((h) => {
+  return turn;
+}
+
+export async function queryPatch(code, cycles) {
+  return (await queryHaps(code, 0, cycles)).filter((h) => h.hasOnset()).map((h) => {
     const v = h.value || {}, begin = h.whole.begin.valueOf(), dur = h.duration.valueOf();
     return { start: begin, end: begin + dur, s: v.s, note: v.note, n: v.n, bank: v.bank, gain: v.gain, velocity: v.velocity };
   });
+}
+
+
+// The full event record (src/events.js) of cycles from..to: exact positions, every control, the span, the revision. For the cable x-ray, Grab and Bake.
+export async function queryEvents(code, { from = 0, to = 4, kind = 'queried', context = {} } = {}) {
+  return recordFromHaps(await queryHaps(code, from, to), { from, to, code, kind, context });
 }
 
 const NOTE_INDEX = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };

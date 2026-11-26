@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 5174",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-docs.mjs --out dist",
     "rubric": "node --import ./scripts/stub-loader.mjs scripts/rubric.mjs",
     "test": "node --import ./scripts/stub-loader.mjs scripts/verify.mjs && npm run test:reconcile && npm run test:guard && npm run handoff:check",
     "preview": "vite preview --port 4173",
@@ -18,7 +18,9 @@
     "handoff:new": "node scripts/handoff.mjs new",
     "handoff:context": "node scripts/handoff.mjs context",
     "handoff:fetch": "node scripts/handoff.mjs fetch",
-    "handoff:index": "node scripts/handoff.mjs index"
+    "handoff:index": "node scripts/handoff.mjs index",
+    "docs": "node scripts/build-docs.mjs --out public",
+    "perf:play": "node --import ./scripts/stub-loader.mjs scripts/perf-play.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

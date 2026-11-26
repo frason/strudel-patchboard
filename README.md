@@ -120,3 +120,9 @@ If you host your own public copy, link to your source: set `SOURCE_URL` near the
 ## Hydra visuals
 Patchboard does not run Hydra. If you paste code that uses it, the Hydra lines are left out of the board, listed in the import report, and can be copied
 with **Copy the skipped code**: nothing is deleted. Run that code on [strudel.cc](https://strudel.cc), where Hydra works.
+
+## Documentation for search engines and AI assistants
+- `src/aidocs.js` writes plain-language documentation straight from the module definitions (so it cannot go stale): one page per module with its settings and the Strudel code it writes, plus guides.
+- `npm run build` (Vite, then `scripts/build-docs.mjs`) adds to `dist/`: `/about/`, `/modules/…`, `/import-from-strudel/`, `/sample-packs-and-recording/`, `/privacy/`, `/llms.txt`, `/llms-full.txt`, `/robots.txt` and `/sitemap.xml`. `npm run docs` writes the same into `public/` (ignored by git) for the dev server. Set `SITE_URL` or pass `--site` if the address changes (the canonical address in `index.html` is written by hand).
+- Export menu, "Copy for an AI chat": copies how Patchboard works, the module list and the current board's code, ready to paste into any chatbot.
+
