@@ -20,7 +20,8 @@
     "handoff:fetch": "node scripts/handoff.mjs fetch",
     "handoff:index": "node scripts/handoff.mjs index",
     "docs": "node scripts/build-docs.mjs --out public",
-    "perf:play": "node --import ./scripts/stub-loader.mjs scripts/perf-play.mjs"
+    "perf:play": "node --import ./scripts/stub-loader.mjs scripts/perf-play.mjs",
+    "bench:query": "node --import ./scripts/stub-loader.mjs scripts/bench-query.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

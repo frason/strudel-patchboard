@@ -17,7 +17,7 @@ const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i >= 0 
 const REPEAT = Number(arg('repeat', 3)), ONLY = arg('only', ''), SAVE = arg('save', ''), COMPARE = arg('compare', ''), WINDOW = Number(arg('seconds', 20)), LOADNAME = arg('load', ''), JUDGE = arg('judge', '');
 // the options are checked before Chrome starts: a window that is not positive or a repeat that is not a whole number cannot be evidence
 const badArgs = [];
-if (!JUDGE) { if (!Number.isFinite(WINDOW) || WINDOW < 1) badArgs.push(`--seconds must be a number of at least 1 (got ${arg('seconds', 20)})`); if (!Number.isInteger(REPEAT) || REPEAT < 1) badArgs.push(`--repeat must be a whole number of at least 1 (got ${arg('repeat', 3)})`); if (LOADNAME && !['xray', 'xray-edit', 'stall'].includes(LOADNAME)) badArgs.push(`--load ${LOADNAME} is not a known load`); }
+if (!JUDGE) { if (!Number.isFinite(WINDOW) || WINDOW < 1) badArgs.push(`--seconds must be a number of at least 1 (got ${arg('seconds', 20)})`); if (!Number.isInteger(REPEAT) || REPEAT < 1) badArgs.push(`--repeat must be a whole number of at least 1 (got ${arg('repeat', 3)})`); if (LOADNAME && !['xray', 'xray-edit', 'formmap', 'stall'].includes(LOADNAME)) badArgs.push(`--load ${LOADNAME} is not a known load`); }
 if (badArgs.length) { for (const b of badArgs) console.log(`FAIL ${b}`); process.exit(2); }
 const report = (res, label) => { for (const l of res.lines) console.log(`FAIL ${l}`); for (const n of res.notes || []) console.log(`note ${n}`); console.log(res.failed ? `${res.failed} playback check(s) failed against "${label}"` : `ok   playback is no worse than "${label}"`); return res.failed; };
 const file = (n) => JSON.parse(fs.readFileSync(`.perf/${n}.json`, 'utf8'));
@@ -47,6 +47,16 @@ const LOADS = {
     window.__xrayStop = window.__xrayStress(2000); return true;
   }`,
   // a self-test of the gate: blocks the page for 0.6 s in the middle of the window, which must show up as a stall and a long task (run with --compare and it must fail)
+  // opens the song form map (32 cycles, every voice) and asks it to read again every 3 s: far busier than anyone would use it (it is one click and one read)
+  formmap: `async () => {
+    const out = [...document.querySelectorAll('.node')].find((n) => /^Output/.test((n.innerText || '').trim()));
+    if (!out) throw new Error('no Output on this board');
+    out.querySelector('[aria-label="More"], [title="More"]').click(); await new Promise((r) => setTimeout(r, 200));
+    [...document.querySelectorAll('.menu-item')].find((b) => /form map/i.test(b.textContent)).click(); await new Promise((r) => setTimeout(r, 800));
+    const go = [...document.querySelectorAll('.modal button')].find((b) => /Read again/.test(b.textContent));
+    if (!go) throw new Error('the form map did not open');
+    const t = setInterval(() => { if (!go.disabled) go.click(); }, 3000); window.__xrayStop = () => clearInterval(t); return true;
+  }`,
   stall: `async () => { setTimeout(() => { const t = performance.now(); while (performance.now() - t < 600); }, 4000); return true; }`,
 };
 if (LOADNAME && !LOADS[LOADNAME]) { console.error(`unknown load "${LOADNAME}" (known: ${Object.keys(LOADS).join(', ')})`); process.exit(2); }

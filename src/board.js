@@ -519,7 +519,10 @@ function openNodeMenu(anchor, id) {
   const item = (label, fn, cls = '') => h('button', { class: 'menu-item ' + cls, onclick: () => { close(); fn(); } }, label);
   const pop = h('div', { class: 'pop', style: `left:${Math.max(8, Math.min(r.left - 100, window.innerWidth - 200))}px;top:${r.bottom + 4}px;min-width:170px` }, h('div', { class: 'menu' },
     MODULES[n.type].single ? null : item('Duplicate', () => soundHooks.duplicate(id)),
+    n.type === 'output' && soundHooks.formmap ? item('Song form map…', () => soundHooks.formmap()) : null,
     MODULES[n.type].out && !['number', 'key'].includes(MODULES[n.type].out) && n.type !== 'output' && soundHooks.xray ? item('Show what comes out', () => soundHooks.xray(id, anchor)) : null,
+    MODULES[n.type].out && !['number', 'key'].includes(MODULES[n.type].out) && n.type !== 'output' && soundHooks.grab ? item('Grab…', () => soundHooks.grab(id)) : null,
+    MODULES[n.type].out === 'notes' && soundHooks.bake ? item('Bake…', () => soundHooks.bake(id)) : null,
     MUTE_KIND[n.type] ? item(n.muted ? (MUTE_KIND[n.type] === 'bypass' ? 'Switch on' : 'Unmute') : (MUTE_KIND[n.type] === 'bypass' ? 'Bypass' : 'Mute'), () => soundHooks.toggleMute(id)) : null,
     item(n.collapsed ? 'Expand' : 'Collapse', () => soundHooks.collapse(id)),
     item('Delete', () => soundHooks.removeNode(id), 'danger')));

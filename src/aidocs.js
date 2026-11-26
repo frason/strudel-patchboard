@@ -146,6 +146,15 @@ export const GUIDES = () => [
         'Record notes from a MIDI keyboard (in browsers that support Web MIDI, such as Chrome and Edge) or from the computer keyboard into a Take module. A Take keeps when each note started, how long it lasted and how hard it was played, and writes them as a Strudel pattern.',
         'Import a .mid file: each track and channel becomes its own Take on its own Instrument, and you can adopt the file\'s tempo.',
       ]],
+      ['h2', 'See, grab and bake what a module plays'],
+      ['ul', [
+        'Show what comes out: a module\'s menu opens a small panel with the notes or hits that module outputs over four cycles, as a picture and a summary. It shows the pattern as that module leaves it, before anything further along (master volume, Mixer and effects are not applied).',
+        'Grab: a module\'s menu copies a stretch of what it plays (you choose the starting cycle and length) into a Take for notes, or a Strudel Code (pattern) module for sample hits. It replays what the board plays now over those cycles; it is not a recording of what you heard. A Take keeps pitch, timing and loudness only, and the window says what it left out.',
+        'Bake: on a notes module, freezes its output over the chosen cycles into a Take and plugs the Take in where the module was, so random parts stop changing. The original stays on the board, unconnected.',
+        'Song form map: the Output module\'s menu shows each voice as a lane and each cycle as a cell, brighter where more notes play, so intros, breaks and drops are visible.',
+      ]],
+      ['h2', 'Share a board'],
+      ['p', 'Export, Copy a share link puts the board itself inside a link (nothing is uploaded; settings, keys and sample-pack approvals are never included; boards too big for a link use the patch file instead). Opening a shared link does not load it: Patchboard shows what it is and what it checked, and the person chooses to open it as a copy. The checks are: the board is valid, the code it makes passes the safety check, and, if you press Run the checks, that reading it back into modules plays the same events over 8 cycles. That says nothing about how it sounds.'],
     ],
   },
   {

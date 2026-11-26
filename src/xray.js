@@ -13,7 +13,7 @@ import { queryEvents, midiOf, noteName } from './snapshot.js';
 import { num, onsets, bounds, midiOfControl } from './events.js';
 import { MODULES } from './modules.js';
 
-const CYCLES = 4, MAX_DRAWN = 2000, PAUSE_MS = 350, SLOW_MS = 40, PLAYING_GAP_MS = 2000;   // while music plays, automatic readings are at least this far apart
+const CYCLES = 4, PROBE_MS = 10, MAX_DRAWN = 2000, PAUSE_MS = 350, SLOW_MS = 40, PLAYING_GAP_MS = 2000;   // while music plays, automatic readings are at least this far apart
 const COLOURS = { bd: '#ff9f4a', sd: '#ff7aa8', rim: '#ff7aa8', cp: '#ff7aa8', hh: '#64a0ff', oh: '#64a0ff', cr: '#64a0ff', rd: '#64a0ff', lt: '#e0c050', mt: '#e0c050', ht: '#e0c050' };
 const level = (c) => Math.max(0.15, Math.min(1, (typeof c.gain === 'number' ? c.gain : 1) * (typeof c.velocity === 'number' ? c.velocity : 1)));
 
@@ -22,7 +22,7 @@ export function summarize(rec, tap) {
   const ev = onsets(rec), sounds = [...new Set(ev.map((e) => e.controls.s).filter(Boolean))];
   let lo = Infinity, hi = -Infinity;   // loops, not Math.min(...list): a long list would overflow the call
   for (const e of ev) { const n = midiOfControl(e.controls); if (n !== null) { if (n < lo) lo = n; if (n > hi) hi = n; } }
-  const parts = [`${ev.length} event${ev.length === 1 ? '' : 's'} over ${CYCLES} cycles`];
+  const cyc = rec.span.to - rec.span.from, parts = [`${ev.length} event${ev.length === 1 ? '' : 's'} over ${cyc} cycle${cyc === 1 ? '' : 's'}`];
   if (lo !== Infinity) parts.push(`notes ${noteName(lo)}${hi > lo ? ' to ' + noteName(hi) : ''}`);
   if (sounds.length) parts.push(`sound${sounds.length === 1 ? '' : 's'} ${sounds.slice(0, 6).join(', ')}${sounds.length > 6 ? ', ...' : ''}`);
   const b = bounds(rec); if (b.carryIn) parts.push(`${b.carryIn} began before cycle 1`);
@@ -34,15 +34,15 @@ export function summarize(rec, tap) {
 }
 
 function draw(canvas, rec, cssW) {
-  const ev = onsets(rec).slice(0, MAX_DRAWN), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const CYC = rec.span.to - rec.span.from, ev = onsets(rec).slice(0, MAX_DRAWN), dpr = Math.min(2, window.devicePixelRatio || 1);
   const pitched = ev.filter((e) => midiOfControl(e.controls) !== null), other = ev.filter((e) => midiOfControl(e.controls) === null);
   const lanes = [...new Set(other.map((e) => String(e.controls.s ?? e.controls.n ?? 'sound')))].sort();
   const pitchH = pitched.length ? 84 : 0, laneH = 16, H = Math.max(40, pitchH + lanes.length * (laneH + 2) + 22);
   canvas.width = cssW * dpr; canvas.height = H * dpr; canvas.style.width = cssW + 'px'; canvas.style.height = H + 'px';
   const c = canvas.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.fillStyle = '#0f1318'; c.fillRect(0, 0, cssW, H);
-  const L = 44, W = cssW - L - 6, x = (t) => L + (t / CYCLES) * W;
-  for (let i = 0; i <= CYCLES; i++) { c.strokeStyle = i % 1 === 0 ? 'rgba(120,230,230,.35)' : '#222'; c.lineWidth = 1; c.beginPath(); c.moveTo(x(i), 0); c.lineTo(x(i), H - 14); c.stroke(); if (i < CYCLES) { c.fillStyle = '#6a8a8a'; c.font = '10px system-ui, sans-serif'; c.fillText(String(i + 1), x(i) + 3, H - 3); } }
+  const L = 44, W = cssW - L - 6, x = (t) => L + (t / CYC) * W;
+  for (let i = 0; i <= CYC; i++) { c.strokeStyle = i % 1 === 0 ? 'rgba(120,230,230,.35)' : '#222'; c.lineWidth = 1; c.beginPath(); c.moveTo(x(i), 0); c.lineTo(x(i), H - 14); c.stroke(); if (i < CYC) { c.fillStyle = '#6a8a8a'; c.font = '10px system-ui, sans-serif'; c.fillText(String(i + 1), x(i) + 3, H - 3); } }
   let y = 0;
   if (pitched.length) {
     let lo = Infinity, hi = -Infinity; for (const e of pitched) { const m = midiOfControl(e.controls); if (m < lo) lo = m; if (m > hi) hi = m; }
@@ -64,7 +64,7 @@ function draw(canvas, rec, cssW) {
 
 // h: the DOM helper; getGraph(): the board's graph now; the tempo is not needed (the x-ray is in cycles)
 export function createXray({ h, getGraph, isPlaying = () => false, findInvoker = () => null }) {
-  let el = null, nodeId = null, wantManual = false, lastKey = '', lastRec = null, lastMs = 0, lastEnd = 0, busy = false, dirty = false, timer = 0, rt = 0, gen = 0, invoker = null, canvas = null, line = null, after = null, applied = null, warn = null, title = null, pausedNote = null;
+  let el = null, nodeId = null, lastPartial = false, wantManual = false, lastKey = '', lastRec = null, lastMs = 0, lastEnd = 0, busy = false, dirty = false, timer = 0, rt = 0, gen = 0, invoker = null, canvas = null, line = null, after = null, applied = null, warn = null, title = null, pausedNote = null;
   const width = () => Math.min(380, window.innerWidth - 48);
   const onVis = () => { if (!document.hidden) schedule(0); };
   const onResize = () => { clearTimeout(rt); rt = setTimeout(() => { if (el && lastRec) draw(canvas, lastRec, width()); }, 150); };   // redraw what we already have: no new query
@@ -79,7 +79,7 @@ export function createXray({ h, getGraph, isPlaying = () => false, findInvoker =
   function show(rec, tap, node, capped) {   // the words and the picture for a record and the tap's current surroundings
     const sum = summarize(rec, tap);
     title.textContent = `What comes out of ${MODULES[node.type].title}`;
-    line.textContent = sum.line; after.textContent = sum.after; applied.textContent = sum.notApplied; warn.textContent = capped ? `Only the first ${MAX_DRAWN} events are drawn.` : (rec.warnings[0] || '');
+    line.textContent = sum.line; after.textContent = sum.after; applied.textContent = sum.notApplied; warn.textContent = (lastPartial ? 'This pattern is heavy to read, so only the first cycle is shown. ' : '') + (capped ? `Only the first ${MAX_DRAWN} events are drawn.` : (rec.warnings[0] || ''));
     canvas.setAttribute('aria-label', `${MODULES[node.type].title} output. ${sum.line}`);
   }
   async function refresh(manual = false) {
@@ -96,11 +96,14 @@ export function createXray({ h, getGraph, isPlaying = () => false, findInvoker =
     if (busy) { dirty = true; if (manual) wantManual = true; return; }   // asked while one is running: asked again after it, and a press of Refresh stays a press of Refresh
     busy = true; dirty = false; const mine = ++gen;
     try {
-      const timing = {}, rec = await queryEvents(tap.code, { from: 0, to: CYCLES, timing });
+      // a one-cycle reading first: when that is already slow (a dense pattern), it is the only one taken, so a heavy pattern costs a quarter of what four cycles would
+      const reuse = {};   // the one-cycle probe and the four-cycle reading share one evaluation
+      let timing = {}, rec = await queryEvents(tap.code, { from: 0, to: 1, timing, reuse }), partial = false;
+      let spent = timing.ms || 0; if (timing.ms > PROBE_MS) partial = true; else { timing = {}; rec = await queryEvents(tap.code, { from: 0, to: CYCLES, timing, reuse }); spent += timing.ms || 0; }
       if (!el || mine !== gen || nodeId !== node.id) return;   // closed or switched to another module while this one ran
       const now = compileTap(getGraph(), nodeId); if (now.error || now.code !== key) { dirty = true; return; }   // the module's code changed while this one ran: this answer is about old code, so it is dropped and the question asked again
-      const t1 = performance.now(), capped = draw(canvas, rec, width()); lastMs = compileMs + (timing.ms || 0) + (performance.now() - t1);   // the work done on this thread: compiling the tap, guard, evaluation, query, record and drawing; not the wait for the turn
-      lastKey = key; lastRec = rec; show(rec, tap, node, capped);
+      const t1 = performance.now(), capped = draw(canvas, rec, width()); lastMs = compileMs + spent + (performance.now() - t1);   // the work done on this thread: compiling the tap, guard, evaluation, query, record and drawing; not the wait for the turn
+      lastKey = key; lastRec = rec; lastPartial = partial; show(rec, tap, node, capped);
     } catch (e) { if (el && mine === gen) line.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 120); }
     finally { busy = false; lastEnd = performance.now(); if (dirty) { const m = wantManual; wantManual = false; if (m) refresh(true); else schedule(PAUSE_MS); } }
   }

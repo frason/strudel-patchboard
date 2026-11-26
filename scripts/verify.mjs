@@ -2094,6 +2094,118 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
     && JSON.stringify(shared((c) => { const id = mine(c), p = c.mk('codesource', { code: 's("bd").room(1) /* .orbit(2) */' }); c.wire(p, c.out); return id; })) === '[]');
 }
 
+// ---------- leftovers: the trigger hook, and the x-ray's scheduling against a stand-in page ----------
+{
+  const core = await import('@strudel/core'), { queryEvents } = await import('../src/snapshot.js'), { exclusive } = await import('../src/evallock.js');
+  const mine = () => {}; core.setTriggerFunc(mine); await queryEvents('setcpm(30)\n$: note(60)', { to: 1 });
+  check('Leftover: an offline query leaves the player\'s trigger hook as it was', core.getTriggerFunc() === mine);
+  const { createXray } = await import('../src/xray.js'), { makeNode, emptyGraph } = await import('../src/graph.js'), { cleanParams } = await import('../src/validate.js');
+  const g = emptyGraph(); g.groups = [];
+  const mk = (type, p = {}) => { const n = makeNode(type, 0, 0, cleanParams(type, { ...makeNode(type, 0, 0).params, ...p })); g.nodes.push(n); return n; };
+  const out = mk('output'), note = mk('notetext', { text: 'c4' }), syn = mk('synth');
+  g.wires.push({ id: 'a', from: { node: note.id, port: 'out' }, to: { node: syn.id, port: 'in' } }, { id: 'b', from: { node: syn.id, port: 'out' }, to: { node: out.id, port: 'in' } });
+  const made = []; let focused = null;
+  const ctx = new Proxy({}, { get: () => () => {}, set: () => true });
+  const h = (tag, props, ...kids) => { const el = { tag, props: props || {}, textContent: kids.filter((k) => typeof k === 'string').join(''), attrs: {}, style: {}, remove() {}, focus() { focused = el; }, setAttribute(k, v) { this.attrs[k] = v; }, getContext: () => ctx }; made.push(el); return el; };
+  const saved = { document: globalThis.document, window: globalThis.window }, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  globalThis.document = { hidden: false, body: { append() {} }, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true, contains: () => true, activeElement: null };
+  globalThis.window = { innerWidth: 1000, devicePixelRatio: 1, addEventListener() {}, removeEventListener() {} };
+  try {
+    let playing = false; const anchor = { focus() { focused = anchor; } };
+    const xr = createXray({ h, getGraph: () => g, isPlaying: () => playing });
+    const text = (cls) => made.filter((e) => e.props.class === cls).map((e) => e.textContent).pop() || '';
+    xr.open(note.id, anchor); await wait(600);
+    const first = text('xr-line');
+    let release; const held = exclusive(() => new Promise((r) => { release = r; }));   // the engine is busy: the x-ray's next question has to wait for its turn
+    note.params.text = 'c5'; xr.update(); await wait(600);   // the question about c5 is waiting...
+    note.params.text = 'e5'; xr.update();   // ...and the board changes again while it waits
+    release(); await held; await wait(2500);
+    const last = text('xr-line');
+    check('X-ray (stand-in page): it reads the first state, and after edits made while a question waits for its turn it ends on the latest one, with no paused note', /c3|c4/.test(first) && /e5/.test(last) && !/c4|c5/.test(last) && text('xr-note xr-paused') === '');
+    xr.close();
+    check('X-ray (stand-in page): closing returns focus to the control that opened it', focused === anchor);
+  } finally { globalThis.document = saved.document; globalThis.window = saved.window; if (saved.document === undefined) delete globalThis.document; if (saved.window === undefined) delete globalThis.window; }
+}
+
+// ---------- Grab: a stretch of what a module plays becomes a Take or a hit pattern ----------
+{
+  const { queryEvents } = await import('../src/snapshot.js'), { grabFrom, recordToHits } = await import('../src/grab.js'), { takeToCode } = await import('../src/takecode.js'), { onsets, num } = await import('../src/events.js'), { guardCode: gc } = await import('../src/guard.js');
+  const src = '$: note("c3 e3 g3 b3 c4 e4 g4 b4").degradeBy(.5).s("sawtooth")';
+  const a = await queryEvents(src, { from: 4, to: 8 }), b = await queryEvents(src, { from: 4, to: 8 }), gr = grabFrom(a, { bpm: 120, beatsPerBar: 4, grid: 24 });
+  const sig = (r) => onsets(r).map((e) => `${e.at.join('/')}:${e.controls.note}`).join();
+  check('Grab: asking again for the same cycles of a random chain gives the same notes (seeded by time), and the grab keeps them', sig(a) === sig(b) && gr.kind === 'notes' && gr.take.events.length === onsets(a).length && gr.take.events.length > 0 && gr.take.events.length < 32);
+  const back = await queryEvents(takeToCode(gr.take, { grid: 24 }).code, { from: 0, to: 4 });
+  const { midiOfControl: mo } = await import('../src/events.js');
+  check('Grab: the Take written from cycles 4-8 plays the same notes at the same places over cycles 0-4', gr.takeReport.exactNotes && onsets(back).map((e) => num(e.at).toFixed(6) + ':' + mo(e.controls)).join() === onsets(a).map((e) => (num(e.at) - 4).toFixed(6) + ':' + mo(e.controls)).join());
+  const dr = await queryEvents('$: stack(s("bd*2 [~ sd]").bank("RolandTR909"), s("hh*8").gain(.5), s("cp:3 ~ ~ ~"))', { from: 0, to: 2 }), gd = grabFrom(dr), key = (r) => r.events.map((e) => e.controls.s + (e.controls.n ? ':' + e.controls.n : '') + '@' + e.at.join('/')).sort().join();
+  const hb = await queryEvents('$: ' + gd.hits.code, { from: 0, to: 2 });
+  check('Grab: sample hits are all found, with their sound and sample number', gd.kind === 'hits' && gd.hits.report.hits === 24 && gd.hits.report.sounds.join() === 'bd,cp:3,hh,sd');
+  check('Grab: the hit pattern replays exactly (same sound and place for every hit) and the guard accepts it', key(hb) === key(dr) && gc('$: ' + gd.hits.code) === null && gd.hits.report.gainLost === 16 && gd.hits.report.controlsLost.includes('gain'));
+  const mixed = grabFrom(await queryEvents('$: stack(note("c3 e3"), s("bd hh"))', { to: 1 })), none = grabFrom(await queryEvents('$: silence', { to: 2 }));
+  check('Grab: a voice with notes and hits offers both, and silence says nothing plays', mixed.kind === 'mixed' && mixed.take.events.length === 2 && !mixed.hits.empty && none.kind === 'empty' && /Nothing plays/.test(none.line));
+  const off = recordToHits(await queryEvents('$: s("bd ~ ~ bd")', { from: 0, to: 2.5 }));
+  check('Grab: a span that is not whole cycles is reported (the written pattern is rounded up to whole cycles)', off.report.spanPadded === 1);
+}
+
+// ---------- Bake: a random chain frozen into a Take plays the same notes as the chain did over those cycles ----------
+{
+  const { makeNode, emptyGraph } = await import('../src/graph.js'), { cleanParams } = await import('../src/validate.js'), { compile, compileTap } = await import('../src/compile.js');
+  const { queryEvents } = await import('../src/snapshot.js'), { grabFrom } = await import('../src/grab.js'), { onsets, num, midiOfControl } = await import('../src/events.js');
+  const build = (src) => { const g = emptyGraph(); g.groups = []; const mk = (type, p = {}) => { const n = makeNode(type, 0, 0, cleanParams(type, { ...makeNode(type, 0, 0).params, ...p })); g.nodes.push(n); return n; }; const out = mk('output', { bpm: 120, beats: 4 }), s1 = src(mk), sy = mk('synth', { wave: 'triangle' });
+    g.wires.push({ id: 'a', from: { node: s1.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: 'b', from: { node: sy.id, port: 'out' }, to: { node: out.id, port: 'in' } }); return { g, s1, sy, out }; };
+  const { g, s1, sy, out } = build((mk) => mk('randnotes'));
+  const rec = await queryEvents(compileTap(g, s1.id).code, { from: 0, to: 8 }), gr = grabFrom(rec, { bpm: 120, beatsPerBar: 4, grid: 24 });
+  // the bake: a Take with the frozen notes takes the place of the random module on the cable
+  const t = makeNode('take', 0, 0, cleanParams('take', { name: 'Baked 1', grid: 12, bpm: gr.take.bpm, beats: gr.take.beatsPerBar, events: gr.take.events, versions: [] }));
+  g.nodes.push(t); for (const w of g.wires) if (w.from.node === s1.id) w.from.node = t.id;
+  const after = await queryEvents(compile(g).code, { from: 0, to: 8 }), want = onsets(rec).map((e) => num(e.at).toFixed(4) + ':' + midiOfControl(e.controls)).join(), got = onsets(after).map((e) => num(e.at).toFixed(4) + ':' + midiOfControl(e.controls)).join();
+  check('Bake: a Random Notes module frozen into a Take (cycles 0-8) and plugged in its place plays the same notes at the same places over those cycles', gr.kind === 'notes' && gr.take.events.length > 0 && gr.takeReport.exactNotes && got === want);
+}
+
+// ---------- Share a board as a link (G1) ----------
+{
+  const { makeShareFragment, readShareFragment, describeBoard, SHARE_PREFIX, MAX_LINK_CHARS } = await import('../src/share.js'), { LESSONS } = await import('../src/starters.js'), { compile } = await import('../src/compile.js');
+  const g = LESSONS.find((l) => l.id === 'song').graph(), made = await makeShareFragment(g);
+  const back = made.fragment ? await readShareFragment(made.fragment) : { error: 'no fragment' };
+  check('Share: a board packs into a link and reads back as the same board (same code), and the link holds only the graph (no settings, keys or saves)', made.fragment && made.fragment.startsWith(SHARE_PREFIX) && back.graph && compile(back.graph).code === compile(g).code && !/key|apiKey|secret/i.test(JSON.stringify({ v: 1, kind: 'patchboard-board', graph: back.graph }).replace(/"keyboard"|"key"\s*:\s*"?\w*/g, '')));
+  const { deflateRawSync } = await import('node:zlib');
+  const enc = (obj) => SHARE_PREFIX + Buffer.from(deflateRawSync(Buffer.from(JSON.stringify(obj)))).toString('base64url');
+  const bombs = [enc({ v: 1, kind: 'patchboard-board', graph: { v: 1, nodes: [], wires: [], pad: 'x'.repeat(4_000_000) } }), SHARE_PREFIX + 'not base64 !!', SHARE_PREFIX + 'AAAA', '#other=abc', enc({ v: 2, kind: 'patchboard-board', graph: {} }), enc({ v: 1, kind: 'patchboard-board', graph: { v: 1, nodes: [{ id: 'x', type: 'nonsense', x: 0, y: 0, params: {} }], wires: [] } })];
+  const results = await Promise.all(bombs.map(readShareFragment));
+  check('Share: an unpacking bomb, bad characters, junk, a wrong prefix, a wrong version and an unknown module are all refused with a message, never loaded', results.every((r) => typeof r.error === 'string' && !r.graph));
+  const evil = { v: 1, nodes: [{ id: 'c1', type: 'codesource', x: 0, y: 0, params: { code: 'fetch("https://evil.example").then(console.log)' } }, { id: 'o1', type: 'output', x: 0, y: 0, params: {} }], wires: [{ id: 'w1', from: { node: 'c1', port: 'out' }, to: { node: 'o1', port: 'in' } }] };
+  const ev = await readShareFragment(enc({ v: 1, kind: 'patchboard-board', graph: evil }));
+  check('Share: unsafe code inside a shared board never reaches the player: it is left out of the compiled code, the link says so in its issues, and what would run passes the guard', ev.graph && !/fetch|evil/.test(ev.code) && ev.issues.some((m) => /left out/.test(m)));
+  const d = describeBoard(back.graph, back.code);
+  check('Share: the description gives plain counts (modules, cables) and any sample packs the code names', d.modules === g.nodes.length && d.cables === g.wires.length && Array.isArray(d.packs) && MAX_LINK_CHARS > 1000);
+}
+
+// ---------- Evidence labels ----------
+{
+  const { evidenceFor } = await import('../src/evidence.js'), { LESSONS } = await import('../src/starters.js');
+  const good = await evidenceFor(LESSONS.find((l) => l.id === 'song').graph(), { cycles: 4 });
+  check('Evidence: a lesson board gets the guard label and a read-back label that says what was replayed and on which engine, and a "not checked" line', good.ok && good.labels.some((l) => l.id === 'guard' && l.ok) && good.labels.some((l) => l.id === 'readback' && l.ok && /4 cycles/.test(l.text) && /@strudel\/web/.test(l.text) && /not a proof/.test(l.text)) && good.labels.some((l) => l.id === 'not-checked'));
+}
+
+// ---------- Form map ----------
+{
+  const { buildFormMap, voicesOf, describeMap, activityFromRecord } = await import('../src/formmap.js'), { makeNode, emptyGraph } = await import('../src/graph.js'), { cleanParams } = await import('../src/validate.js'), { LESSONS } = await import('../src/starters.js');
+  const g = emptyGraph(); g.groups = [];
+  const mk = (type, p = {}) => { const n = makeNode(type, 0, 0, cleanParams(type, { ...makeNode(type, 0, 0).params, ...p })); g.nodes.push(n); return n; };
+  const out = mk('output'), cs = mk('codesource', { code: 'note("c3 e3 g3 b3").mask("<0 0 1 1>/2")' }), cd = mk('codesource', { code: 's("bd*4")' }), st = mk('stack');
+  const wire = (a, b, port = 'in') => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+  wire(cs, st); wire(cd, st); wire(st, out);
+  const vs = voicesOf(g), map = await buildFormMap(g, { from: 0, cycles: 16 });
+  const mel = map.voices.find((v) => v.id === cs.id), dr = map.voices.find((v) => v.id === cd.id);
+  check('Form map: the voices are found through a Stack, and a mask("<0 0 1 1>/2") voice plays in the second half of each 8 cycles only while a steady voice plays in every cycle', vs.length === 2 && mel && dr && mel.counts.join() === '0,0,0,0,4,4,4,4,0,0,0,0,4,4,4,4' && dr.counts.every((n) => n === 4) && mel.readCycles === 16);
+  const text = describeMap(map);
+  check('Form map: the words say which cycles each voice plays in (the text alternative of the picture)', /plays in cycles 5-8, 13-16/.test(text) && /plays in cycles 1-16/.test(text));
+  const lesson = LESSONS.find((l) => l.id === 'song').graph(), m2 = await buildFormMap(lesson, { cycles: 8 });
+  check('Form map: a real lesson board is read voice by voice with a count for every cycle', m2.voices.length >= 2 && m2.voices.every((v) => v.counts.length === 8) && m2.voices.some((v) => v.counts.some((n) => n > 0)));
+  let cancelled = false; const part = await buildFormMap(g, { cycles: 64, cancelled: () => cancelled, onProgress: (d) => { if (d >= 2) cancelled = true; } });
+  check('Form map: reading can be cancelled part way, and cycles not read are marked as not read', part.voices.some((v) => v.readCycles < 64));
+}
+
 // ---------- the playback gate fails closed (handoff 0002, finding 7) ----------
 {
   const { judge, validateRuns } = await import('./perfjudge.mjs');

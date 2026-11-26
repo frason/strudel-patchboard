@@ -29,6 +29,11 @@ import { mergeGraph } from './recorder.js';
 import { approvePacks, approvedPacks } from './packs.js';
 import { chatPack } from './aidocs.js';
 import { createXray } from './xray.js';
+import { openGrab } from './grabui.js';
+import { evidenceFor } from './evidence.js';
+import { buildFormMap, drawFormMap, describeMap, MAP_LENGTHS } from './formmap.js';
+import { makeShareFragment, readShareFragment, describeBoard, SHARE_PREFIX } from './share.js';
+import { sliderValues } from './slider.js';
 import { wavBytes, recordingSeconds, recordingName } from './wav.js';
 import { noteName } from './takecode.js';
 import { parseMidi, pickGrid, isMidiFile } from './midifile.js';
@@ -780,6 +785,9 @@ const hooks = {
     if (merge) store.amend(apply, { label: 'tidy' }); else store.update(apply, { label: 'tidy' });
     requestAnimationFrame(() => board.fit());
   },
+  formmap() { openFormMap(); },
+  grab(id) { openGrabFor(id); },
+  bake(id) { openGrabFor(id, true); },
   xray(id, anchor) { xray.open(id, anchor); },   // pin a small panel showing what comes out of this module (src/xray.js)
   duplicate(id) {
     const src = nodeById(store.graph, id);
@@ -1221,6 +1229,14 @@ exportBtn.addEventListener('click', () => {
   showPop(exportBtn, h('div', { class: 'menu' },
     h('button', { class: 'menu-item', id: 'export-json', onclick: () => { download('patch.patchboard.json', JSON.stringify(store.graph, null, 2), 'application/json'); closePop(); } }, 'Patch file (.json) — exact graph'),
     h('button', { class: 'menu-item', id: 'export-strudel', onclick: () => { download('patch.strudel', strudelFile(store.graph)); closePop(); } }, 'Strudel code (.strudel) — with the patch embedded'),
+    h('button', { class: 'menu-item', id: 'export-link', title: 'Copies a link that holds this board. Whoever opens it is shown what it is and chooses whether to open it as a copy. Nothing is uploaded: the board is inside the link.', onclick: async () => {
+      closePop();
+      const r = await makeShareFragment(store.graph);
+      if (r.error) return toast(r.error, [], 9000);
+      const url = location.origin + location.pathname + r.fragment;
+      try { await navigator.clipboard.writeText(url); toast('Link copied. The board is inside the link, nothing is uploaded; sample packs are not included.', [], 6000); }
+      catch { toast('Could not copy to the clipboard.', [], 5000); }
+    } }, 'Copy a share link — the board is inside the link'),
     h('button', { class: 'menu-item', id: 'export-ai', title: 'Copies a short account of how Patchboard works, the list of modules, and this board as Strudel code, ready to paste into an AI chat', onclick: async () => {
       closePop();
       try { await navigator.clipboard.writeText(chatPack(compile(store.graph).code)); toast('Copied. Paste it into an AI chat and ask your question.', [], 5000); }
@@ -1340,6 +1356,69 @@ function openRecord(replaceId = null) {
       toast(`Added "Take ${k}": ${take.events.length} note${take.events.length === 1 ? '' : 's'}. Press Re-record on it to play it again.`, [undoAction], 7000);
     },
   });
+}
+// Grab: copy a stretch of what a module plays into a module of its own (src/grab.js, src/grabui.js).
+function openGrabFor(id, bake = false) {
+  openGrab({
+    h, showModal, closeModal, onClose: (fn) => modalCloseHooks.push(fn), getGraph: () => store.graph, nodeId: id, bake,
+    isPlaying: () => engine.playing, nowCycle: () => engine.nowCycle?.() ?? 0, sliders: () => ({ ...sliderValues }),
+    onAddTake(take, grid, from, opts = {}) {
+      if (opts.bake) return bakeInto(id, take, grid);
+      const names = new Set(store.graph.nodes.filter((n) => n.type === 'take').map((n) => n.params.name));
+      let k = 1; while (names.has('Grab ' + k)) k++;
+      const t = makeNode('take', 0, 0, cleanParams('take', { name: 'Grab ' + k, grid, bpm: take.bpm, beats: take.beatsPerBar, events: take.events, versions: [] }));
+      const sy = makeNode('synth', 0, 0, { wave: 'triangle' }), o = makeNode('output', 0, 0);
+      const g = { v: 1, nodes: [t, sy, o], wires: [{ id: uid('w'), from: { node: t.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: uid('w'), from: { node: sy.id, port: 'out' }, to: { node: o.id, port: 'in' } }] };
+      let added = []; store.update((cur) => { added = mergeGraph(cur, g); }, { label: 'grab a take' });
+      requestAnimationFrame(() => added[0] && board.reveal?.(added[0]));
+      toast(`Added "Grab ${k}": ${take.events.length} note${take.events.length === 1 ? '' : 's'} ${from}. It is a normal Take: edit it, or plug it elsewhere.`, [undoAction], 7000);
+    },
+    onAddHits(code, from) {
+      const c = makeNode('codesource', 0, 0, cleanParams('codesource', { code })), o = makeNode('output', 0, 0);
+      const g = { v: 1, nodes: [c, o], wires: [{ id: uid('w'), from: { node: c.id, port: 'out' }, to: { node: o.id, port: 'in' } }] };
+      let added = []; store.update((cur) => { added = mergeGraph(cur, g); }, { label: 'grab a hit pattern' });
+      requestAnimationFrame(() => added[0] && board.reveal?.(added[0]));
+      toast(`Added a Strudel Code (pattern) module ${from}: the hits, as code you can edit.`, [undoAction], 7000);
+    },
+  });
+}
+// Bake: the module `id` is frozen into a Take of what it plays over the chosen cycles; whatever it fed is plugged into the Take instead. The module stays, unconnected.
+function bakeInto(id, take, grid) {
+  const src = nodeById(store.graph, id); if (!src) return;
+  const names = new Set(store.graph.nodes.filter((n) => n.type === 'take').map((n) => n.params.name));
+  let k = 1; while (names.has('Baked ' + k)) k++;
+  const t = makeNode('take', src.x + 40, src.y + 170, cleanParams('take', { name: 'Baked ' + k, grid, bpm: take.bpm, beats: take.beatsPerBar, events: take.events, versions: [] }));
+  let moved = 0;
+  store.update((g) => { g.nodes.push(t); for (const w of g.wires) if (w.from.node === id) { w.from.node = t.id; moved++; } }, { label: 'bake into a take' });
+  requestAnimationFrame(() => board.reveal?.(t.id));
+  toast(`Baked into "Baked ${k}": ${take.events.length} note${take.events.length === 1 ? '' : 's'}. ${moved ? `${moved} cable${moved === 1 ? '' : 's'} now come${moved === 1 ? 's' : ''} from the Take.` : 'Nothing was plugged into the original, so the Take stands alone.'} The original is still on the board, unconnected.`, [undoAction], 9000);
+}
+// The form map: the shape of the song, voice by voice, cycle by cycle (src/formmap.js).
+function openFormMap() {
+  const len = h('select', { 'aria-label': 'How many cycles' }, ...MAP_LENGTHS.map((n) => h('option', { value: n, selected: n === 32 }, `${n} cycles`)));
+  const canvas = h('canvas', { role: 'img', 'aria-label': 'Song form map' }), status = h('div', { class: 'imp-hint', 'aria-live': 'polite' }, 'Reading…'), words = h('p', { class: 'imp-hint' });
+  const go = h('button', { class: 'btn', type: 'button' }, 'Read again'), close = h('button', { class: 'btn ghost', type: 'button', onclick: () => closeModal() }, 'Close');
+  let run = 0, alive = true, map = null;
+  const width = () => Math.min(900, window.innerWidth - 80);
+  const read = async () => {
+    const mine = ++run; go.disabled = true; status.textContent = 'Reading…';
+    try {
+      const m = await buildFormMap(store.graph, { from: 0, cycles: Number(len.value), cancelled: () => !alive || mine !== run, onProgress: (d, t) => { if (alive && mine === run) status.textContent = `Reading… ${Math.round((d / t) * 100)}%`; } });
+      if (!alive || mine !== run) return;
+      map = m; drawFormMap(canvas, m, width());
+      words.textContent = describeMap(m); canvas.setAttribute('aria-label', 'Song form map. ' + describeMap(m));
+      status.textContent = m.voices.length ? `${m.voices.length} voice${m.voices.length === 1 ? '' : 's'} over ${m.cycles} cycles. Brighter means more notes in that cycle.` : 'Nothing is plugged into the Output yet, so there is no form to show.';
+    } catch (e) { if (alive && mine === run) status.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 140); }
+    go.disabled = false;
+  };
+  go.addEventListener('click', read); len.addEventListener('change', read);
+  showModal('Song form map', h('div', {},
+    h('p', { class: 'imp-hint' }, 'Each lane is a voice (a module plugged into the Output); each cell is a cycle. Intros, breaks and drops show as where the lanes light up. It reads what each voice\'s module outputs, so master volume and effects further along are not applied.'),
+    h('label', { style: 'display:flex;gap:8px;align-items:center;margin:4px 0' }, h('span', {}, 'Length'), len), status, canvas, words,
+    engine.playing ? h('p', { class: 'imp-hint' }, 'The music is playing: reading a long map takes a moment on the player\'s thread, so a note may come late. It reads in small pieces to keep that short.') : null,
+    h('div', { class: 'modal-btns' }, go, close)));
+  modalCloseHooks.push(() => { alive = false; });   // after showModal, which runs the hooks of the window it replaces
+  read();
 }
 function openImport() {
   const area = h('textarea', { class: 'imp-area', id: 'import-text', spellcheck: 'false', placeholder: 'Paste Strudel code here, e.g.\n\nsetcpm(120/4)\n\$: s("bd*2 ~ sd").bank("RolandTR909")' });
@@ -1625,6 +1704,32 @@ let introSeen = false;
 try { introSeen = localStorage.getItem('pb.introSeen') === '1'; } catch { /* private mode */ }
 if (!introSeen) showIntro();
 
+// ---------- a shared link: show what it is, and open it only if the person says so ----------
+async function openSharedLink() {
+  const frag = location.hash; if (!frag.startsWith(SHARE_PREFIX)) return;
+  const clear = () => { try { history.replaceState(null, '', location.pathname + location.search); } catch { /* ignore */ } };
+  const r = await readShareFragment(frag);
+  if (r.error) { clear(); return toast(r.error, [], 9000); }
+  const d = describeBoard(r.graph, r.code), kinds = Object.entries(d.types).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t, n]) => `${n} ${MODULES[t]?.title || t}`).join(', ');
+  const evid = h('div', { 'aria-live': 'polite' });
+  const body = h('div', {},
+    h('p', { class: 'imp-hint' }, `Someone shared a board with you: ${d.modules} modules and ${d.cables} cables (${kinds}). It has not been opened. Opening it replaces what is on the board now (you can undo).`),
+    h('p', { class: 'imp-hint' }, 'Checked: the file is a valid board, and the code it makes passes the same safety check as everything else here. That says nothing about how it sounds.'),
+    r.issues.length ? h('p', { class: 'imp-hint' }, 'Parts that were left out: ' + r.issues.slice(0, 4).join('; ') + '.') : null,
+    d.packs.length ? h('p', { class: 'imp-hint' }, 'It names sample packs (' + d.packs.join(', ') + '). Nothing is downloaded unless you approve it when you play.') : null,
+    evid,
+    h('div', { class: 'modal-btns' },
+      h('button', { class: 'btn ghost', id: 'share-check', title: 'Reads the board back into modules and plays 8 cycles of both offline to compare them', onclick: async (e) => {
+        const b = e.currentTarget; b.disabled = true; evid.textContent = engine.playing ? 'Checking (the music is playing: this can make a note late)…' : 'Checking…';
+        try { const ev = await evidenceFor(r.graph, { sounds: (name, bank) => soundsFor(bank || '').includes(name) }); evid.replaceChildren(...ev.labels.map((l) => h('div', { class: 'imp-hint' }, (l.ok === true ? '✓ ' : l.ok === false ? '✗ ' : '· ') + l.text))); }
+        catch (err) { evid.textContent = 'The check failed: ' + String((err && err.message) || err).slice(0, 120); }
+        b.disabled = false;
+      } }, 'Run the checks'),
+      h('button', { class: 'btn', id: 'share-open', onclick: () => { clear(); closeModal(); loadGraph(r.graph, 'a shared board'); } }, 'Open it'),
+      h('button', { class: 'btn ghost', id: 'share-cancel', onclick: () => { clear(); closeModal(); } }, 'Not now')));
+  showModal('Open a shared board?', body);
+}
+openSharedLink();
 window.addEventListener('resize', () => board.drawCables());
 // the lesson text sits in the code column: under the code on a wide screen, at the top of the code sheet on a phone (so it is gone when the sheet is closed)
 function placeLearn() {

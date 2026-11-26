@@ -55,6 +55,8 @@ a load that blocks the page for 600 ms in the middle of the window now shows up 
 ## Not measured
 A phone, a slow or throttled computer, a long session, listening, dense expanded chains, long Takes, and a person editing live (the 2 s load re-reads on a timer; it does not change the patch). One fixed query repeated is a heavy load, not a universal worst case. These numbers are one machine's baseline, not guarantees.
 
+> The tables above were measured on earlier builds, before the 2-second reading gap, the cost accounting and the stricter gate described below. They are historical observations on one machine. Only the section below describes the current x-ray, and it is not a guarantee either.
+
 ## Re-measurement after handoff 0003 (2026-11-26)
 
 Method as above, 15 s windows, 2 runs per board (3 for the Oleander re-run), new baseline `r3-idle`. Local, headless Chrome, one machine: a historical observation, not a safety proof.
@@ -65,3 +67,28 @@ Method as above, 15 s windows, 2 runs per board (3 for the Oleander re-run), new
 - Deliberate stall (`stall` load, 600 ms): fails as it should (8 skipped, 1 stall, a 600 ms long task). A run with `--only` also fails because the other baseline scenarios are not measured, by design.
 - The `xray` load calls the same pausable refresh the panel uses, so a pass can mean the readings paused, not that reading is free.
 - Harness input checks: `--seconds -1`, `--repeat 1.5` and unknown loads are refused before Chrome starts.
+
+## Cost of one reading on dense patterns (Node, `npm run bench:query`)
+
+`scripts/bench-query.mjs` runs the real guard, evaluate, query and record path in Node, four cycles, median of 5 (not browser timing: it shows which shapes are expensive, and it is the first benchmark of dense admitted patterns).
+
+| Pattern | Events | Median ms |
+|---|---|---|
+| 8-note melody | 32 | 1.4 |
+| `bd*16 hh*16 sd*16` | 192 | 1.9 |
+| `note("c3*16").ply(8).chop(32)` | 16,384 | 121 |
+| `note("c3*4000")` | 16,000 | 44 |
+| `s("hh*32").fast(8).chop(64)` | 50,000 (the record's cap) | 525 |
+| superimpose + off + echo chain | 768 | 5 |
+| 600-note Take over 61 bars | 40 | 9 |
+
+What this shows: the guard admits patterns that cost half a second to read. Before this benchmark the x-ray would take such a reading in one go, on the thread that schedules notes. Now the x-ray first reads one cycle, and when that alone takes over 10 ms it keeps only that picture (and says so), which cuts the worst case to about a quarter. That is a mitigation, not a bound: a 1-cycle reading of the heaviest admitted pattern still takes about 130 ms. Not measured: the browser, a long Take with dense overlaps, live edits.
+
+## The form map while music plays (2026-11-26)
+
+Same method (15 s windows, 3 runs, baseline `r3-idle`, headless Chrome, one machine). The `formmap` load opens the song form map (32 cycles, every voice) and presses Read again every 3 s, far busier than anyone would use it.
+- First version (8-cycle chunks, every chunk evaluated again): no skipped notes, but one 72 ms long task on whole-song and 6 to 20 MB of heap still held after a collection on every board.
+- 4-cycle chunks removed the long tasks; the heap growth stayed (10 to 20 MB per window). The cause was evaluating the same voice many times (about 360 evaluations a window): each Strudel evaluation appears to keep some memory. Reading one voice in pieces from a single evaluation (`reuse` in `queryEvents`) brought it back inside the gate.
+- Final: all three boards pass the gate against idle (0 skipped notes, underruns, stalls and long tasks; heap growth 3 MB or less).
+- What it does not show: whether the memory per evaluation is released later (the window is short), so a very long session of repeated x-ray readings (two evaluations per reading) is still unmeasured; a form map on a board with many dense voices; a phone.
+

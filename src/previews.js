@@ -57,7 +57,14 @@ export function drawPreview(kind, canvas, p, ctxInfo = {}) {
     ctx.fillStyle = COLORS.text; ctx.textAlign = 'right';
     ctx.fillText(String(hi), L - 4, T + 8); ctx.fillText(String(lo), L - 4, T + h);
     ctx.textAlign = 'center';
-    ctx.fillText(`one sweep = ${p.slow} cycle${Number(p.slow) === 1 ? '' : 's'}`, L + w / 2, H - 3);
+    const cyc = Number(p.slow), whole = Number.isFinite(cyc) && cyc >= 1 && cyc <= 16 && Math.abs(cyc - Math.round(cyc)) < 1e-9;
+    if (whole) {   // a tick at every cycle (a bar): the curve is read against the song's own count, 1 2 3 4 ...
+      ctx.strokeStyle = '#2a3844'; ctx.lineWidth = 1;
+      for (let c = 1; c < cyc; c++) { const x = L + (c / cyc) * w; ctx.beginPath(); ctx.moveTo(x + 0.5, T); ctx.lineTo(x + 0.5, T + h); ctx.stroke(); }
+      ctx.fillStyle = COLORS.text; ctx.textAlign = 'left';
+      for (let c = 0; c < cyc; c++) ctx.fillText(String(c + 1), L + (c / cyc) * w + 2, H - 3);
+      ctx.textAlign = 'right'; ctx.fillText(`${cyc} cycle${cyc === 1 ? '' : 's'}, then repeats`, L + w - 2, T + 8);
+    } else { ctx.fillText(`one sweep = ${p.slow} cycle${cyc === 1 ? '' : 's'}`, L + w / 2, H - 3); }
     const y = (v) => T + h - v * h;
     ctx.beginPath();
     if (p.shape === 'rand') {
