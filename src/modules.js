@@ -231,14 +231,14 @@ export const MODULES = {
   // ---------- transformers (keep the type of what comes in) ----------
   fast: {
     title: 'Fast', cat: 'transform', out: 'through',
-    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
-    blurb: 'Speeds a pattern up: fast(2) plays it twice per cycle.',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true, multi: true }],
+    blurb: 'Speeds a pattern up: fast(2) plays it twice per cycle. Several patterns of the same kind can plug into it: they play together, all sped up the same.',
     params: [{ key: 'n', label: 'times', kind: 'knob', min: 0.25, max: 16, step: 0.25, def: 2, call: 'fast', always: true, wire: true }],
   },
   slow: {
     title: 'Slow', cat: 'transform', out: 'through',
-    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
-    blurb: 'Slows a pattern down: slow(2) stretches it over two cycles.',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true, multi: true }],
+    blurb: 'Slows a pattern down: slow(2) stretches it over two cycles. Several patterns of the same kind can plug into it: they play together, all slowed the same.',
     params: [{ key: 'n', label: 'times', kind: 'knob', min: 0.25, max: 8, step: 0.25, def: 2, call: 'slow', always: true, wire: true }],
   },
   notefilter: {
@@ -443,7 +443,7 @@ export const MODULES = {
   djf: {
     title: 'DJ filter', cat: 'effect', out: 'sound',
     inputs: [{ id: 'in', type: ['sound'], label: 'sound', required: true }],
-    blurb: 'One knob, like a DJ mixer: turn left of the middle for a low-pass, right of it for a high-pass.',
+    blurb: 'One knob, like a DJ mixer: turn left of the middle for a low-pass, right of it for a high-pass. In Strudel this filter works on the whole orbit (mix bus) the sound plays on, so it also filters every other sound on the same orbit. To filter only one part, put an Orbit module in front of it.',
     params: [{ key: 'amount', label: 'filter', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.5, call: 'djf', always: true, wire: true, tip: 'below 0.5 low-pass, above 0.5 high-pass' }],
   },
   lofi: {

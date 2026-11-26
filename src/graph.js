@@ -77,6 +77,13 @@ export function whyNot(g, fromNode, toNode, toPort, ignoreWire) {
   } else if (!port.accept.includes(t)) {
     return `${t} cable does not fit a ${port.accept.join('/')} input`;
   }
+  // an input that takes several cables (Slow, Fast) takes ones of the same kind: they are stacked, and a stack holds one kind
+  if (port.multi && port.accept !== 'same' && t) {
+    for (const w of wiresInto(test, toNode, toPort)) {
+      const o = outType(test, w.from.node);
+      if (o && o !== t) return `this input already holds ${o} cables, not ${t}`;
+    }
+  }
   if (reaches(test, toNode, fromNode)) return 'that would make a feedback loop';
   return null;
 }

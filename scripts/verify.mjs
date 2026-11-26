@@ -1739,4 +1739,41 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Evaluation lock: the player and the offline evaluator take turns (one finishes before the next starts, and a failure does not block the rest)', log.join(',') === 'start a,end a,start b,end b,start c,end c' && rs[1].status === 'rejected' && rs[2].status === 'fulfilled');
 }
 
+
+// ---------- the DJ filter works on the whole orbit ----------
+{
+  const { emptyGraph: eg, makeNode: mn } = await import('../src/graph.js');
+  const build = (withOrbit, withDrums) => {
+    const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port: 'in' } });
+    const mel = N('notetext', { text: 'c3 e3' }), sy = N('synth', { wave: 'sawtooth' }), dj = N('djf'), out = N('output');
+    let tail = sy; W(mel, sy);
+    if (withOrbit) { const ob = N('orbit', { n: 2 }); W(sy, ob); tail = ob; }
+    W(tail, dj); W(dj, out);
+    if (withDrums) { const dr = N('sample', { name: 'hh*8' }); W(dr, out); }
+    return compile(g);
+  };
+  const warns = (r) => r.issues.some((i) => /DJ filter filters the whole orbit/.test(i.msg));
+  check('DJ filter: it warns when other sounds share its orbit (the drums would be filtered too)', warns(build(false, true)));
+  check('DJ filter: no warning with an Orbit module in front of it, or when nothing else plays', !warns(build(true, true)) && !warns(build(false, false)));
+}
+
+
+// ---------- Slow and Fast take several cables of one kind ----------
+{
+  const { emptyGraph: eg, makeNode: mn, whyNot, normalize } = await import('../src/graph.js');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  for (const kind of ['slow', 'fast']) {
+    const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port = 'in') => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } });
+    const a = N('notetext', { text: 'c3 e3' }), b = N('notetext', { text: 'g3 b3' }), t = N(kind, { n: 2 }), sy = N('synth', { wave: 'sawtooth' }), out = N('output');
+    W(a, t); W(b, t); W(t, sy); W(sy, out);
+    const removed = normalize(g), code = compile(g).code;
+    check(`${kind}: two note patterns plugged into one ${kind} both stay, and the code is stack(a, b).${kind}(2) with one instrument`, !removed.length && new RegExp(`stack\\([\\s\\S]*c3 e3[\\s\\S]*g3 b3[\\s\\S]*\\)\\s*\\.${kind}\\(2\\)`).test(code) && !gc(code));
+    const back = imp(code);
+    check(`${kind}: that code reads back into modules with nothing skipped`, !back.report.skipped.length && back.graph.nodes.some((n) => n.type === kind));
+    const hits = N('rhythm');
+    check(`${kind}: a cable of another kind (a rhythm) is refused once notes are plugged in`, /already holds notes/.test(whyNot(g, hits.id, t.id, 'in') || ''));
+  }
+}
+
 process.exit(failures ? 1 : 0);

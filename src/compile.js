@@ -1,7 +1,7 @@
 // Graph -> idiomatic Strudel code. Pure. The returned `code` string is exactly what gets evaluated.
 // Alongside the code we return `segments`: which character ranges belong to which module (and which knob / step),
 // which is how highlighting, hover and "who made this event" work without any second representation of the sound.
-import { parseArrangeOrder, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas, SCALES, NOTE_NAMES, noteRank } from './modules.js';
+import { parseArrangeOrder, portsOf, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas, SCALES, NOTE_NAMES, noteRank } from './modules.js';
 import { chordSymbol } from './chords.js';
 import { guardCalls, guardCode } from './guard.js';
 import { takeToPattern } from './takecode.js';
@@ -80,6 +80,15 @@ export function compile(g) {
   function input(n, portId, depth, inline) {
     const ws = wiresInto(g, n.id, portId);
     if (!ws.length) return null;
+    if (ws.length > 1 && portsOf(n).find((q) => q.id === portId)?.multi) {   // several cables into one input (Slow, Fast): they play together, as stack(a, b)
+      const args = ws.map((w) => compileNode(nodeById(g, w.from.node), depth + 1, false)).filter(Boolean);
+      if (!args.length) return null;
+      if (args.length === 1) return args[0];
+      const m = { node: n.id, role: 'fn' }, parts = [S('stack(', { ...m, note: 'stack(a, b) plays the patterns plugged into this input at the same time; what follows applies to all of them.' })];
+      args.forEach((a, i) => { parts.push(NL(depth + 1), ...a); if (i < args.length - 1) parts.push(S(',', m)); });
+      parts.push(NL(depth), S(')', m));
+      return parts;
+    }
     return compileNode(nodeById(g, ws[0].from.node), depth, inline);
   }
 
@@ -666,6 +675,12 @@ export function compile(g) {
       case 'delay': case 'reverb': case 'distortion': case 'pan': case 'vibrato': case 'pulsewidth': case 'vowel': case 'djf': case 'lofi': case 'pitchenv': case 'fm': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'sound');
+        if (n.type === 'djf') {   // Strudel's DJ filter is a filter on the whole orbit (mix bus), so it also filters every other sound that plays on the same orbit
+          const before = new Set(), todo = [n.id];
+          while (todo.length) { const id = todo.pop(); for (const w of g.wires) if (w.to.node === id && !before.has(w.from.node)) { before.add(w.from.node); todo.push(w.from.node); } }
+          const mates = g.nodes.filter((x) => !before.has(x.id) && x.id !== n.id && MODULES[x.type]?.cat === 'source' && !x.muted);
+          if (mates.length && ![...before].some((id) => nodeById(g, id)?.type === 'orbit')) issues.push({ node: n.id, msg: `The DJ filter filters the whole orbit it plays on, so it also changes ${mates.length === 1 ? 'the other sound' : 'the other ' + mates.length + ' sounds'} on this board (the drums too). Put an Orbit module (set to 2) in front of it so only this part is filtered.` });
+        }
         if (n.type === 'pulsewidth') {   // the width only exists on the pulse oscillator
           const seen = new Set(), todo = [n.id], other = [];
           while (todo.length) {
