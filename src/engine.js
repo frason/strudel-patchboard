@@ -119,7 +119,7 @@ export function createEngine() {
   const late = { count: 0, at: 0, by: 0 };   // notes that reached the audio player after their moment had passed (they are skipped, with only a console message)
   let repl = null;
   let starting = null;
-  bindPlayerClock(() => repl?.scheduler?.cps ?? 0.5);   // lets an offline query put the player's tempo hook back after it runs (snapshot.js)
+  bindPlayerClock(() => repl?.scheduler?.cps ?? 0.5, () => repl?.scheduler?.now?.() ?? 0);   // lets an offline query put the player's tempo hook back after it runs (snapshot.js)
   let playing = false;
   const hapSubs = new Set();
   const statusSubs = new Set();

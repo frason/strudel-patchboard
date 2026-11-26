@@ -818,8 +818,13 @@ export function compileTap(g, nodeId) {
   // Not analysed: other parts that simply use the default orbit, Duck routing between parts, or an orbit set inside code the tapped chain contains.
   const mine = new Set([...before].map((id) => nodeById(g, id)).filter((n) => n && n.type === 'orbit').map((n) => n.params.n)); if (!mine.size) mine.add(1);   // no Orbit module upstream: the default orbit
   const reachesOut = (id) => { const seen = new Set([id]), st = [id]; while (st.length) { const x = st.pop(); if (x === out.id) return true; for (const w of g.wires) if (w.from.node === x && !seen.has(w.to.node)) { seen.add(w.to.node); st.push(w.to.node); } } return false; };
-  const orbitsOf = (n) => (n.type === 'orbit' ? [n.params.n] : (n.type === 'code' || n.type === 'codesource') ? [...String(n.params.code || '').matchAll(/\.orbit\(\s*(\d+)/g)].map((m) => Number(m[1])) : []);
-  const sharedOrbit = [...new Set(g.nodes.filter((n) => !before.has(n.id) && !n.muted && reachesOut(n.id)).flatMap(orbitsOf).filter((o) => mine.has(o)))].sort((x, y) => x - y);
+  const stripComments = (t) => String(t || '').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');   // an orbit named in a comment is not a route
+  const orbitsOf = (n) => (n.type === 'orbit' ? [n.params.n] : (n.type === 'code' || n.type === 'codesource') ? [...stripComments(n.params.code).matchAll(/\.orbit\(\s*(\d+)/g)].map((m) => Number(m[1])) : []);
+  // a peer counts only if something that makes sound is switched on upstream of it, and no other Orbit module lies between it and the Output (that one decides the orbit)
+  const upstreamOf = (id) => { const seen = new Set([id]), st = [id]; while (st.length) { const x = st.pop(); for (const w of g.wires) if (w.to.node === x && !seen.has(w.from.node)) { seen.add(w.from.node); st.push(w.from.node); } } return seen; };
+  const soundOn = (id) => [...upstreamOf(id)].some((x) => { const m = nodeById(g, x); return m && !m.muted && MODULES[m.type].cat === 'source'; });
+  const orbitDownstream = (id) => { const seen = new Set([id]), st = [id]; while (st.length) { const x = st.pop(); for (const w of g.wires) if (w.from.node === x && !seen.has(w.to.node)) { seen.add(w.to.node); st.push(w.to.node); const m = nodeById(g, w.to.node); if (m && m.type === 'orbit') return true; } } return false; };
+  const sharedOrbit = [...new Set(g.nodes.filter((n) => !before.has(n.id) && !n.muted && reachesOut(n.id) && soundOn(n.id) && !(n.type === 'orbit' && orbitDownstream(n.id))).flatMap(orbitsOf).filter((o) => mine.has(o)))].sort((x, y) => x - y);
   const r = compile(copy);
   return {
     code: r.code, issues: r.issues,

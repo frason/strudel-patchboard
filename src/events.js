@@ -103,14 +103,17 @@ export const midiOfControl = (c) => { const m = midiExact(c); return m === null 
 //   noNote (sample hits), silent (gain or velocity 0: a Take has no silent notes), clipped (cut at the span), detuned (fractional pitch rounded), tooShort (under 0.05 beat),
 //   dynamicsClamped (loudness above 1 or below 0.1), controlsLost (every control the Take does not carry, sound names included), snap (how far notes are from the grid they will be written on),
 //   emitted (what writing the Take as a pattern would still change: overlaps shortened, simultaneous notes merged to one velocity).
+// The Take carries `length` (the span in beats) so a rest at the end is kept; a span that is not whole bars is counted as spanPadded. Numbers closer than floating-point noise (1e-6 of a cent, 1e-9 of loudness, a millionth of a grid step) are treated as equal: that is the one tolerance, and it is not an audible one.
 // `exactNotes` is the narrower promise: pitch, timing and loudness of every note kept, whatever else a Take cannot hold (the sound name, filters).
 // `grid` is the grid the Take will be written on (default 24, the finest the writer uses); the returned Take is never snapped, the report says what snapping would do.
 export function recordToTake(rec, { bpm = 120, beatsPerBar = 4, grid = 24 } = {}) {
   const from = rec.span.from, to = rec.span.to, events = [], lost = new Set(), sounds = new Set();
-  const report = { lossless: true, exactNotes: true, noNote: 0, silent: 0, clipped: 0, detuned: 0, maxCents: 0, tooShort: 0, dynamicsClamped: 0, dynamicsChanged: 0, pitchOverridden: 0, controlsLost: [], sounds: [], snap: { grid, snapped: 0, maxSnapBeats: 0, preview: true }, emitted: { shortened: 0, dropped: 0, merged: 0, changed: 0, extra: 0 }, warnings: rec.warnings.slice() };
+  const report = { lossless: true, exactNotes: true, noNote: 0, silent: 0, clipped: 0, detuned: 0, maxCents: 0, tooShort: 0, dynamicsClamped: 0, dynamicsChanged: 0, pitchOverridden: 0, badValues: 0, spanPadded: 0, controlsLost: [], sounds: [], snap: { grid, snapped: 0, maxSnapBeats: 0, preview: true }, emitted: { shortened: 0, dropped: 0, merged: 0, changed: 0, extra: 0 }, warnings: rec.warnings.slice() };
   for (const e of rec.events) {
     const exact = midiExact(e.controls);
     if (exact === null || Math.round(exact) < 0 || Math.round(exact) > 127) { report.noNote++; continue; }
+    const badType = ['note', 'gain', 'velocity', 'clip'].filter((k) => k in e.controls && typeof e.controls[k] !== 'number' && !(k === 'note' && typeof e.controls[k] === 'string'));
+    if (badType.length) { report.badValues++; for (const k of badType) lost.add(k); }   // a gain, velocity or clip that is not a number (false, "foo") is not turned into a default: it is reported
     const vel = typeof e.controls.velocity === 'number' ? e.controls.velocity : 1, gain = typeof e.controls.gain === 'number' ? e.controls.gain : 1, loud = vel * gain;
     if (!(loud > 0)) { report.silent++; continue; }
     const t0 = Math.max(num(e.at), from), t1 = Math.min(num(e.at) + gateOf(e), to);
@@ -125,7 +128,8 @@ export function recordToTake(rec, { bpm = 120, beatsPerBar = 4, grid = 24 } = {}
     if (typeof e.controls.s === 'string') sounds.add(e.controls.s);
     events.push({ t: (t0 - from) * beatsPerBar, d: Math.max(0.05, dBeats), n: Math.round(exact), v });
   }
-  const take = { bpm, beatsPerBar, events };
+  const spanBars = to - from, take = { bpm, beatsPerBar, events, length: spanBars * beatsPerBar };   // the length of the capture, so silence at the end stays
+  if (Math.abs(spanBars - Math.round(spanBars)) > 1e-9) report.spanPadded++;   // the written loop is whole bars: a span of 2.5 cycles comes out as 3
   for (const ev of events) { const err = Math.abs(ev.t * grid - Math.round(ev.t * grid)) / grid; if (err > 1e-9) { report.snap.snapped++; report.snap.maxSnapBeats = Math.max(report.snap.maxSnapBeats, err); } }
   report.snap.maxSnapBeats = Math.round(report.snap.maxSnapBeats * 1e4) / 1e4;
   // what writing the Take as a pattern really does: compare the notes the writer emits (after snapping starts AND ends, lanes, merging, and section cuts) with the Take's notes, one for one
@@ -137,7 +141,7 @@ export function recordToTake(rec, { bpm = 120, beatsPerBar = 4, grid = 24 } = {}
   report.emitted.merged = Math.max(0, events.length - w.debugSteps.reduce((m, st) => m + st.notes.length, 0));   // notes that became fewer on the way out
   report.controlsLost = [...lost].sort(); report.sounds = [...sounds].sort();
   report.maxSnapBeats = report.snap.maxSnapBeats; report.snapped = report.snap.snapped;   // the same numbers at the top, for the callers that already read them
-  report.exactNotes = !(report.noNote || report.silent || report.clipped || report.detuned || report.tooShort || report.dynamicsChanged || report.pitchOverridden || report.snap.snapped || report.emitted.shortened || report.emitted.dropped || report.emitted.merged || report.emitted.changed || report.emitted.extra);
+  report.exactNotes = !(report.noNote || report.silent || report.clipped || report.detuned || report.tooShort || report.dynamicsChanged || report.pitchOverridden || report.badValues || report.spanPadded || report.snap.snapped || report.emitted.shortened || report.emitted.dropped || report.emitted.merged || report.emitted.changed || report.emitted.extra);
   report.lossless = report.exactNotes && !report.controlsLost.length && !report.sounds.length && !report.warnings.length;
   return { take, report };
 }

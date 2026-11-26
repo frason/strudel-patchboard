@@ -16,18 +16,21 @@ const initOffline = () => (async () => {
   const web = typeof window === 'undefined' ? null : await import('@strudel/web');
   if (web) {
     await web.evalScope(web);   // sliderWithID is not part of this: it is put in place only while a query runs (see below), so the player keeps its own
-    return { ref: web.ref, setCpsFunc: web.setCpsFunc, repl: web.repl({ defaultOutput() {}, getTime: () => 0, transpiler: web.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
+    return { ref: web.ref, setCpsFunc: web.setCpsFunc, setTime: web.setTime, Pattern: web.Pattern, repl: web.repl({ defaultOutput() {}, getTime: () => 0, transpiler: web.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
   }
   const [core, mini, tonal, transpiler] = await Promise.all([import('@strudel/core'), import('@strudel/mini'), import('@strudel/tonal'), import('@strudel/transpiler')]);
   await core.evalScope(core, mini, tonal);
-  return { ref: core.ref, setCpsFunc: core.setCpsFunc, repl: core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
+  return { ref: core.ref, setCpsFunc: core.setCpsFunc, setTime: core.setTime, Pattern: core.Pattern, repl: core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
 })();
 // the raw haps of a stretch of cycles of this code (see evallock.js for why queries take turns)
 export const MAX_RANGE = 256;
 // The offline evaluator is a second Strudel "repl" in the same page, and building or evaluating with it rebinds names the player's code reads while it plays (the tempo hook `getCps`,
 // setcpm, all, each, hush ...). Every query puts them back when it is done. The engine tells us how to read the player's own tempo (bindPlayerClock).
-let playerCps = null;
-export const bindPlayerClock = (fn) => { playerCps = fn; };
+let playerCps = null, playerNow = null;
+export const bindPlayerClock = (cps, now = null) => { playerCps = cps; playerNow = now; };
+// Every evaluation also registers scheduler-bound methods on Pattern.prototype (cpm) that a lazy callback in an EXISTING player pattern calls later (when("1", x => x.cpm(30))), and sets the shared time source:
+// both are put back too (handoff 0004, F1). setTriggerFunc is still not restored (not shown to matter).
+const PROTO = ['cpm'];
 const SHARED = ['all', 'each', 'hush', 'cpm', 'setCps', 'setcps', 'setCpm', 'setcpm', 'compileKabel'];   // cycles one query may ask for
 async function queryHaps(code, from, to, sliders = null, timing = null) {
   const refused = guardCode(code);
@@ -41,7 +44,9 @@ async function queryHaps(code, from, to, sliders = null, timing = null) {
   const run = () => exclusive(async () => {
     if (!offline) offline = initOffline();   // built here, inside the turn: building it sets shared global names, which must never overlap a player evaluation
     const saved = globalThis.sliderWithID, keep = {}; for (const k of SHARED) keep[k] = globalThis[k];
-    let o = null;
+    let o = null, proto = null; const protoKeep = {};
+    try { const P = (await offline).Pattern; if (P) { proto = P.prototype; for (const k of PROTO) protoKeep[k] = proto[k]; } } catch { /* building the evaluator failed: the query below reports it */ }
+
     try {
       o = await offline;
       const t0 = performance.now();   // the cost of the query itself: waiting for the turn and building the evaluator for the first time are not counted
@@ -58,6 +63,8 @@ async function queryHaps(code, from, to, sliders = null, timing = null) {
       globalThis.sliderWithID = saved;
       for (const k of SHARED) if (keep[k] !== undefined) globalThis[k] = keep[k];
       if (o && playerCps && o.setCpsFunc) o.setCpsFunc(() => playerCps());   // the player's clock, not the offline one's
+      if (o && playerNow && o.setTime) o.setTime(() => playerNow());   // and the player's time source (what drawing and scheduling read)
+      if (proto) for (const k of PROTO) if (protoKeep[k] !== undefined) proto[k] = protoKeep[k];   // and the player's scheduler-bound Pattern methods
     }
   });
   const turn = queue.then(() => run().catch(async (e) => {
@@ -80,8 +87,11 @@ export async function queryPatch(code, cycles) {
 // The full event record (src/events.js) of cycles from..to: exact positions, every control, the span, the revision. For the cable x-ray, Grab and Bake.
 // context.sliders ({ slider_id: value }) are live Slider values to use for this query; they are applied, and the record says which were.
 export async function queryEvents(code, { from = 0, to = 4, kind = 'queried', context = {}, timing = null } = {}) {   // timing: an object that gets .ms, the milliseconds the query itself took inside its turn
+  const g0 = performance.now(); guardCode(code); const guardMs = performance.now() - g0;   // (queryHaps guards again; the second pass is the price of keeping it simple) timing counts every phase that runs on this thread: guard, evaluate, query, record
   const r = await queryHaps(code, from, to, context.sliders, timing);
-  return recordFromHaps(r.haps, { from, to, code, kind, context: { cps: r.cps, ...(context.sliders ? { sliders: r.applied } : {}) } });
+  const t0 = performance.now(), rec = recordFromHaps(r.haps, { from, to, code, kind, context: { cps: r.cps, ...(context.sliders ? { sliders: r.applied } : {}) } });
+  if (timing) timing.ms = (timing.ms || 0) + guardMs + (performance.now() - t0);
+  return rec;
 }
 
 const NOTE_INDEX = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };

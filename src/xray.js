@@ -86,7 +86,7 @@ export function createXray({ h, getGraph, isPlaying = () => false, findInvoker =
     if (!el || document.hidden) return;
     const g = getGraph(), node = g.nodes.find((n) => n.id === nodeId);
     if (!node) return close();   // the module was deleted
-    const tap = compileTap(g, nodeId);
+    const c0 = performance.now(), tap = compileTap(g, nodeId), compileMs = performance.now() - c0;
     if (tap.error) { line.textContent = tap.error; return; }
     const key = tap.code;
     if (key === lastKey && lastRec && !manual) { show(lastRec, tap, node, onsets(lastRec).length > MAX_DRAWN); return; }   // this module's code is the same: no query, but what lies around it may have changed, so the words are renewed
@@ -99,7 +99,7 @@ export function createXray({ h, getGraph, isPlaying = () => false, findInvoker =
       const timing = {}, rec = await queryEvents(tap.code, { from: 0, to: CYCLES, timing });
       if (!el || mine !== gen || nodeId !== node.id) return;   // closed or switched to another module while this one ran
       const now = compileTap(getGraph(), nodeId); if (now.error || now.code !== key) { dirty = true; return; }   // the module's code changed while this one ran: this answer is about old code, so it is dropped and the question asked again
-      const t1 = performance.now(), capped = draw(canvas, rec, width()); lastMs = (timing.ms || 0) + (performance.now() - t1);   // the work done on this thread: the query itself and the drawing, not the wait for the turn
+      const t1 = performance.now(), capped = draw(canvas, rec, width()); lastMs = compileMs + (timing.ms || 0) + (performance.now() - t1);   // the work done on this thread: compiling the tap, guard, evaluation, query, record and drawing; not the wait for the turn
       lastKey = key; lastRec = rec; show(rec, tap, node, capped);
     } catch (e) { if (el && mine === gen) line.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 120); }
     finally { busy = false; lastEnd = performance.now(); if (dirty) { const m = wantManual; wantManual = false; if (m) refresh(true); else schedule(PAUSE_MS); } }

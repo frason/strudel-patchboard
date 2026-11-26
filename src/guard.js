@@ -26,18 +26,24 @@ const NUM_LIMITS = { fast: 4096, fastGap: 4096, ply: 1024, chop: 1024, striate: 
 const COUNT_ARGS = { echo: [0], stut: [0], euclid: [0, 1], euclidRot: [0, 1], euclidLegato: [0, 1], euclidLegatoRot: [0, 1], euclidInv: [0, 1] };
 // these multiply how many events a pattern makes (a chain of them multiplies: .fast(4096).fast(4096) is 16 million)
 const MULTIPLIES = new Set(['fast', 'fastGap', 'ply', 'chop', 'striate', 'segment', 'seg', 'echo', 'stut', 'hurry']);
+const NUM_RE = /-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/gi;
+// the exact value of a calculation on plain numbers (1000*1000, 1/(1-.999999)), or null when it depends on anything else
+function constVal(node) {
+  if (!node) return null;
+  if (node.type === 'Literal' && typeof node.value === 'number') return node.value;
+  if (node.type === 'UnaryExpression' && node.operator === '-') { const v = constVal(node.argument); return v === null ? null : -v; }
+  if (node.type === 'BinaryExpression') {
+    const l = constVal(node.left), r = constVal(node.right); if (l === null || r === null) return null;
+    return node.operator === '+' ? l + r : node.operator === '-' ? l - r : node.operator === '*' ? l * r : node.operator === '/' ? (r === 0 ? Infinity : l / r) : null;
+  }
+  return null;
+}
 // The biggest number a call argument can be, when it can be known without running anything: a number, a calculation on numbers, or a string/list of them. null when it cannot be known.
-const NUM_RE = /-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi;
 function biggest(node) {
   if (!node) return null;
-  if (node.type === 'Literal' && typeof node.value === 'number') return Math.abs(node.value);
+  const c = constVal(node); if (c !== null) return Math.abs(c);
   if (node.type === 'Literal' && typeof node.value === 'string') return strMax(node.value);
   if (node.type === 'TemplateLiteral' && node.expressions.length === 0) return strMax(node.quasis[0].value.cooked || '');
-  if (node.type === 'UnaryExpression') return biggest(node.argument);
-  if (node.type === 'BinaryExpression') {
-    const l = biggest(node.left), r = biggest(node.right); if (l === null || r === null) return null;
-    return node.operator === '*' ? l * r : node.operator === '/' ? (r === 0 ? Infinity : l / r) : l + r;   // for - and +, the bigger the magnitudes added the bigger the worst case
-  }
   if (node.type === 'ArrayExpression') { let m = 0; for (const e of node.elements) { const v = biggest(e); if (v === null) return null; if (v > m) m = v; } return m; }
   return null;
 }
@@ -56,9 +62,9 @@ export function expandedSize(str) {
       else { let j = i; while (j < n && !/[\s,|\[\]<>{}*!@(/]/.test(str[j])) j++; if (j === i) { i++; continue; } i = j; base = 1; }
       let mult = 1, copies = 1;
       for (;;) {
-        const m = /^([*!@/:?%])(\d+(?:\.\d+)?)?/.exec(str.slice(i));
-        if (m && m[1] === '*' && !m[2] && (str[i + 1] === '[' || str[i + 1] === '<')) {   // "bd*[30 30]": the biggest number inside the group is the rate
-          const open = str[i + 1], cl = open === '[' ? ']' : '>'; let d = 0, j = i + 1; for (; j < n; j++) { if (str[j] === open) d++; else if (str[j] === cl && --d === 0) break; }
+        const m = /^([*!@/:?%])((?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)?/i.exec(str.slice(i));
+        if (m && m[1] === '*' && !m[2] && (str[i + 1] === '[' || str[i + 1] === '<' || str[i + 1] === '{')) {   // "bd*[30 30]": the biggest number inside the group is the rate
+          const open = str[i + 1], cl = open === '[' ? ']' : open === '<' ? '>' : '}'; let d = 0, j = i + 1; for (; j < n; j++) { if (str[j] === open) d++; else if (str[j] === cl && --d === 0) break; }
           mult *= Math.max(1, strMax(str.slice(i + 1, j + 1))); i = j + 1; continue;
         }
         if (m) { i += m[0].length; if (m[1] === '*' && m[2]) mult *= Math.max(1, Number(m[2])); else if (m[1] === '!') copies += m[2] ? Number(m[2]) - 1 : 1; continue; }

@@ -21,7 +21,7 @@ if (!JUDGE) { if (!Number.isFinite(WINDOW) || WINDOW < 1) badArgs.push(`--second
 if (badArgs.length) { for (const b of badArgs) console.log(`FAIL ${b}`); process.exit(2); }
 const report = (res, label) => { for (const l of res.lines) console.log(`FAIL ${l}`); for (const n of res.notes || []) console.log(`note ${n}`); console.log(res.failed ? `${res.failed} playback check(s) failed against "${label}"` : `ok   playback is no worse than "${label}"`); return res.failed; };
 const file = (n) => JSON.parse(fs.readFileSync(`.perf/${n}.json`, 'utf8'));
-if (JUDGE) { const nw = file(JUDGE), old = file(COMPARE); process.exit(report(judge(nw.results, old.results, COMPARE, { heapOk: nw.heap === 'after-gc' && old.heap === 'after-gc', load: nw.load || '', meta: { now: { window: nw.window, repeat: nw.repeat }, base: { window: old.window, repeat: old.repeat } } }), COMPARE) ? 1 : 0); }
+if (JUDGE) { const nw = file(JUDGE), old = file(COMPARE); process.exit(report(judge(nw.results, old.results, COMPARE, { heapOk: nw.heap === 'after-gc' && old.heap === 'after-gc', load: nw.load || '', baseLoad: old.load || '', meta: { now: { window: nw.window, repeat: nw.repeat }, base: { window: old.window, repeat: old.repeat } } }), COMPARE) ? 1 : 0); }
 
 // loads that can run while playing: name -> JavaScript run in the page for the whole window; it must resolve to true once it is really running
 const LOADS = {
@@ -120,6 +120,6 @@ if (SAVE) fs.writeFileSync(`.perf/${SAVE}.json`, JSON.stringify({ when: new Date
 let failed = 0;
 const invalid = validateRuns(results, { load: LOADNAME });
 for (const l of invalid) { failed++; console.log(`FAIL ${l}`); }
-if (COMPARE) { const base = file(COMPARE); failed += invalid.length ? 0 : report(judge(results, base.results, COMPARE, { heapOk: base.heap === 'after-gc', load: LOADNAME, meta: { now: { window: WINDOW, repeat: REPEAT }, base: { window: base.window, repeat: base.repeat } } }), COMPARE); }
+if (COMPARE) { const base = file(COMPARE); failed += invalid.length ? 0 : report(judge(results, base.results, COMPARE, { heapOk: base.heap === 'after-gc', load: LOADNAME, baseLoad: base.load || '', meta: { now: { window: WINDOW, repeat: REPEAT }, base: { window: base.window, repeat: base.repeat } } }), COMPARE); }
 stopAll();
 process.exit(failed ? 1 : 0);

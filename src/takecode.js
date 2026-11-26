@@ -40,7 +40,7 @@ export function quantizeTake(take, { grid = 24, overlap } = {}) {
     }
     if (!placed) { st.lane = lanes.length; lanes.push([st]); }
   }
-  const total = steps.reduce((m, s) => Math.max(m, s.s + s.dur), 0);
+  const total = Math.max(steps.reduce((m, s) => Math.max(m, s.s + s.dur), 0), Number.isFinite(take.length) && take.length > 0 ? Math.round(take.length * grid) : 0);   // an optional take.length (beats) keeps the rest at the end of a capture
   return { steps, lanes, T, grid, bars: Math.max(1, Math.ceil(total / T)), shortened, dropped };
 }
 
