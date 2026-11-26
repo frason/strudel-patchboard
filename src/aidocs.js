@@ -131,7 +131,7 @@ export const GUIDES = () => [
       ['h2', 'Sample packs'],
       ['p', 'Code that starts with samples(\'github:user/repo\') asks for a sample pack. The import window shows the pack and asks before anything downloads. Only GitHub packs written github:user/repo (optionally with a branch) are accepted. Your yes is remembered for that pack in this browser.'],
       ['h2', 'Round trips'],
-      ['p', 'Code that Patchboard wrote reads back into the same board. The Open in strudel.cc and Copy buttons use the full text, so the code runs on strudel.cc exactly as written.'],
+      ['p', 'Code that Patchboard wrote is meant to read back into the same board; the tests replay real songs and many generated boards, but that is not a proof for every board. The Open in strudel.cc and Copy buttons use the full text, so the code runs on strudel.cc exactly as written.'],
     ],
   },
   {

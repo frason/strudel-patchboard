@@ -15,7 +15,7 @@
 //   through (velocity ".2 .8") are not new attacks and are folded into it (their count is in `warnings`).
 // Converting to something with fewer features (a Take) reports every loss in a `report`; it never claims to be exact when it is not.
 // Plain functions, no DOM: tested without a browser.
-import { quantizeTake } from './takecode.js';
+import { quantizeTake, takeToPattern } from './takecode.js';
 
 export const EVENTS_V = 1;
 export const ENGINE_ID = '@strudel/web 1.3.0 (core 1.2.6)';
@@ -107,7 +107,7 @@ export const midiOfControl = (c) => { const m = midiExact(c); return m === null 
 // `grid` is the grid the Take will be written on (default 24, the finest the writer uses); the returned Take is never snapped, the report says what snapping would do.
 export function recordToTake(rec, { bpm = 120, beatsPerBar = 4, grid = 24 } = {}) {
   const from = rec.span.from, to = rec.span.to, events = [], lost = new Set(), sounds = new Set();
-  const report = { lossless: true, exactNotes: true, noNote: 0, silent: 0, clipped: 0, detuned: 0, maxCents: 0, tooShort: 0, dynamicsClamped: 0, controlsLost: [], sounds: [], snap: { grid, snapped: 0, maxSnapBeats: 0, preview: true }, emitted: { shortened: 0, dropped: 0, merged: 0 }, warnings: rec.warnings.slice() };
+  const report = { lossless: true, exactNotes: true, noNote: 0, silent: 0, clipped: 0, detuned: 0, maxCents: 0, tooShort: 0, dynamicsClamped: 0, dynamicsChanged: 0, pitchOverridden: 0, controlsLost: [], sounds: [], snap: { grid, snapped: 0, maxSnapBeats: 0, preview: true }, emitted: { shortened: 0, dropped: 0, merged: 0, changed: 0, extra: 0 }, warnings: rec.warnings.slice() };
   for (const e of rec.events) {
     const exact = midiExact(e.controls);
     if (exact === null || Math.round(exact) < 0 || Math.round(exact) > 127) { report.noNote++; continue; }
@@ -116,22 +116,28 @@ export function recordToTake(rec, { bpm = 120, beatsPerBar = 4, grid = 24 } = {}
     const t0 = Math.max(num(e.at), from), t1 = Math.min(num(e.at) + gateOf(e), to);
     if (t0 > num(e.at) + 1e-12 || t1 < num(e.at) + gateOf(e) - 1e-12) report.clipped++;
     if (!(t1 > t0)) { report.clipped++; continue; }
-    const cents = Math.abs(exact - Math.round(exact)) * 100; if (cents > 0.5) { report.detuned++; report.maxCents = Math.max(report.maxCents, Math.round(cents)); }
+    const cents = Math.abs(exact - Math.round(exact)) * 100; if (cents > 1e-6) { report.detuned++; report.maxCents = Math.max(report.maxCents, Math.round(cents * 100) / 100); }   // any difference counts: there is no "small enough to ignore"
+    if ('freq' in e.controls && 'note' in e.controls) report.pitchOverridden++;   // a freq control sets the heard pitch over the note field
     const dBeats = (t1 - t0) * beatsPerBar; if (dBeats < 0.05) report.tooShort++;
     if (loud > 1 || loud < 0.1) report.dynamicsClamped++;
+    const v = Math.round(Math.min(1, Math.max(0.1, loud)) * 100) / 100; if (Math.abs(v - loud) > 1e-9) report.dynamicsChanged++;   // clamped or rounded to two places
     for (const k of Object.keys(e.controls)) if (!['note', 'gain', 'velocity', 'clip'].includes(k)) lost.add(k);
     if (typeof e.controls.s === 'string') sounds.add(e.controls.s);
-    events.push({ t: (t0 - from) * beatsPerBar, d: Math.max(0.05, dBeats), n: Math.round(exact), v: Math.round(Math.min(1, Math.max(0.1, loud)) * 100) / 100 });
+    events.push({ t: (t0 - from) * beatsPerBar, d: Math.max(0.05, dBeats), n: Math.round(exact), v });
   }
   const take = { bpm, beatsPerBar, events };
   for (const ev of events) { const err = Math.abs(ev.t * grid - Math.round(ev.t * grid)) / grid; if (err > 1e-9) { report.snap.snapped++; report.snap.maxSnapBeats = Math.max(report.snap.maxSnapBeats, err); } }
   report.snap.maxSnapBeats = Math.round(report.snap.maxSnapBeats * 1e4) / 1e4;
-  const q = quantizeTake(take, { grid }), seen = new Map();
+  // what writing the Take as a pattern really does: compare the notes the writer emits (after snapping starts AND ends, lanes, merging, and section cuts) with the Take's notes, one for one
+  const q = quantizeTake(take, { grid }), w = takeToPattern(take, { grid }), tally = new Map(), key = (a, b, n, v) => [a, b, n, v].map((x) => Math.round(x * 1e6)).join(':');
   report.emitted.shortened = q.shortened; report.emitted.dropped = q.dropped;
-  for (const ev of events) { const k = Math.round(ev.t * grid) + ':' + Math.round(ev.d * grid); const v = seen.get(k); if (v === undefined) seen.set(k, ev.v); else if (v !== ev.v) report.emitted.merged++; }
+  for (const ev of events) { const k = key(ev.t * grid, (ev.t + ev.d) * grid, ev.n, ev.v); tally.set(k, (tally.get(k) || 0) + 1); }
+  for (const st of w.debugSteps) for (const n of st.notes) { const k = key(st.s, st.s + st.dur, n, Math.round(st.vel * 100) / 100), c = tally.get(k) || 0; if (c > 0) tally.set(k, c - 1); else report.emitted.extra++; }
+  for (const c of tally.values()) report.emitted.changed += c;   // Take notes with no identical emitted note
+  report.emitted.merged = Math.max(0, events.length - w.debugSteps.reduce((m, st) => m + st.notes.length, 0));   // notes that became fewer on the way out
   report.controlsLost = [...lost].sort(); report.sounds = [...sounds].sort();
   report.maxSnapBeats = report.snap.maxSnapBeats; report.snapped = report.snap.snapped;   // the same numbers at the top, for the callers that already read them
-  report.exactNotes = !(report.noNote || report.silent || report.clipped || report.detuned || report.tooShort || report.dynamicsClamped || report.snap.snapped || report.emitted.shortened || report.emitted.dropped || report.emitted.merged);
+  report.exactNotes = !(report.noNote || report.silent || report.clipped || report.detuned || report.tooShort || report.dynamicsChanged || report.pitchOverridden || report.snap.snapped || report.emitted.shortened || report.emitted.dropped || report.emitted.merged || report.emitted.changed || report.emitted.extra);
   report.lossless = report.exactNotes && !report.controlsLost.length && !report.sounds.length && !report.warnings.length;
   return { take, report };
 }

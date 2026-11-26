@@ -1995,7 +1995,7 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const big = E.pairOf({ n: 2n ** 70n, d: 3n, s: 1n });
   check('Events: a position too large for an exact fraction is marked approximate, and ordinary ones are exact', big.exact === false && E.pairOf({ n: 1n, d: 3n, s: 1n }).exact === true && E.pairOf({ n: 1n, d: 3n, s: -1n }).p[0] === -1);
   const merged = E.recordToTake({ span: { from: 0, to: 1 }, warnings: [], events: [{ at: [0, 1], dur: [1, 4], controls: { note: 60, velocity: 0.3 } }, { at: [0, 1], dur: [1, 4], controls: { note: 64, velocity: 0.9 } }] }, { beatsPerBar: 4, grid: 4 });
-  check('Events -> Take: simultaneous notes that the writer would merge to one velocity are reported', merged.report.emitted.merged === 1 && !merged.report.exactNotes);
+  check('Events -> Take: simultaneous notes that the writer would merge to one velocity are reported', merged.report.emitted.changed === 1 && merged.report.emitted.extra === 1 && !merged.report.exactNotes);   // the quiet note comes out loud: compared note for note, not by a counter
 }
 
 
@@ -2022,7 +2022,7 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('X-ray: a very long record is summarised without overflowing the call, and it says which orbit is shared', /150000 events/.test(sum.line) && /notes/.test(sum.line) && /orbit 2 is also used/.test(sum.notApplied));
   const code = 'setcpm(120/4)\n$: note("c3").s("sine").lpf(slider(800,20,20000))', sid = 'slider_' + (code.indexOf('slider(') + 'slider('.length);
   const withCtx = await queryEvents(code, { from: 0, to: 1, context: { sliders: { [sid]: 123 } } }), plain = await queryEvents(code, { from: 0, to: 1 });
-  check('Events: a live Slider value passed as context is applied to that query (and recorded), and the next query starts from the code again', withCtx.events[0].controls.cutoff === 123 && withCtx.context.sliders[sid] === 123 && plain.events[0].controls.cutoff === 800 && Object.keys(plain.context).length === 0);
+  check('Events: a live Slider value passed as context is applied to that query (and recorded), and the next query starts from the code again', withCtx.events[0].controls.cutoff === 123 && withCtx.context.sliders[sid] === 123 && plain.events[0].controls.cutoff === 800 && plain.context.sliders === undefined && plain.context.cps === 0.5);
   let refused = ''; try { await queryEvents(code, { from: 0, to: 1000 }); } catch (e) { refused = e.message; }
   check('Events: a query may ask for a bounded number of cycles only', /1 to 256 cycles/.test(refused));
 }
@@ -2037,6 +2037,30 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
 }
 
 
+// ---------- handoff 0003: exactness, admission, tempo context, state, the gate's evidence ----------
+{
+  const { queryEvents, bindPlayerClock } = await import('../src/snapshot.js');
+  const { recordToTake } = await import('../src/events.js');
+  const { takeToCode } = await import('../src/takecode.js');
+  const { guardCode: gc, expandedSize: ex } = await import('../src/guard.js');
+  const conv = async (code) => recordToTake(await queryEvents(code, { to: 1 }));
+  const clip = await conv('$: note(60).clip(.13)'), cents = await conv('$: note(60.004)'), vel = await conv('$: note(60).velocity(.333)'), twin = await conv('$: stack(note(60),note(60))'), fq = await conv('$: note(60).freq(440)'), plain = await conv('$: note("c3 e3 g3 b3")');
+  check('0003 F1: an end the writer must move (clip .13 gives 0.52 beat, written as 0.5) is not called exact', !clip.report.exactNotes && !clip.report.lossless && clip.report.emitted.changed === 1 && /~@7/.test(takeToCode(clip.take).code));
+  check('0003 F2: a pitch off by a hair, a velocity rounded to two places, two identical notes written as one, and a freq control over the note are none of them "exact"', !cents.report.exactNotes && cents.report.detuned === 1 && !vel.report.exactNotes && vel.report.dynamicsChanged === 1 && !twin.report.exactNotes && twin.report.emitted.merged === 1 && !fq.report.exactNotes && fq.report.pitchOverridden === 1);
+  check('0003 F2: a plain melody on the grid is still exact and lossless (the report did not become a blanket "no")', plain.report.exactNotes && plain.report.lossless && plain.report.emitted.changed === 0 && plain.report.emitted.extra === 0);
+  const refused = ['$: s("bd").fast(1000*1000)', '$: s("bd").fast(-1000000)', '$: s("bd").fast("1000000")', '$: s("bd").fastGap(1000000)', '$: s("bd").euclidLegatoRot(1000000,1000000,0)', '$: s(`bd*[1000000 1000000]`)', '$: s("bd(2,1000000000)")', '$: s("bd").fast(4096).fast(4096)', '$: s("bd*1000").ply(1000)'];
+  check('0003 F3: the alternate forms of an absurd count are refused (a product, a negative, a string, another name, a bracketed rate, euclid steps, a chain that multiplies)', refused.every((c) => typeof gc(c) === 'string'));
+  let deep; try { deep = gc('$: s("' + '['.repeat(10000) + 'bd' + ']'.repeat(10000) + '*2")'); } catch (e) { deep = 'threw ' + e.message; }
+  check('0003 F3: absurd nesting is a refusal, not a crash; "bd*[30 30]" counts 30; echo(3,128,.5) (128 is a time, not a count) is accepted', typeof deep === 'string' && !/^threw/.test(deep) && ex('bd*[30 30]') === 30 && gc('$: s("sd").echo(3,128,.5)') === null && gc('$: s("bd*16").fast(2).ply(2)') === null);
+  const loop = await queryEvents('setcpm(156/4)\n$: s("breaks").loopAt(2)', { to: 2 }), loop2 = await queryEvents('$: s("breaks").loopAt(2)', { to: 2 });
+  check('0003 F4: a query reads the patch\'s own tempo like the player does (loopAt at 156 bpm gives speed .325, not the 120 bpm .25) and records the tempo it used', loop.events[0].controls.speed === 0.325 && loop.context.cps === 0.65 && loop2.events[0].controls.speed === 0.25 && loop2.context.cps === 0.5);
+  const core = await import('@strudel/core'); bindPlayerClock(() => 1.5);
+  await queryEvents('setcpm(30)\n$: note(60)', { to: 1 });
+  const afterCps = core.getCps(); bindPlayerClock(null);
+  const bad = await queryEvents('$: note(60)', { to: 1, context: { sliders: { a: 1, b: 'bad', c: null, d: NaN } } });
+  check('0003 F5: after an offline query the player\'s clock hook is back (getCps is the player\'s 1.5, not the query\'s .5), and a Slider value that is not a finite number is neither used nor reported as applied', afterCps === 1.5 && JSON.stringify(bad.context.sliders) === '{"a":1}');
+}
+
 // ---------- the playback gate fails closed (handoff 0002, finding 7) ----------
 {
   const { judge, validateRuns } = await import('./perfjudge.mjs');
@@ -2047,6 +2071,10 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Perf gate: a rising counter fails (a skipped note, an underrun, a stall)', ok({ a: [run({ skipped: 1 })], b: [run()] }).failed === 1 && ok({ a: [run()], b: [run({ underruns: 2 })] }).failed === 1 && ok({ a: [run({ stalls: 1 })], b: [run()] }).failed === 1);
   check('Perf gate: a counter the browser could not give (null) is not read as zero: lost since the baseline fails, never measured is noted', ok({ a: [run({ underruns: null })], b: [run()] }).failed === 1 && judge({ a: [run({ underruns: null })] }, { a: [run({ underruns: null })] }, 'x').failed === 0 && judge({ a: [run({ underruns: null })] }, { a: [run({ underruns: null })] }, 'x').notes.length === 1);
   check('Perf gate: a run that was not playing at either end, or whose audio clock did not move, or whose load did not start, is no measurement', validateRuns({ a: [run({ playingStart: false })] }).length === 1 && validateRuns({ a: [run({ playingEnd: false })] }).length === 1 && validateRuns({ a: [run({ audioAdvanced: false })] }).length === 1 && validateRuns({ a: [run({ loadOk: false, loadError: 'no Instrument' })] }, { load: 'xray' }).length === 1 && validateRuns({ a: [run({ loadOk: true })] }, { load: 'xray' }).length === 0);
+  const meta = (w, r = 1) => ({ window: w, repeat: r });
+  check('0003 F7: a baseline that is missing or empty, a null/NaN/negative/string measurement, a clock that was not read, and a lost measured counter all fail', judge({ a: [run()] }, {}, 'x').failed > 0 && judge({ a: [run()] }, undefined, 'x').failed > 0 && validateRuns({ a: [run({ audioAdvanced: null })] }).length === 1 && validateRuns({ a: [{ playingStart: true, playingEnd: true }] }).length > 0 && validateRuns({ a: [run({ cpuMsPerSec: NaN })] }).length === 1 && validateRuns({ a: [run({ cpuMsPerSec: 'oops' })] }).length === 1 && validateRuns({ a: [run({ skipped: -1 })] }).length === 1 && validateRuns({ a: [run({ heapGrowthMB: -3 })] }).length === 0 && judge({ a: [run({ underruns: null })] }, { a: [run({ underruns: 0 }), run({ underruns: null })] }, 'x').failed > 0);
+  check('0003 F7: a baseline run that is itself invalid fails the comparison, and a scenario with no baseline entry fails', judge({ a: [run()] }, { a: [run({ playingStart: false })] }, 'x').failed > 0 && judge({ a: [run()], z: [run()] }, { a: [run()] }, 'x').failed > 0);
+  check('0003 F8: a window that is not positive, a repeat that is not a whole number, or a different window from the baseline cannot pass', judge({ a: [run()] }, { a: [run()] }, 'x', { meta: { now: meta(-1), base: meta(8) } }).failed > 0 && judge({ a: [run()] }, { a: [run()] }, 'x', { meta: { now: meta(8, 1.5), base: meta(8) } }).failed > 0 && judge({ a: [run()] }, { a: [run()] }, 'x', { meta: { now: meta(4), base: meta(8) } }).failed > 0 && judge({ a: [run()] }, { a: [run()] }, 'x', { meta: { now: meta(8), base: meta(8) } }).failed === 0 && judge({ a: [run()] }, { a: [run()] }, 'x', { meta: { now: {}, base: meta(8) } }).failed > 0);
   check('Perf gate: a cost more than 25% worse (plus the allowance) fails, a small one does not', ok({ a: [run({ cpuMsPerSec: 400 })], b: [run()] }).failed === 1 && ok({ a: [run({ cpuMsPerSec: 280 })], b: [run()] }).failed === 0 && ok({ a: [run({ longTaskMs: 200 })], b: [run()] }).failed === 1);
 }
 

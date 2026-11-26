@@ -16,15 +16,20 @@ const initOffline = () => (async () => {
   const web = typeof window === 'undefined' ? null : await import('@strudel/web');
   if (web) {
     await web.evalScope(web);   // sliderWithID is not part of this: it is put in place only while a query runs (see below), so the player keeps its own
-    return { ref: web.ref, repl: web.repl({ defaultOutput() {}, getTime: () => 0, transpiler: web.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
+    return { ref: web.ref, setCpsFunc: web.setCpsFunc, repl: web.repl({ defaultOutput() {}, getTime: () => 0, transpiler: web.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
   }
   const [core, mini, tonal, transpiler] = await Promise.all([import('@strudel/core'), import('@strudel/mini'), import('@strudel/tonal'), import('@strudel/transpiler')]);
   await core.evalScope(core, mini, tonal);
-  return { ref: core.ref, repl: core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
+  return { ref: core.ref, setCpsFunc: core.setCpsFunc, repl: core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
 })();
 // the raw haps of a stretch of cycles of this code (see evallock.js for why queries take turns)
-export const MAX_RANGE = 256;   // cycles one query may ask for
-async function queryHaps(code, from, to, sliders = null) {
+export const MAX_RANGE = 256;
+// The offline evaluator is a second Strudel "repl" in the same page, and building or evaluating with it rebinds names the player's code reads while it plays (the tempo hook `getCps`,
+// setcpm, all, each, hush ...). Every query puts them back when it is done. The engine tells us how to read the player's own tempo (bindPlayerClock).
+let playerCps = null;
+export const bindPlayerClock = (fn) => { playerCps = fn; };
+const SHARED = ['all', 'each', 'hush', 'cpm', 'setCps', 'setcps', 'setCpm', 'setcpm', 'compileKabel'];   // cycles one query may ask for
+async function queryHaps(code, from, to, sliders = null, timing = null) {
   const refused = guardCode(code);
   if (refused) throw new Error('Not drawn: ' + refused);
   if (!(to > from) || to - from > MAX_RANGE) throw new Error(`Not drawn: a query may ask for 1 to ${MAX_RANGE} cycles at a time`);
@@ -35,13 +40,25 @@ async function queryHaps(code, from, to, sliders = null) {
   // back after: a picture or a download list must never reset a Slider (or replace the player's sliderWithID, which would cut the live Slider from the sound).
   const run = () => exclusive(async () => {
     if (!offline) offline = initOffline();   // built here, inside the turn: building it sets shared global names, which must never overlap a player evaluation
-    const o = await offline, saved = globalThis.sliderWithID;
-    globalThis.sliderWithID = makeSliderWithID(o.ref, offlineSliders);
+    const saved = globalThis.sliderWithID, keep = {}; for (const k of SHARED) keep[k] = globalThis[k];
+    let o = null;
     try {
+      o = await offline;
+      const t0 = performance.now();   // the cost of the query itself: waiting for the turn and building the evaluator for the first time are not counted
+      globalThis.sliderWithID = makeSliderWithID(o.ref, offlineSliders);
+      try { o.repl.scheduler.setCps(0.5); } catch { /* the default tempo, so a patch that sets none is read the way the player reads it */ }
       const pat = await o.repl.evaluate(code, false);
-      for (const [id, v] of Object.entries(sliders || {})) if (Number.isFinite(Number(v))) offlineSliders[id] = Number(v);   // a captured live value replaces the one in the code, for this query only
-      return pat.queryArc(from, to);
-    } finally { globalThis.sliderWithID = saved; }
+      const applied = {};
+      for (const [id, v] of Object.entries(sliders || {})) if (typeof v === 'number' && Number.isFinite(v)) { offlineSliders[id] = v; applied[id] = v; }   // a captured live value replaces the one in the code, for this query only; anything else is ignored and not reported as applied
+      const cps = Number(o.repl.scheduler.cps) || 0.5;
+      const haps = pat.queryArc(from, to, { _cps: cps });   // the tempo the player passes to every query (loopAt, speed ... read it), so the offline notes carry the same values
+      if (timing) timing.ms = performance.now() - t0;
+      return { haps, cps, applied };
+    } finally {
+      globalThis.sliderWithID = saved;
+      for (const k of SHARED) if (keep[k] !== undefined) globalThis[k] = keep[k];
+      if (o && playerCps && o.setCpsFunc) o.setCpsFunc(() => playerCps());   // the player's clock, not the offline one's
+    }
   });
   const turn = queue.then(() => run().catch(async (e) => {
     if (!/is not a function|is not defined/.test(String((e && e.message) || e))) throw e;
@@ -53,7 +70,7 @@ async function queryHaps(code, from, to, sliders = null) {
 }
 
 export async function queryPatch(code, cycles) {
-  return (await queryHaps(code, 0, cycles)).filter((h) => h.hasOnset()).map((h) => {
+  return (await queryHaps(code, 0, cycles)).haps.filter((h) => h.hasOnset()).map((h) => {
     const v = h.value || {}, begin = h.whole.begin.valueOf(), dur = h.duration.valueOf();
     return { start: begin, end: begin + dur, s: v.s, note: v.note, n: v.n, bank: v.bank, gain: v.gain, velocity: v.velocity };
   });
@@ -62,8 +79,9 @@ export async function queryPatch(code, cycles) {
 
 // The full event record (src/events.js) of cycles from..to: exact positions, every control, the span, the revision. For the cable x-ray, Grab and Bake.
 // context.sliders ({ slider_id: value }) are live Slider values to use for this query; they are applied, and the record says which were.
-export async function queryEvents(code, { from = 0, to = 4, kind = 'queried', context = {} } = {}) {
-  return recordFromHaps(await queryHaps(code, from, to, context.sliders), { from, to, code, kind, context: { ...(context.sliders ? { sliders: { ...context.sliders } } : {}) } });
+export async function queryEvents(code, { from = 0, to = 4, kind = 'queried', context = {}, timing = null } = {}) {   // timing: an object that gets .ms, the milliseconds the query itself took inside its turn
+  const r = await queryHaps(code, from, to, context.sliders, timing);
+  return recordFromHaps(r.haps, { from, to, code, kind, context: { cps: r.cps, ...(context.sliders ? { sliders: r.applied } : {}) } });
 }
 
 const NOTE_INDEX = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };

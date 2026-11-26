@@ -13,7 +13,7 @@ import { queryEvents, midiOf, noteName } from './snapshot.js';
 import { num, onsets, bounds, midiOfControl } from './events.js';
 import { MODULES } from './modules.js';
 
-const CYCLES = 4, MAX_DRAWN = 2000, PAUSE_MS = 350, SLOW_MS = 40;
+const CYCLES = 4, MAX_DRAWN = 2000, PAUSE_MS = 350, SLOW_MS = 40, PLAYING_GAP_MS = 2000;   // while music plays, automatic readings are at least this far apart
 const COLOURS = { bd: '#ff9f4a', sd: '#ff7aa8', rim: '#ff7aa8', cp: '#ff7aa8', hh: '#64a0ff', oh: '#64a0ff', cr: '#64a0ff', rd: '#64a0ff', lt: '#e0c050', mt: '#e0c050', ht: '#e0c050' };
 const level = (c) => Math.max(0.15, Math.min(1, (typeof c.gain === 'number' ? c.gain : 1) * (typeof c.velocity === 'number' ? c.velocity : 1)));
 
@@ -63,16 +63,17 @@ function draw(canvas, rec, cssW) {
 }
 
 // h: the DOM helper; getGraph(): the board's graph now; the tempo is not needed (the x-ray is in cycles)
-export function createXray({ h, getGraph, isPlaying = () => false }) {
-  let el = null, nodeId = null, lastKey = '', lastRec = null, lastMs = 0, busy = false, dirty = false, timer = 0, rt = 0, gen = 0, invoker = null, canvas = null, line = null, after = null, applied = null, warn = null, title = null, pausedNote = null;
+export function createXray({ h, getGraph, isPlaying = () => false, findInvoker = () => null }) {
+  let el = null, nodeId = null, wantManual = false, lastKey = '', lastRec = null, lastMs = 0, lastEnd = 0, busy = false, dirty = false, timer = 0, rt = 0, gen = 0, invoker = null, canvas = null, line = null, after = null, applied = null, warn = null, title = null, pausedNote = null;
   const width = () => Math.min(380, window.innerWidth - 48);
   const onVis = () => { if (!document.hidden) schedule(0); };
   const onResize = () => { clearTimeout(rt); rt = setTimeout(() => { if (el && lastRec) draw(canvas, lastRec, width()); }, 150); };   // redraw what we already have: no new query
   function close() {
-    clearTimeout(timer); clearTimeout(rt); gen++;   // an answer still on its way is discarded
+    const closedId = nodeId; clearTimeout(timer); clearTimeout(rt); gen++; wantManual = false;   // an answer still on its way is discarded
     document.removeEventListener('visibilitychange', onVis); window.removeEventListener('resize', onResize);
     el?.remove(); el = null; nodeId = null; lastKey = ''; lastRec = null;
-    if (invoker && document.contains(invoker)) invoker.focus?.();   // back to the control that opened it
+    const back = invoker && document.contains(invoker) ? invoker : (closedId ? findInvoker(closedId) : null);   // the control that opened it (or its module's menu button, if the board was redrawn)
+    back?.focus?.();
     invoker = null;
   }
   function show(rec, tap, node, capped) {   // the words and the picture for a record and the tap's current surroundings
@@ -90,34 +91,37 @@ export function createXray({ h, getGraph, isPlaying = () => false }) {
     const key = tap.code;
     if (key === lastKey && lastRec && !manual) { show(lastRec, tap, node, onsets(lastRec).length > MAX_DRAWN); return; }   // this module's code is the same: no query, but what lies around it may have changed, so the words are renewed
     if (!manual && lastRec && lastMs > SLOW_MS && isPlaying()) { pausedNote.textContent = `Updates are paused while the music plays: the last reading took ${Math.round(lastMs)} ms, which could make a note late. Press Refresh to read again, or stop the music.`; return; }
+    if (!manual && isPlaying() && lastEnd && performance.now() - lastEnd < PLAYING_GAP_MS) { schedule(PLAYING_GAP_MS - (performance.now() - lastEnd) + 5); return; }   // the 0003 measurement: reading every 0.5 s while playing skipped notes on a whole song, so automatic readings keep their distance
     pausedNote.textContent = '';
-    if (busy) { dirty = true; return; }
+    if (busy) { dirty = true; if (manual) wantManual = true; return; }   // asked while one is running: asked again after it, and a press of Refresh stays a press of Refresh
     busy = true; dirty = false; const mine = ++gen;
     try {
-      const t0 = performance.now(), rec = await queryEvents(tap.code, { from: 0, to: CYCLES }); lastMs = performance.now() - t0;
-      if (!el || mine !== gen || nodeId !== node.id) return;   // closed, or a newer question was asked while this one ran
-      const capped = draw(canvas, rec, width());
+      const timing = {}, rec = await queryEvents(tap.code, { from: 0, to: CYCLES, timing });
+      if (!el || mine !== gen || nodeId !== node.id) return;   // closed or switched to another module while this one ran
+      const now = compileTap(getGraph(), nodeId); if (now.error || now.code !== key) { dirty = true; return; }   // the module's code changed while this one ran: this answer is about old code, so it is dropped and the question asked again
+      const t1 = performance.now(), capped = draw(canvas, rec, width()); lastMs = (timing.ms || 0) + (performance.now() - t1);   // the work done on this thread: the query itself and the drawing, not the wait for the turn
       lastKey = key; lastRec = rec; show(rec, tap, node, capped);
     } catch (e) { if (el && mine === gen) line.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 120); }
-    finally { busy = false; if (dirty) schedule(PAUSE_MS); }
+    finally { busy = false; lastEnd = performance.now(); if (dirty) { const m = wantManual; wantManual = false; if (m) refresh(true); else schedule(PAUSE_MS); } }
   }
   function schedule(ms = PAUSE_MS) { clearTimeout(timer); timer = setTimeout(refresh, ms); }
   return {
     get openId() { return nodeId; },
-    open(id) {
-      const was = document.activeElement; close(); nodeId = id; invoker = was && was !== document.body ? was : null;
+    open(id, anchor = null) {
+      const was = anchor || document.activeElement; close(); nodeId = id; invoker = was && was !== document.body ? was : null;   // the control that opened it, given by the caller (a menu item is gone by now)
       title = h('strong', { class: 'xr-title' }, 'What comes out');
       canvas = h('canvas', { role: 'img', 'aria-label': 'Events coming out of this module' });
       line = h('div', { class: 'xr-line', 'aria-live': 'polite' }, 'Reading…'); after = h('div', { class: 'xr-note' }); applied = h('div', { class: 'xr-note' }); warn = h('div', { class: 'xr-note' }); pausedNote = h('div', { class: 'xr-note xr-paused', 'aria-live': 'polite' }); lastMs = 0;
       el = h('section', { class: 'xray', role: 'region', 'aria-label': 'Cable x-ray', tabindex: '-1', onkeydown: (e) => { if (e.key === 'Escape') close(); } },
         h('div', { class: 'xr-head' }, title, h('span', { class: 'xr-btns' }, h('button', { class: 'btn sm', type: 'button', title: 'Read this module again now', onclick: () => refresh(true) }, 'Refresh'), h('button', { class: 'btn sm', type: 'button', title: 'Close (Esc)', onclick: close }, 'Close'))),
         canvas, line, after, applied, warn, pausedNote,
-        h('div', { class: 'xr-note xr-fine' }, 'The pattern as this module leaves it, four cycles from the start. It stays up to date as you edit.'));
+        h('div', { class: 'xr-note xr-fine' }, 'The pattern as this module leaves it, four cycles from the start. It stays up to date as you edit. How parts share orbits and ducking is only partly checked, so the final sound can differ.'));
       document.body.append(el); document.addEventListener('visibilitychange', onVis); window.addEventListener('resize', onResize); el.focus(); schedule(0);
     },
     // for the performance harness only: read again every `ms` whether or not the code changed (the worst case, far busier than any person editing). Returns a stop function.
     stress(ms) { const t = setInterval(() => { lastKey = ''; refresh(); }, ms); return () => clearInterval(t); },
-    update() { if (el) schedule(); },   // the board changed: look again after a pause (if this module's code is the same, nothing is asked)
+    update() { if (el) schedule(); },   // the board changed: look again after a pause (if this module's code is the same, nothing is asked; a reading in flight about old code is dropped when it lands)
+    playingChanged() { if (el && pausedNote && pausedNote.textContent) schedule(0); },   // the music stopped: a paused reading can run again
     close,
   };
 }

@@ -780,7 +780,7 @@ const hooks = {
     if (merge) store.amend(apply, { label: 'tidy' }); else store.update(apply, { label: 'tidy' });
     requestAnimationFrame(() => board.fit());
   },
-  xray(id) { xray.open(id); },   // pin a small panel showing what comes out of this module (src/xray.js)
+  xray(id, anchor) { xray.open(id, anchor); },   // pin a small panel showing what comes out of this module (src/xray.js)
   duplicate(id) {
     const src = nodeById(store.graph, id);
     if (!src || MODULES[src.type].single) return toast(`Only one ${MODULES[src.type].title} is allowed.`);
@@ -900,7 +900,7 @@ function liveSlider() {
   }
 }
 store.subscribe(liveSlider);
-const xray = createXray({ h, getGraph: () => store.graph, isPlaying: () => engine.playing });
+const xray = createXray({ h, getGraph: () => store.graph, isPlaying: () => engine.playing, findInvoker: (id) => document.querySelector(`.node[data-id="${id}"] .n-btn[title="More"]`) });
 store.subscribe(() => xray.update());
 try { if (localStorage.getItem('pb.perf') === '1') window.__xrayStress = xray.stress; } catch { /* storage unavailable */ }   // the performance harness (scripts/perf-play.mjs) asks the x-ray to read over and over
 // the browser can refuse to save (its storage is full, or blocked): say so, because a refresh would lose the work
@@ -966,6 +966,7 @@ statusEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key ===
 document.addEventListener('pointerdown', (e) => { if (statusFull && !statusFull.contains(e.target) && e.target !== statusEl) closeStatusFull(); }, true);
 engine.onStatus((s) => {
   if (s.state === 'playing') syncOutScope();
+  if (s.state !== 'playing') xray.playingChanged();   // paused updates can run again once the music stops
   statusEl.textContent = { idle: 'ready', loading: s.message, ok: 'ok', ready: 'stopped', playing: 'playing', error: 'error: ' + s.message, warn: s.message }[s.state] || s.state;
   statusEl.className = 'status ' + s.state;
   const long = (s.state === 'error' || s.state === 'warn') && s.message;   // the toolbar cuts long messages short: hover shows all of it, a click opens it in a box
@@ -1614,7 +1615,7 @@ function showIntro() {
       h('div', { class: 'intro-btns' },
         h('button', { class: 'btn primary', id: 'intro-start', type: 'button', onclick: () => { closeIntro(); loadLesson(LESSONS[0]); requestAnimationFrame(() => board.tidy({ merge: true })); } }, 'Start the first lesson'),
         h('button', { class: 'btn', type: 'button', onclick: closeIntro }, 'Look around')),
-      h('p', { class: 'intro-foot' }, 'An unofficial tool, not made or endorsed by the Strudel team. Free and open source (AGPL-3.0). Sound plays in your browser; nothing is uploaded.')));
+      h('p', { class: 'intro-foot' }, 'An unofficial tool, not made or endorsed by the Strudel team. Free and open source (AGPL-3.0). Sound plays in your browser and boards stay on this device. (If you turn on the optional AI helper, the board text and your key go to the AI provider you choose.)')));
   document.body.append(introEl);
   introEl.querySelector('#intro-start')?.focus();
 }

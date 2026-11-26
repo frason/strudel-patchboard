@@ -54,3 +54,14 @@ a load that blocks the page for 600 ms in the middle of the window now shows up 
 
 ## Not measured
 A phone, a slow or throttled computer, a long session, listening, dense expanded chains, long Takes, and a person editing live (the 2 s load re-reads on a timer; it does not change the patch). One fixed query repeated is a heavy load, not a universal worst case. These numbers are one machine's baseline, not guarantees.
+
+## Re-measurement after handoff 0003 (2026-11-26)
+
+Method as above, 15 s windows, 2 runs per board (3 for the Oleander re-run), new baseline `r3-idle`. Local, headless Chrome, one machine: a historical observation, not a safety proof.
+
+- Idle playback: 0 skipped notes, underruns and stalls on whole-song, Oleander and Feel Good.
+- `xray-edit` (the x-ray asked again every 2 s): all three boards pass against idle.
+- `xray` (asked every 0.5 s, far busier than a person editing): the first run, with readings only slowed by the 40 ms rule, **failed** on whole-song (27 skipped notes, 1 underrun, 3 stalls). That is real harm, and it appeared because queue wait is no longer counted as query cost (0003 F9), so fewer readings looked slow. Fix: while the music plays, automatic readings are at least 2 s apart. After that, whole-song and Feel Good pass the stall counters; Feel Good's CPU and frame time stay above the 25% margin on one run; **Oleander skipped 4 notes with 2 stalls (one 286 ms task) in one of 5 runs** and was clean in the other 4 (3 of 3 in the Oleander-only re-run). The first reading after opening the panel, while music plays, is one unavoidable query that cannot be interrupted. So: the gate catches problems, and a heavy board can still have an occasional late note when the x-ray is first opened during playback.
+- Deliberate stall (`stall` load, 600 ms): fails as it should (8 skipped, 1 stall, a 600 ms long task). A run with `--only` also fails because the other baseline scenarios are not measured, by design.
+- The `xray` load calls the same pausable refresh the panel uses, so a pass can mean the readings paused, not that reading is free.
+- Harness input checks: `--seconds -1`, `--repeat 1.5` and unknown loads are refused before Chrome starts.

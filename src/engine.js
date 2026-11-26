@@ -8,6 +8,7 @@ import { getPrefs, onPrefs } from './prefs.js';
 import { makeSliderWithID, sliderValues } from './slider.js';
 import { registerSoundfonts } from './soundfonts.js';
 import { guardCode } from './guard.js';
+import { bindPlayerClock } from './snapshot.js';
 
 const DS = 'https://raw.githubusercontent.com/felixroos/dough-samples/main';
 
@@ -118,6 +119,7 @@ export function createEngine() {
   const late = { count: 0, at: 0, by: 0 };   // notes that reached the audio player after their moment had passed (they are skipped, with only a console message)
   let repl = null;
   let starting = null;
+  bindPlayerClock(() => repl?.scheduler?.cps ?? 0.5);   // lets an offline query put the player's tempo hook back after it runs (snapshot.js)
   let playing = false;
   const hapSubs = new Set();
   const statusSubs = new Set();
@@ -328,7 +330,7 @@ export function createEngine() {
         return true;
       } catch { return false; }
     },
-    cps: () => repl?.scheduler?.cps ?? 0.5,
+    cps: () => repl?.scheduler?.cps ?? 0.5,   // (also given to snapshot.js below, so an offline query can put the player's clock hook back)
     // the live pattern and clock, for the display-only views
     nowCycle: () => { try { return repl?.scheduler?.now?.() ?? 0; } catch { return 0; } },
     haps: (a, b) => { try { return repl?.state?.pattern?.queryArc(a, b) ?? []; } catch { return []; } },

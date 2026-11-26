@@ -804,16 +804,22 @@ export function compileTap(g, nodeId) {
   const downstream = [...after].filter((id) => id !== out.id).map((id) => nodeById(g, id)).filter(Boolean);
   // no master volume or master effect on a raw tap: neither the settings nor a cable driving them (the tempo and beats stay, so the cycles mean the same)
   const MASTER_WIRE = /^p:(mvol|mphaser|mtrem|mchorus)$/, masterWired = g.wires.some((w) => w.to.node === out.id && MASTER_WIRE.test(w.to.port));
+  // one Output exactly: a board that somehow holds two (an imported file can) is tapped with only the first, and the others and their cables are left out of the copy
+  const extra = new Set(g.nodes.filter((n) => n.type === 'output' && n.id !== out.id).map((n) => n.id));
   const copy = {
     ...g,
-    nodes: g.nodes.map((n) => (n.id === out.id ? { ...n, params: { ...n.params, mvol: 1, mphaser: 0, mtrem: 0, mchorus: 0 } } : n)),
-    wires: [...g.wires.filter((w) => !(w.to.node === out.id && (w.to.port === 'in' || MASTER_WIRE.test(w.to.port)))), { id: '_tap', from: { node: nodeId, port: 'out' }, to: { node: out.id, port: 'in' } }],
+    nodes: g.nodes.filter((n) => !extra.has(n.id)).map((n) => (n.id === out.id ? { ...n, params: { ...n.params, mvol: 1, mphaser: 0, mtrem: 0, mchorus: 0 } } : n)),
+    wires: [...g.wires.filter((w) => !extra.has(w.to.node) && !extra.has(w.from.node) && !(w.to.node === out.id && (w.to.port === 'in' || MASTER_WIRE.test(w.to.port)))), { id: '_tap', from: { node: nodeId, port: 'out' }, to: { node: out.id, port: 'in' } }],
   };
   // the mix bus is shared by name, not by cable: another Orbit module with the same number puts other parts on the same reverb, delay and DJ filter
   const before = new Set([nodeId]), up = [nodeId];
   while (up.length) { const id = up.pop(); for (const w of g.wires) if (w.to.node === id && !before.has(w.from.node)) { before.add(w.from.node); up.push(w.from.node); } }
-  const mine = new Set([...before].map((id) => nodeById(g, id)).filter((n) => n && n.type === 'orbit').map((n) => n.params.n));
-  const sharedOrbit = [...new Set(g.nodes.filter((n) => n.type === 'orbit' && !before.has(n.id) && mine.has(n.params.n)).map((n) => n.params.n))].sort();
+  // Only what is clearly shared is named, and the answer is labelled partial (routing: 'partial'): other Orbit modules and Strudel Code that set the same orbit number, if they are on and reach the Output.
+  // Not analysed: other parts that simply use the default orbit, Duck routing between parts, or an orbit set inside code the tapped chain contains.
+  const mine = new Set([...before].map((id) => nodeById(g, id)).filter((n) => n && n.type === 'orbit').map((n) => n.params.n)); if (!mine.size) mine.add(1);   // no Orbit module upstream: the default orbit
+  const reachesOut = (id) => { const seen = new Set([id]), st = [id]; while (st.length) { const x = st.pop(); if (x === out.id) return true; for (const w of g.wires) if (w.from.node === x && !seen.has(w.to.node)) { seen.add(w.to.node); st.push(w.to.node); } } return false; };
+  const orbitsOf = (n) => (n.type === 'orbit' ? [n.params.n] : (n.type === 'code' || n.type === 'codesource') ? [...String(n.params.code || '').matchAll(/\.orbit\(\s*(\d+)/g)].map((m) => Number(m[1])) : []);
+  const sharedOrbit = [...new Set(g.nodes.filter((n) => !before.has(n.id) && !n.muted && reachesOut(n.id)).flatMap(orbitsOf).filter((o) => mine.has(o)))].sort((x, y) => x - y);
   const r = compile(copy);
   return {
     code: r.code, issues: r.issues,
@@ -822,7 +828,8 @@ export function compileTap(g, nodeId) {
       master: out.params.mvol !== 1 || out.params.mphaser > 0 || out.params.mtrem > 0 || masterWired,
       mixer: downstream.some((n) => n.type === 'mixer'),
       orbit: downstream.some((n) => n.type === 'orbit' || n.type === 'duck') || sharedOrbit.length > 0,
-      sharedOrbit,   // orbit numbers that other parts of the board also use (reverb, delay and DJ filter are shared there)
+      sharedOrbit,   // orbit numbers that other active parts of the board are clearly set to as well (reverb, delay and DJ filter are shared there)
+      routing: 'partial',   // the routing analysis above is a structural hint, not an account of the final mix
     },
   };
 }

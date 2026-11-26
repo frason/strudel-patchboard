@@ -15,9 +15,13 @@ import { judge, worst, validateRuns } from './perfjudge.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i >= 0 ? process.argv[i + 1] : d; };
 const REPEAT = Number(arg('repeat', 3)), ONLY = arg('only', ''), SAVE = arg('save', ''), COMPARE = arg('compare', ''), WINDOW = Number(arg('seconds', 20)), LOADNAME = arg('load', ''), JUDGE = arg('judge', '');
+// the options are checked before Chrome starts: a window that is not positive or a repeat that is not a whole number cannot be evidence
+const badArgs = [];
+if (!JUDGE) { if (!Number.isFinite(WINDOW) || WINDOW < 1) badArgs.push(`--seconds must be a number of at least 1 (got ${arg('seconds', 20)})`); if (!Number.isInteger(REPEAT) || REPEAT < 1) badArgs.push(`--repeat must be a whole number of at least 1 (got ${arg('repeat', 3)})`); if (LOADNAME && !['xray', 'xray-edit', 'stall'].includes(LOADNAME)) badArgs.push(`--load ${LOADNAME} is not a known load`); }
+if (badArgs.length) { for (const b of badArgs) console.log(`FAIL ${b}`); process.exit(2); }
 const report = (res, label) => { for (const l of res.lines) console.log(`FAIL ${l}`); for (const n of res.notes || []) console.log(`note ${n}`); console.log(res.failed ? `${res.failed} playback check(s) failed against "${label}"` : `ok   playback is no worse than "${label}"`); return res.failed; };
 const file = (n) => JSON.parse(fs.readFileSync(`.perf/${n}.json`, 'utf8'));
-if (JUDGE) { const nw = file(JUDGE), old = file(COMPARE); process.exit(report(judge(nw.results, old.results, COMPARE, { heapOk: nw.heap === 'after-gc' && old.heap === 'after-gc', load: nw.load || '' }), COMPARE) ? 1 : 0); }
+if (JUDGE) { const nw = file(JUDGE), old = file(COMPARE); process.exit(report(judge(nw.results, old.results, COMPARE, { heapOk: nw.heap === 'after-gc' && old.heap === 'after-gc', load: nw.load || '', meta: { now: { window: nw.window, repeat: nw.repeat }, base: { window: old.window, repeat: old.repeat } } }), COMPARE) ? 1 : 0); }
 
 // loads that can run while playing: name -> JavaScript run in the page for the whole window; it must resolve to true once it is really running
 const LOADS = {
@@ -116,6 +120,6 @@ if (SAVE) fs.writeFileSync(`.perf/${SAVE}.json`, JSON.stringify({ when: new Date
 let failed = 0;
 const invalid = validateRuns(results, { load: LOADNAME });
 for (const l of invalid) { failed++; console.log(`FAIL ${l}`); }
-if (COMPARE) { const base = file(COMPARE); failed += invalid.length ? 0 : report(judge(results, base.results, COMPARE, { heapOk: base.heap === 'after-gc', load: LOADNAME }), COMPARE); }
+if (COMPARE) { const base = file(COMPARE); failed += invalid.length ? 0 : report(judge(results, base.results, COMPARE, { heapOk: base.heap === 'after-gc', load: LOADNAME, meta: { now: { window: WINDOW, repeat: REPEAT }, base: { window: base.window, repeat: base.repeat } } }), COMPARE); }
 stopAll();
 process.exit(failed ? 1 : 0);
