@@ -1348,10 +1348,10 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const evs = async (c) => (await evaluate(c, false)).queryArc(0, 8).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.entries(h.value).filter(([k]) => k !== 'color').sort())}`).sort().join('|');
   const run = async (code) => { const r = imp(code); return { g: r.graph, skipped: r.report.skipped.length, ok: !r.error && (await evs(code)) === (await evs(compile(r.graph).code)) }; };
   const has = (g, t, re) => g.nodes.some((n) => n.type === t && (!re || re.test(n.params.code ?? n.params.text ?? '')));
-  let t = await run('$: s("bd*8").mask("1 0 1 1")');
-  check('Kept as code: a call with no module (mask) becomes a Strudel Code module and plays the same', t.ok && t.skipped === 0 && has(t.g, 'code', /mask\("1 0 1 1"\)/));
-  t = await run('$: s("bd*4 sd").mask("1 0 1").fast(2).gain(0.5).lpf(800)');
-  check('Kept as code: order is kept: a later fast() goes into the code module with the mask, while the gain and filter stay modules', t.ok && t.skipped === 0 && has(t.g, 'code', /mask\("1 0 1"\)\.fast\(2\)/) && !has(t.g, 'fast'));
+  let t = await run('$: s("bd*8").linger(0.25)');
+  check('Kept as code: a call with no module (linger) becomes a Strudel Code module and plays the same', t.ok && t.skipped === 0 && has(t.g, 'code', /linger\(0\.25\)/));
+  t = await run('$: s("bd*4 sd").linger(0.5).fast(2).gain(0.5).lpf(800)');
+  check('Kept as code: order is kept: a later fast() goes into the code module with the linger, while the gain and filter stay modules', t.ok && t.skipped === 0 && has(t.g, 'code', /linger\(0\.5\)\.fast\(2\)/) && !has(t.g, 'fast'));
   t = await run('const VOL = 0.4\n$: s("bd*4").gain(VOL).mask("1 0 1 1")');
   check('Kept as code: a const number is used as its value (the gain is a plain knob, 0.4)', t.ok && t.skipped === 0 && t.g.nodes.some((n) => n.type === 'sample' && n.params.gain === 0.4));
   t = await run('$: note("c3 e3").s("sawtooth").gain("<0.4 0.8>")');
@@ -1364,8 +1364,8 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Kept as code: nothing that is not an allowed Strudel call is ever kept (an unknown function is left out with a reason)', t.report.skipped.length === 1 && !has(t.graph, 'code'));
   t = imp('$: s("bd").chorus(0.3)');
   check('Kept as code: effects the browser player cannot play are still left out with the reason', t.report.skipped.length === 1 && !has(t.graph, 'code'));
-  const rb = imp(compile(imp('$: s("bd*8").mask("1 0 1 1").gain(0.5)').graph).code);
-  check('Kept as code: code written by the board (with a Strudel Code module) imports back to the same board', !rb.error && rb.report.skipped.length === 0 && has(rb.graph, 'code', /mask\("1 0 1 1"\)/));
+  const rb = imp(compile(imp('$: s("bd*8").linger(0.25).gain(0.5)').graph).code);
+  check('Kept as code: code written by the board (with a Strudel Code module) imports back to the same board', !rb.error && rb.report.skipped.length === 0 && has(rb.graph, 'code', /linger\(0\.25\)/));
   const { guardCalls: gc } = await import('../src/guard.js');
   check('Kept as code: the Strudel Code module only takes Strudel calls: no assignments, no unknown functions, no values computed from variables', gc('.mask("1 0")') === null && !!gc('.mask(foo)') && !!gc('; fetch("x")') && !!gc('.constructor("x")') && !!gc('mask("1")'));
 }
@@ -1774,6 +1774,69 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
     const hits = N('rhythm');
     check(`${kind}: a cable of another kind (a rhythm) is refused once notes are plugged in`, /already holds notes/.test(whyNot(g, hits.id, t.id, 'in') || ''));
   }
+}
+
+
+// ---------- ten more transform modules: Mask, Chop, Loop at, When, Superimpose, Off, Jux, Echo, Iter, Add notes ----------
+{
+  const { emptyGraph: eg, makeNode: mn, normalize } = await import('../src/graph.js');
+  const { importStrudel: imp } = await import('../src/importer.js');
+  const { guardCode: gc } = await import('../src/guard.js');
+  const { cleanParams } = await import('../src/validate.js');
+  const evs = async (c) => (await evaluate(c, false)).queryArc(0, 8).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).filter(([k]) => k !== 'color').sort().map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v])))}`).sort().join('|');
+  const build = (type, params, notes = true) => {
+    const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port: 'in' } });
+    const src = notes ? N('notetext', { text: 'c3 e3 g3 b3' }) : N('sample', { name: 'bd sd hh*2' }), m = N(type, cleanParams(type, params)), out = N('output');
+    if (notes) { const sy = N('synth', { wave: 'sawtooth' }); W(src, m); W(m, sy); W(sy, out); } else { W(m, out); g.wires.pop(); W(src, m); W(m, out); }
+    normalize(g); return { g, m };
+  };
+  const cases = [
+    ['mask', { pat: '1 0 1 1' }, true, 'note("c3 e3 g3 b3").mask("1 0 1 1").s("sawtooth")'],
+    ['mask', { pat: '<0 1>' }, true, 'note("c3 e3 g3 b3").mask("<0 1>").s("sawtooth")'],
+    ['chop', { n: 4, mode: 'chop' }, false, 's("bd sd hh*2").chop(4)'],
+    ['chop', { n: 3, mode: 'striate' }, false, 's("bd sd hh*2").striate(3)'],
+    ['loopat', { n: 2 }, false, 's("bd sd hh*2").loopAt(2)'],
+    ['when', { pat: '<0 0 0 1>', fn: 'rev' }, true, 'note("c3 e3 g3 b3").when("<0 0 0 1>", rev).s("sawtooth")'],
+    ['superimpose', { fn: 'up12' }, true, 'note("c3 e3 g3 b3").superimpose(x=>x.transpose(12)).s("sawtooth")'],
+    ['off', { t: 0.125, fn: 'up7' }, true, 'note("c3 e3 g3 b3").off(0.125, x=>x.transpose(7)).s("sawtooth")'],
+    ['jux', { width: 1, fn: 'rev' }, true, 'note("c3 e3 g3 b3").jux(rev).s("sawtooth")'],
+    ['jux', { width: 0.5, fn: 'fast2' }, true, 'note("c3 e3 g3 b3").juxBy(0.5, x=>x.fast(2)).s("sawtooth")'],
+    ['echo', { times: 3, time: 0.125, fb: 0.5 }, false, 's("bd sd hh*2").echo(3, 0.125, 0.5)'],
+    ['iter', { n: 4, mode: 'iter' }, true, 'note("c3 e3 g3 b3").iter(4).s("sawtooth")'],
+    ['iter', { n: 3, mode: 'iterBack' }, true, 'note("c3 e3 g3 b3").iterBack(3).s("sawtooth")'],
+    ['addnotes', { pat: '<0 7>' }, true, 'note("c3 e3 g3 b3").add(note("<0 7>")).s("sawtooth")'],
+  ];
+  for (const [type, params, notes, ref] of cases) {
+    const { g, m } = build(type, params, notes), code = compile(g).code, tag = `${type} ${JSON.stringify(params)}`;
+    const back = imp(code), bm = back.graph.nodes.find((n) => n.type === type);
+    check(`${tag}: plays what the same call written by hand plays, and the code passes the guard`, (await evs(code)) === (await evs('$: ' + ref)) && !gc(code));
+    check(`${tag}: the code reads back into the same module with the same settings, nothing skipped`, !back.report.skipped.length && !!bm && Object.keys(params).every((k) => bm.params[k] === m.params[k]) && (await evs(compile(back.graph).code)) === (await evs(code)));
+  }
+  // order matters: Jux sets the pan and Echo the volume, so on a line that also sets them the calls stay as written
+  let t = imp('$: note("c3 e3").s("sawtooth").pan(0.3).jux(rev)');
+  check('Jux: on a line that also sets pan() it stays as written (the later call wins in Strudel), and plays the same', !t.report.skipped.length && !t.graph.nodes.some((n) => n.type === 'jux') && (await evs('$: note("c3 e3").s("sawtooth").pan(0.3).jux(rev)')) === (await evs(compile(t.graph).code)));
+  t = imp('$: s("bd sd").gain(0.8).echo(3, 0.125, 0.5)');
+  check('Echo: on a line that also sets gain() it stays as written, and plays the same', !t.report.skipped.length && !t.graph.nodes.some((n) => n.type === 'echo') && (await evs('$: s("bd sd").gain(0.8).echo(3, 0.125, 0.5)')) === (await evs(compile(t.graph).code)));
+  t = imp('$: s("break").loopAt(2).chop(8)');
+  check('Chop and Loop at: together on one line they stay as written (the order of the two calls matters), and play the same', !t.report.skipped.length && !t.graph.nodes.some((n) => n.type === 'chop' || n.type === 'loopat') && (await evs('$: s("break").loopAt(2).chop(8)')) === (await evs(compile(t.graph).code)));
+  t = imp('$: note("c3 e3").s("sawtooth").when("<0 1>", x=>x.shape(.1).lpf(500))');
+  check('When: a function that is not one of its choices stays as written, and plays the same', !t.report.skipped.length && !t.graph.nodes.some((n) => n.type === 'when') && (await evs('$: note("c3 e3").s("sawtooth").when("<0 1>", x=>x.shape(.1).lpf(500))')) === (await evs(compile(t.graph).code)));
+  // the module list itself
+  const { MODULES: MM } = await import('../src/modules.js');
+  check('The ten new modules are in the module list, each with a plain-language description, and can be muted (they pass the sound through)', ['mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes'].every((k) => MM[k] && MM[k].blurb.length > 40 && MM[k].cat === 'transform'));
+}
+
+
+// ---------- the handoff tool ----------
+{
+  const H = await import('./handoff.mjs');
+  const req = 'x'.repeat(80), fm = (o = {}) => { const m = { id: '0007', title: 'T', from: 'claude', to: 'codex', status: 'open', created: '2026-11-25', refs: 'README.md', ...o }; return '---\n' + Object.entries(m).map(([k, v]) => `${k}: ${v}`).join('\n') + '\n---\n'; };
+  const file = (meta, resp = '', disp = '', request = req) => fm(meta) + `## Request\n${request}\n\n## Response\n<!-- note -->\n${resp}\n\n## Disposition\n${disp}\n`;
+  const ok = (name, text, errRe) => { const r = H.validate('0007-t.md', text); return errRe ? r.errs.some((e) => errRe.test(e)) : !r.errs.length; };
+  check('Handoff: a well-formed open handoff validates; the front matter, id, status and from/to are checked', ok('', file({})) && ok('', file({ id: '0008' }), /does not match the file name/) && ok('', file({ status: 'maybe' }), /not one of/) && ok('', file({ to: 'claude' }), /same/) && ok('', file({ created: 'today' }), /YYYY-MM-DD/) && ok('', file({ refs: 'nope/missing.md' }), /does not exist/));
+  check('Handoff: answered needs a real Response, ingested needs a Disposition that decides each finding, and an unfilled template is refused', ok('', file({ status: 'answered' }), /Response is empty/) && ok('', file({ status: 'answered' }, 'A real answer with enough words to count as written text.')) && ok('', file({ status: 'ingested' }, 'A real answer with enough words to count as written text.'), /Disposition is empty/) && ok('', file({ status: 'ingested' }, 'A real answer with enough words to count as written text.', 'F1: reviewed, will think about it later maybe'), /accepted, rejected, deferred/) && ok('', file({ status: 'ingested' }, 'A real answer with enough words to count as written text.', 'F1: accepted - it goes into ROADMAP section 4.')) && ok('', file({}, '', '', '<one paragraph: the question>' + req), /still the template/));
+  const text = file({ status: 'open' }, '', ''), r = H.parseHandoff(text);
+  check('Handoff: sections and the status line can be replaced without touching the rest, ids count up, names are slugs, the index lists every file', r.order.join() === 'Request,Response,Disposition' && H.setMeta(text, 'status', 'answered').includes('status: answered') && H.parseHandoff(H.replaceSection(text, 'Response', 'New answer here.')).sections.Response.includes('New answer here.') && H.parseHandoff(H.replaceSection(text, 'Response', 'New answer here.')).sections.Request.includes(req) && H.nextId(['0001-a.md', '0004-b.md']) === '0005' && H.nextId([]) === '0001' && H.slug('Roadmap: review!') === 'roadmap-review' && /\| \[0001\]\(0001-a.md\) \| T \| claude -> codex \| open \|/.test(H.indexMarkdown([{ id: '0001', file: '0001-a.md', title: 'T', from: 'claude', to: 'codex', status: 'open', created: '2026-11-25' }])));
 }
 
 process.exit(failures ? 1 : 0);

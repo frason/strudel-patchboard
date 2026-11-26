@@ -154,7 +154,7 @@ sample pattern) of exactly what it plays over that range (same mechanism as A, b
 
 ## 5. Known gaps and housekeeping (not part of the headline features)
 
-- Uncommitted at time of writing: Slow/Fast accept several cables of one kind (`modules.js`, `graph.js` `whyNot`, `compile.js` `input()`, tests in `verify.mjs`) and the DJ-filter orbit warning (`compile.js`, `modules.js`).
+- Done since this was written (2026-11-26): ten transform modules (Appendix A), the handoff system (`docs/handoff/`, `AGENTS.md`, `CLAUDE.md`, `scripts/handoff.mjs`). Slow/Fast several-cable input and the DJ-filter orbit warning are committed (235ff21).
 - Corporeal: the same song sounds different in the app than on strudel.cc; not investigated.
 - Importer: merging separate `$:` blocks; round-tripping partials written as mask patterns; fractional `.orbit()` stays as written.
 - Take as a source for Harmonics / Note filter masks.
@@ -179,3 +179,35 @@ sample pattern) of exactly what it plays over that range (same mechanism as A, b
 - `npm test` green (verify, reconcile, guard); guard accepts everything the compiler writes.
 - The module blurbs and the in-app hints explain the feature in plain language.
 - No new network access without consent; no secrets in anything shared.
+
+## Appendix A. Module gap ranking and the ten modules built first (2026-11-26)
+
+The app had 64 modules; Strudel's pattern methods number about 920 raw names (aliases and sound controls included), of which the code check lets 251 through as text.
+Raw counts overstate the gap, so the ranking below is by use, not by count.
+
+**Evidence.** Calls without a module in the seven real songs kept under `tools/` (only seven, so treat as a weak signal): `mask` 2 songs / 4 calls; `dict`, `offset`, `set` (chord voicing) 2 songs; `when`, `loopAt`, `chop`,
+`superimpose`, `add`, `euclidRot`, `end`, `lpe`, `dt`, `dfb` 1 song each. Songs seen earlier in conversation but not saved (Pyramid Song, a guitar-strum script) leaned on `pick`/`pickOut`/`pickRestart`, `jux`, `layer`, custom `register` functions (refused by design, DECISIONS D2).
+Ranking also uses how prominent each function is in everyday Strudel patches (my judgement, not measured).
+
+| Rank | Function | Why | Status |
+|---|---|---|---|
+| 1 | `mask` | 2 of 7 songs, 4 calls; the basic "bring a part in later" tool | built: Mask |
+| 2 | `chop`, `striate` | sample/break work (46 Cycles); no other way to slice from the board | built: Chop |
+| 3 | `loopAt` | pairs with Chop for breaks | built: Loop at |
+| 4 | `when` | 46 Cycles; generalises Every N to chosen cycles | built: When (function choices shared with Every N) |
+| 5 | `superimpose` | common thickening trick | built: Superimpose |
+| 6 | `off` | very common harmony/echo layer | built: Off |
+| 7 | `jux`, `juxBy` | very common stereo width | built: Jux |
+| 8 | `echo` | echoes of the pattern itself | built: Echo |
+| 9 | `iter`, `iterBack` | rotating melodies | built: Iter |
+| 10 | `add(note(...))` | Oleander; moves a riff through a progression | built: Add notes |
+
+**Next candidates** (not built): chord voicing options `dict`/`anchor`/`offset`/`mode` (3 songs, and an `IDEAS.md` item); `pick`/`pickOut`/`pickRestart` (table lookups; needs a design for the table values);
+`slice`/`splice`; `linger`; `hurry`; `chunk`; `inside`/`outside`; `rolled`; `press`; `segment`; `euclidRot`/`euclidLegato` as options on Euclid; `begin`/`end` on Sample; `velocity` on samples; `whenKey`; `stut` as an alias of Echo.
+
+**How the ten work (for reviewers).**
+- Defined in `src/modules.js` (all `cat: 'transform'`, bypassed when muted) with `LAYER_FNS`, a small shared list of functions (reverse, fast, slow, repeat, octave, fifth, a hair later) used by When, Superimpose, Off and Jux (same text as Every N writes).
+- One table `CALLS` in `src/compile.js` writes each module's single method call.
+- `applyCall` in `src/importer.js` reads each call back into a module only in the exact shapes the module can write. Anything else stays as written in a Strudel Code module. Echo (sets the volume) and Jux (sets the pan) are never made modules on a line that also sets gain/pan, because the order of such calls decides the result; Chop and Loop at likewise when `begin`/`end`/`speed`/`unit` or each other are on the line.
+- `scripts/verify.mjs`: each module plays exactly what the same call written by hand plays, its code reads back into the same module and settings, and the order-sensitive cases play the same as the original.
+- Known weakness: transforms import into the chain *before* the instrument (the existing design), which is why the order-sensitive cases above fall back to code.

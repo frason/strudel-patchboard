@@ -75,6 +75,15 @@ export const EVERY_FNS = {
   up12: { code: 'x=>x.transpose(12)', label: 'up an octave', say: 'moves the notes up an octave', notesOnly: true },
 };
 
+// what the layering modules (When, Superimpose, Off, Jux) can do to a copy of the pattern: the same small list as Every N, plus a few musical ones
+export const LAYER_FNS = {
+  ...EVERY_FNS,
+  down12: { code: 'x=>x.transpose(-12)', label: 'down an octave', say: 'moves the notes down an octave', notesOnly: true },
+  up7: { code: 'x=>x.transpose(7)', label: 'up a fifth', say: 'moves the notes up a fifth', notesOnly: true },
+  late02: { code: 'x=>x.late(.02)', label: 'a hair later', say: 'plays it a hair later (a thicker sound)' },
+};
+const layerOptions = Object.entries(LAYER_FNS).map(([k, v]) => [k, v.label]);
+
 // what Sometimes can do to the events it picks
 export const SOMETIMES_FNS = {
   ply2: { code: 'x=>x.ply(2)', label: 'play twice', say: 'plays it twice' },
@@ -338,6 +347,85 @@ export const MODULES = {
       { key: 'fn', label: 'then', kind: 'select', def: 'rev', options: Object.entries(EVERY_FNS).map(([k, v]) => [k, v.label]) },
     ],
     call: 'every',
+  },
+  mask: {
+    title: 'Mask', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Lets the pattern through only where the mask says 1 and silences it where it says 0: mask("1 0 1 1") plays three of four steps, mask("<0 0 1 1>/16") brings it in after 32 cycles. Written as mini-notation, so < > and / work.',
+    params: [{ key: 'pat', label: 'mask', kind: 'text', def: '1 0', always: true, tip: '1 plays, 0 is silent: "1 0 1 1", "<0 1>", "<0 0 1 1>/16"' }],
+  },
+  chop: {
+    title: 'Chop', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Cuts every sound into pieces, for breaks and loops: chop(8) plays each sample as 8 short slices in a row; striate(8) interleaves the slices instead. For recorded samples.',
+    params: [
+      { key: 'n', label: 'pieces', kind: 'knob', min: 1, max: 64, step: 1, def: 8, always: true },
+      { key: 'mode', label: 'how', kind: 'select', def: 'chop', options: [['chop', 'chop: slices in order'], ['striate', 'striate: slices interleaved']] },
+    ],
+  },
+  loopat: {
+    title: 'Loop at', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Fits a recorded loop (a break) to a number of cycles: loopAt(2) plays the whole sample over two cycles, changing its speed to fit. For samples.',
+    params: [{ key: 'n', label: 'cycles', kind: 'knob', min: 0.25, max: 16, step: 0.25, def: 2, always: true }],
+  },
+  when: {
+    title: 'When', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Does something different to the pattern in the cycles where a 1 comes up: when("<0 0 0 1>", rev) reverses every fourth cycle. Like Every N, but you choose the cycles yourself, with < > and ! in the mask.',
+    params: [
+      { key: 'pat', label: 'cycles', kind: 'text', def: '<0 0 0 1>', always: true, tip: '1 means "do it now": "<0 0 0 1>", "<0!7 1>", "<0!24 1!4 0!20>"' },
+      { key: 'fn', label: 'then', kind: 'select', def: 'rev', options: layerOptions },
+    ],
+  },
+  superimpose: {
+    title: 'Superimpose', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Plays the pattern and, on top of it, a changed copy: superimpose(x => x.transpose(12)) adds the same notes an octave higher.',
+    params: [{ key: 'fn', label: 'copy', kind: 'select', def: 'up12', options: layerOptions }],
+  },
+  off: {
+    title: 'Off', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Plays the pattern and a copy of it shifted in time and changed: off(1/8, x => x.transpose(7)) adds an echo an eighth of a cycle later, a fifth higher.',
+    params: [
+      { key: 't', label: 'later by', kind: 'knob', min: -1, max: 1, step: 0.0625, def: 0.125, always: true, unit: 'cyc', tip: 'a fraction of a cycle: 0.125 is an eighth; negative is earlier' },
+      { key: 'fn', label: 'copy', kind: 'select', def: 'up7', options: layerOptions },
+    ],
+  },
+  jux: {
+    title: 'Jux', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Stereo trick: the pattern plays on the left and a changed copy plays on the right, jux(rev) puts it forwards on one side and backwards on the other. Width below 1 keeps the sides closer together. It sets the pan, so it replaces a Pan module on the same part.',
+    params: [
+      { key: 'width', label: 'width', kind: 'knob', min: 0, max: 1, step: 0.05, def: 1, always: true },
+      { key: 'fn', label: 'right side', kind: 'select', def: 'rev', options: layerOptions },
+    ],
+  },
+  echo: {
+    title: 'Echo', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Repeats every event a few times, each repeat quieter: echo(3, 1/8, 0.5) plays it three more times, an eighth of a cycle apart, each at half the volume of the one before. It works on the pattern, so it also echoes the notes, not just the sound. It sets the volume, so it replaces a gain on the same part.',
+    params: [
+      { key: 'times', label: 'times', kind: 'knob', min: 1, max: 8, step: 1, def: 3, always: true },
+      { key: 'time', label: 'apart', kind: 'knob', min: 0.0625, max: 1, step: 0.0625, def: 0.125, always: true, unit: 'cyc', tip: 'a fraction of a cycle between repeats' },
+      { key: 'fb', label: 'volume', kind: 'knob', min: 0, max: 1, step: 0.05, def: 0.5, always: true, tip: 'each repeat is this much of the volume of the one before' },
+    ],
+  },
+  iter: {
+    title: 'Iter', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Starts the pattern one step further along each cycle, so a melody slowly rotates: iter(4) comes back to the start after four cycles. Back reverses the direction.',
+    params: [
+      { key: 'n', label: 'steps', kind: 'knob', min: 2, max: 16, step: 1, def: 4, always: true },
+      { key: 'mode', label: 'direction', kind: 'select', def: 'iter', options: [['iter', 'forward'], ['iterBack', 'back']] },
+    ],
+  },
+  addnotes: {
+    title: 'Add notes', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: ['notes'], label: 'notes', required: true }],
+    blurb: 'Adds semitones to the notes, following a pattern: add(note("<0 3 7>")) moves every note up by 0, then 3, then 7 semitones, one value per cycle. A way to move a riff through a chord progression. Notes come out as numbers, which sound the same.',
+    params: [{ key: 'pat', label: 'semitones', kind: 'text', def: '<0 3 7>', always: true, tip: 'numbers in mini-notation: "0 7", "<0 3 7>", "-12"' }],
   },
 
   // ---------- combiners ----------
@@ -884,7 +972,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
   ...['melody', 'notetext', 'rhythm', 'hitpattern', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm', 'codesource', 'take'].map((t) => [t, 'silence']),
-  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes', 'code', 'harmonics', 'notefilter'].map((t) => [t, 'bypass']),
+  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes', 'code', 'harmonics', 'notefilter', 'mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes'].map((t) => [t, 'bypass']),
 ]);
 
 // FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.

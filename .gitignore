@@ -4,3 +4,4 @@ dist/
 .claude/settings.local.json
 .wrangler/
 scripts/corpus/
+docs/handoff/CONTEXT.md

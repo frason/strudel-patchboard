@@ -7,12 +7,18 @@
     "dev": "vite --port 5174",
     "build": "vite build",
     "rubric": "node --import ./scripts/stub-loader.mjs scripts/rubric.mjs",
-    "test": "node --import ./scripts/stub-loader.mjs scripts/verify.mjs && npm run test:reconcile && npm run test:guard",
+    "test": "node --import ./scripts/stub-loader.mjs scripts/verify.mjs && npm run test:reconcile && npm run test:guard && npm run handoff:check",
     "preview": "vite preview --port 4173",
     "test:import": "node --import ./scripts/stub-loader.mjs scripts/import-test.mjs",
     "test:reconcile": "node --import ./scripts/stub-loader.mjs scripts/reconcile-test.mjs",
     "test:guard": "node --import ./scripts/stub-loader.mjs scripts/guard-sweep.mjs",
-    "perf": "node --import ./scripts/stub-loader.mjs scripts/perf.mjs"
+    "perf": "node --import ./scripts/stub-loader.mjs scripts/perf.mjs",
+    "handoff:list": "node scripts/handoff.mjs list",
+    "handoff:check": "node scripts/handoff.mjs check",
+    "handoff:new": "node scripts/handoff.mjs new",
+    "handoff:context": "node scripts/handoff.mjs context",
+    "handoff:fetch": "node scripts/handoff.mjs fetch",
+    "handoff:index": "node scripts/handoff.mjs index"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

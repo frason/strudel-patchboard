@@ -1,7 +1,7 @@
 // Graph -> idiomatic Strudel code. Pure. The returned `code` string is exactly what gets evaluated.
 // Alongside the code we return `segments`: which character ranges belong to which module (and which knob / step),
 // which is how highlighting, hover and "who made this event" work without any second representation of the sound.
-import { parseArrangeOrder, portsOf, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas, SCALES, NOTE_NAMES, noteRank } from './modules.js';
+import { parseArrangeOrder, portsOf, LAYER_FNS, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas, SCALES, NOTE_NAMES, noteRank } from './modules.js';
 import { chordSymbol } from './chords.js';
 import { guardCalls, guardCode } from './guard.js';
 import { takeToPattern } from './takecode.js';
@@ -497,6 +497,14 @@ export function compile(g) {
         if (p.loop > 0) calls.push([S(`.ribbon(${p.loop}, 1)`, { ...m, role: 'knob', key: 'loop', note: `ribbon(${p.loop}, 1) takes cycle ${p.loop} and repeats it forever, so the choices stop changing.` })]);
         return chain(up, calls, depth, inline);
       }
+      case 'mask': case 'chop': case 'loopat': case 'when': case 'superimpose': case 'off': case 'jux': case 'echo': case 'iter': case 'addnotes': {
+        const up = input(n, 'in', depth, inline);
+        if (!up) return silent(n, 'input');
+        const [text, key, say] = CALLS[n.type](p);
+        if (['when', 'superimpose', 'off', 'jux'].includes(n.type) && layerFn(p).notesOnly && outType(g, n.id) !== 'notes') issues.push({ node: n.id, msg: `${MODULES[n.type].title}: "${layerFn(p).label}" only makes sense for notes` });
+        if ((n.type === 'chop' || n.type === 'loopat') && outType(g, n.id) === 'notes') issues.push({ node: n.id, msg: `${MODULES[n.type].title} cuts recorded samples: it does nothing to a synth or piano melody.` });
+        return chain(up, [[S(text, { ...m, role: 'knob', key, note: say })]], depth, inline);
+      }
       case 'every': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'input');
@@ -792,6 +800,22 @@ const FM_SAY = {
   fm44: (v) => `fm44(${fmt(v)}) feeds the fourth modulator back into itself; keep it small.`,
 };
 for (const i of [1, 2, 3, 4]) for (const j of [0, 1, 2, 3, 4]) if (j !== i && i !== j + 1) FM_SAY[`fm${i}${j}`] = (v) => `fm${i}${j}(${fmt(v)}) sends modulator ${i} into ${j ? 'modulator ' + j : 'the note'} directly (the FM matrix).`;
+// The ten transform modules that write one method call each: [text, which knob the code panel nudges, what it does in plain words].
+const maskText = (t) => String(t || '').replace(/[\r\n"\\]+/g, ' ').trim().slice(0, 500) || '1';
+const layerFn = (p) => LAYER_FNS[p.fn] || LAYER_FNS.rev;
+const CALLS = {
+  mask: (p) => [`.mask(${q(maskText(p.pat))})`, 'pat', `mask("${maskText(p.pat)}") plays the pattern only where the mask is 1 and is silent where it is 0.`],
+  chop: (p) => [`.${p.mode === 'striate' ? 'striate' : 'chop'}(${fmt(p.n)})`, 'n', p.mode === 'striate' ? `striate(${fmt(p.n)}) cuts each sound into ${fmt(p.n)} slices and interleaves them.` : `chop(${fmt(p.n)}) cuts each sound into ${fmt(p.n)} slices that play one after the other.`],
+  loopat: (p) => [`.loopAt(${fmt(p.n)})`, 'n', `loopAt(${fmt(p.n)}) fits the whole sample to ${fmt(p.n)} cycle${p.n === 1 ? '' : 's'}, changing its speed to match.`],
+  when: (p) => [`.when(${q(maskText(p.pat))}, ${layerFn(p).code})`, 'pat', `when("${maskText(p.pat)}", …) in the cycles where the mask is 1, ${layerFn(p).say}; other cycles play unchanged.`],
+  superimpose: (p) => [`.superimpose(${layerFn(p).code})`, 'fn', `superimpose(…) plays the pattern and, on top of it, a copy that ${layerFn(p).say}.`],
+  off: (p) => [`.off(${fmt(p.t)}, ${layerFn(p).code})`, 't', `off(${fmt(p.t)}, …) plays the pattern and a copy ${fmt(p.t)} of a cycle later that ${layerFn(p).say}.`],
+  jux: (p) => [p.width === 1 ? `.jux(${layerFn(p).code})` : `.juxBy(${fmt(p.width)}, ${layerFn(p).code})`, 'width', `${p.width === 1 ? 'jux' : 'juxBy'}(…) plays the pattern on the left and a copy that ${layerFn(p).say} on the right.`],
+  echo: (p) => [`.echo(${fmt(p.times)}, ${fmt(p.time)}, ${fmt(p.fb)})`, 'times', `echo(${fmt(p.times)}, ${fmt(p.time)}, ${fmt(p.fb)}) repeats each event ${fmt(p.times)} more times, ${fmt(p.time)} of a cycle apart, each at ${fmt(p.fb)} of the volume of the one before.`],
+  iter: (p) => [`.${p.mode === 'iterBack' ? 'iterBack' : 'iter'}(${fmt(p.n)})`, 'n', `${p.mode === 'iterBack' ? 'iterBack' : 'iter'}(${fmt(p.n)}) starts the pattern one step ${p.mode === 'iterBack' ? 'earlier' : 'later'} each cycle, back at the start after ${fmt(p.n)} cycles.`],
+  addnotes: (p) => [`.add(note(${q(maskText(p.pat))}))`, 'pat', `add(note("${maskText(p.pat)}")) moves every note up by that many semitones, following the pattern.`],
+};
+
 const SAY = {
   ...FM_SAY,
   fast: (n) => `fast(${fmt(n)}) plays the pattern ${fmt(n)}× as quickly.`,

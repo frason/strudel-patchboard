@@ -4,7 +4,7 @@ import { validPack } from './packs.js';
 import { parse } from 'acorn';
 import { makeNode, normalize, validateShape } from './graph.js';
 import { parseMini, Unsupported } from './mini.js';
-import { MODULES, SCALES, makeCells, EVERY_FNS, SOMETIMES_FNS, NOTE_NAMES } from './modules.js';
+import { MODULES, SCALES, makeCells, EVERY_FNS, LAYER_FNS, SOMETIMES_FNS, NOTE_NAMES } from './modules.js';
 import { parseChord, sharpSym, QUALITY_INTERVALS, ARP_STYLES } from './chords.js';
 import { melodyToNotes } from './convert.js';
 import { guardCalls, guardCode } from './guard.js';
@@ -426,6 +426,14 @@ export function importStrudel(code, { sounds = null } = {}) {
     throw new Skip('every() with this function cannot be shown');
   }
 
+  function layerFnKey(node, what) {   // one of the small list of functions the layering modules offer (the same text they write)
+    const t0 = code.slice(node.start, node.end).replace(/\s+/g, '');
+    if (t0 === 'rev') return 'rev';
+    const t = t0.replace(/^\(?x\)?=>/, 'x=>');
+    for (const [k, f] of Object.entries(LAYER_FNS)) if (t === f.code) return k;
+    throw new Skip(`${what}() with this function cannot be shown`);
+  }
+
   function sometimesFn(node) {
     const s = code.slice(node.start, node.end).replace(/\s+/g, '');
     if (s === 'rev') return 'rev';
@@ -653,6 +661,7 @@ export function importStrudel(code, { sounds = null } = {}) {
     const pending = [];
     const velocity = [];
     S.codeCalls = [];
+    S.callNames = new Set(calls.map((x) => x.name));   // what else the line does: Echo sets the volume and Jux the pan, so they only become modules when no other call on the line sets the same thing
     const absorbed = new Set();   // calls that were moved into a Strudel Code module together with an earlier call (see keepAsCode)
     calls.forEach((c, ci) => {
       if (absorbed.has(ci)) return;
@@ -902,6 +911,51 @@ export function importStrudel(code, { sounds = null } = {}) {
     if (n === 'rev') { S.pre.push({ type: 'rev', params: {} }); return; }
     if (n === 'transpose' || n === 'trans') { const v = num(a[0]); if (v === null) throw new Skip('transpose() with something other than a number'); if (S.kind !== 'notes') throw new Skip('transpose() only works on notes'); S.pre.push({ type: 'transpose', params: { n: v } }); return; }
     if (n === 'euclid') { const p = num(a[0]), st = num(a[1]); if (p === null || st === null) throw new Skip('euclid() with something other than numbers'); S.pre.push({ type: 'euclid', params: { pulses: p, steps: st } }); return; }
+    // the ten transform modules that write one call each: only the shapes the module can write back exactly; anything else stays as written
+    if (n === 'mask' || n === 'when' || n === 'addnotes' || n === 'add') {
+      const textArg = (x) => { const t = str(x); return t !== null && t.length <= 500 && !/["\\\n]/.test(t) ? t : null; };
+      if (n === 'mask') { const t = a.length === 1 ? textArg(a[0]) : null; if (t === null) throw new Skip('mask() with something other than a plain pattern string'); S.pre.push({ type: 'mask', params: { pat: t } }); return; }
+      if (n === 'when') { const t = a.length === 2 ? textArg(a[0]) : null; if (t === null) throw new Skip('when() with something other than a pattern string and a function'); S.pre.push({ type: 'when', params: { pat: t, fn: layerFnKey(a[1], 'when') } }); return; }
+      const call = a.length === 1 && a[0].type === 'CallExpression' && a[0].callee.type === 'Identifier' && a[0].callee.name === 'note' && a[0].arguments.length === 1 ? a[0].arguments[0] : null;
+      const t = call ? (num(call) !== null ? String(num(call)) : textArg(call)) : null;
+      if (t === null || !/^[-\d\s.~<>\[\]!@*\/,]+$/.test(t) || S.kind !== 'notes') throw new Skip('add() of something other than add(note("numbers"))');
+      S.pre.push({ type: 'addnotes', params: { pat: t } }); return;
+    }
+    if (n === 'chop' || n === 'striate') {
+      const v = num(a[0]);
+      if (a.length !== 1 || v === null || !Number.isInteger(v) || v < 1 || v > 64) throw new Skip(`${n}() with something other than a whole number from 1 to 64`);
+      for (const k of ['begin', 'end', 'speed', 'unit', 'cut', 'loopAt', 'chop', 'striate']) if (k !== n && S.callNames.has(k) && k !== 'cut') throw new Skip(`${n}() on a line that also sets ${k}(), where the order of the calls matters`);
+      S.pre.push({ type: 'chop', params: { n: v, mode: n } }); return;
+    }
+    if (n === 'loopAt') {
+      const v = num(a[0]);
+      if (a.length !== 1 || v === null || v < 0.25 || v > 16) throw new Skip('loopAt() with something other than a number from 0.25 to 16');
+      for (const k of ['begin', 'end', 'speed', 'unit', 'chop', 'striate']) if (S.callNames.has(k)) throw new Skip(`loopAt() on a line that also sets ${k}(), where the order of the calls matters`);
+      S.pre.push({ type: 'loopat', params: { n: v } }); return;
+    }
+    if (n === 'superimpose') { if (a.length !== 1) throw new Skip('superimpose() with more than a function'); S.pre.push({ type: 'superimpose', params: { fn: layerFnKey(a[0], 'superimpose') } }); return; }
+    if (n === 'off') {
+      const v = num(a[0]);
+      if (a.length !== 2 || v === null || v < -1 || v > 1) throw new Skip('off() with something other than a time from -1 to 1 and a function');
+      S.pre.push({ type: 'off', params: { t: v, fn: layerFnKey(a[1], 'off') } }); return;
+    }
+    if (n === 'jux' || n === 'juxBy') {
+      const w = n === 'jux' ? 1 : num(a[0]);
+      if (a.length !== (n === 'jux' ? 1 : 2) || w === null || w < 0 || w > 1) throw new Skip(`${n}() with something other than ${n === 'jux' ? 'a function' : 'a width from 0 to 1 and a function'}`);
+      if (S.callNames.has('pan')) throw new Skip(`${n}() on a line that also sets pan(), where the order of the calls matters`);
+      S.pre.push({ type: 'jux', params: { width: w, fn: layerFnKey(a[a.length - 1], n) } }); return;
+    }
+    if (n === 'echo') {
+      const [t, d, f] = a.map(num);
+      if (a.length !== 3 || t === null || d === null || f === null || !Number.isInteger(t) || t < 1 || t > 8 || d < 0.0625 || d > 1 || f < 0 || f > 1) throw new Skip('echo() with something other than whole times (1 to 8), a time (1/16 to 1) and a volume (0 to 1)');
+      if (S.callNames.has('gain') || S.callNames.has('velocity') || S.callNames.has('postgain')) throw new Skip('echo() on a line that also sets the volume, where the order of the calls matters');
+      S.pre.push({ type: 'echo', params: { times: t, time: d, fb: f } }); return;
+    }
+    if (n === 'iter' || n === 'iterBack') {
+      const v = num(a[0]);
+      if (a.length !== 1 || v === null || !Number.isInteger(v) || v < 2 || v > 16) throw new Skip(`${n}() with something other than a whole number from 2 to 16`);
+      S.pre.push({ type: 'iter', params: { n: v, mode: n } }); return;
+    }
     if (n === 'every') { const k = num(a[0]); if (k === null) throw new Skip('every() with something other than a number'); S.pre.push({ type: 'every', params: { n: k, fn: everyFn(a[1]) } }); return; }
     if (n === 'arp') { const t = str(a[0]); if (t === null) throw new Skip('arp() with something other than a pattern string'); const st = ARP_STYLES.find(([v]) => v === t); S.pre.push({ type: 'arp', params: st ? { style: t } : { style: 'custom', custom: t } }); return; }
     // routing and views
