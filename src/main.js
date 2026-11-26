@@ -900,7 +900,7 @@ function liveSlider() {
   }
 }
 store.subscribe(liveSlider);
-const xray = createXray({ h, getGraph: () => store.graph });
+const xray = createXray({ h, getGraph: () => store.graph, isPlaying: () => engine.playing });
 store.subscribe(() => xray.update());
 try { if (localStorage.getItem('pb.perf') === '1') window.__xrayStress = xray.stress; } catch { /* storage unavailable */ }   // the performance harness (scripts/perf-play.mjs) asks the x-ray to read over and over
 // the browser can refuse to save (its storage is full, or blocked): say so, because a refresh would lose the work

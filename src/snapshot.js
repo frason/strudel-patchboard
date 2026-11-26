@@ -23,25 +23,30 @@ const initOffline = () => (async () => {
   return { ref: core.ref, repl: core.repl({ defaultOutput() {}, getTime: () => 0, transpiler: transpiler.transpiler, setInterval: (...a) => setInterval(...a), clearInterval: (...a) => clearInterval(...a), onEvalError: (e) => { throw e; } }) };
 })();
 // the raw haps of a stretch of cycles of this code (see evallock.js for why queries take turns)
-async function queryHaps(code, from, to) {
+export const MAX_RANGE = 256;   // cycles one query may ask for
+async function queryHaps(code, from, to, sliders = null) {
   const refused = guardCode(code);
   if (refused) throw new Error('Not drawn: ' + refused);
-  if (!offline) offline = initOffline();
+  if (!(to > from) || to - from > MAX_RANGE) throw new Error(`Not drawn: a query may ask for 1 to ${MAX_RANGE} cycles at a time`);
   // one at a time: the engine keeps the pattern it just evaluated in one shared place, so two pictures asking together could be handed each other's notes
   // The audio engine and this offline evaluator share Strudel's global names. If the engine was still starting up when this ran, the names can briefly belong to a
   // half-built engine ("... .p is not a function"): build the offline evaluator again and ask once more before giving up.
   // The Slider values of a query live in a store of their own, and the global sliderWithID that the evaluated code calls is swapped in for the length of the query and put
   // back after: a picture or a download list must never reset a Slider (or replace the player's sliderWithID, which would cut the live Slider from the sound).
   const run = () => exclusive(async () => {
+    if (!offline) offline = initOffline();   // built here, inside the turn: building it sets shared global names, which must never overlap a player evaluation
     const o = await offline, saved = globalThis.sliderWithID;
     globalThis.sliderWithID = makeSliderWithID(o.ref, offlineSliders);
-    try { return (await o.repl.evaluate(code, false)).queryArc(from, to); } finally { globalThis.sliderWithID = saved; }
+    try {
+      const pat = await o.repl.evaluate(code, false);
+      for (const [id, v] of Object.entries(sliders || {})) if (Number.isFinite(Number(v))) offlineSliders[id] = Number(v);   // a captured live value replaces the one in the code, for this query only
+      return pat.queryArc(from, to);
+    } finally { globalThis.sliderWithID = saved; }
   });
   const turn = queue.then(() => run().catch(async (e) => {
     if (!/is not a function|is not defined/.test(String((e && e.message) || e))) throw e;
     offline = null; await new Promise((r) => setTimeout(r, 400));
-    offline = initOffline();
-    return run();
+    return run();   // run() builds a fresh offline evaluator inside its own turn
   }));
   queue = turn.catch(() => {});
   return turn;
@@ -56,8 +61,9 @@ export async function queryPatch(code, cycles) {
 
 
 // The full event record (src/events.js) of cycles from..to: exact positions, every control, the span, the revision. For the cable x-ray, Grab and Bake.
+// context.sliders ({ slider_id: value }) are live Slider values to use for this query; they are applied, and the record says which were.
 export async function queryEvents(code, { from = 0, to = 4, kind = 'queried', context = {} } = {}) {
-  return recordFromHaps(await queryHaps(code, from, to), { from, to, code, kind, context });
+  return recordFromHaps(await queryHaps(code, from, to, context.sliders), { from, to, code, kind, context: { ...(context.sliders ? { sliders: { ...context.sliders } } : {}) } });
 }
 
 const NOTE_INDEX = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };

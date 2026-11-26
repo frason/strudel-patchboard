@@ -1901,9 +1901,9 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const slow = '$: note("c3").s("sine").slow(2)', c2 = E.recordFromHaps(await hapsOf(slow, 0.5, 1.5), { from: 0.5, to: 1.5, code: slow });
   check('Events: an event that began before the span, or ends after it, is reported as carried in or out, never silently cut', c2.events.length === 1 && c2.events[0].carry === 'both' && E.onsets(c2).length === 0 && E.bounds(c2).carryIn === 1 && E.bounds(c2).carryOut === 1 && c2.events[0].dur[0] / c2.events[0].dur[1] === 2);
   const t1 = E.recordToTake(rec, { bpm: 120, beatsPerBar: 4, grid: 4 });
-  check('Events -> Take: a lossy conversion says so (filter and release are lost, the triplet is snapped and by how much), and the note gate stays the length of the event', !t1.report.lossless && t1.report.controlsLost.includes('cutoff') && t1.report.controlsLost.includes('release') && t1.report.snapped >= 2 && t1.report.maxSnapBeats > 0.08 && Math.abs(t1.take.events[0].d - 4 / 3) < 1e-9 && Math.abs(t1.take.events[1].t - 4 / 3) < 1e-9);
-  const clean = E.recordFromHaps(await hapsOf('$: note("c3 e3 g3 b3").s("sine")', 0, 1), { from: 0, to: 1 }), t2 = E.recordToTake(clean, { grid: 4 });
-  check('Events -> Take: a plain melody on the grid converts with nothing lost, and the report says lossless', t2.report.lossless && t2.take.events.length === 4 && t2.take.events.map((e) => e.n).join() === '48,52,55,59' && t2.take.events.map((e) => e.t).join() === '0,1,2,3');
+  check('Events -> Take: a lossy conversion says so (filter and release are lost, the triplet is snapped and by how much), and the note length is the slot times the clip (the release is not added)', !t1.report.lossless && t1.report.controlsLost.includes('cutoff') && t1.report.controlsLost.includes('release') && t1.report.snapped >= 2 && t1.report.maxSnapBeats > 0.08 && Math.abs(t1.take.events[0].d - 2 / 3) < 1e-9 && Math.abs(t1.take.events[1].t - 4 / 3) < 1e-9);
+  const clean = E.recordFromHaps(await hapsOf('$: note("c3 e3 g3 b3")', 0, 1), { from: 0, to: 1 }), t2 = E.recordToTake(clean, { grid: 4 });
+  check('Events -> Take: a plain melody on the grid converts with nothing lost, and the report says lossless', t2.report.lossless && t2.report.exactNotes && t2.take.events.length === 4 && t2.take.events.map((e) => e.n).join() === '48,52,55,59' && t2.take.events.map((e) => e.t).join() === '0,1,2,3');
   const hits = E.recordToTake(E.recordFromHaps(await hapsOf('$: s("bd sd")', 0, 1), { from: 0, to: 1 }), {});
   check('Events -> Take: sample hits have no note, so none are invented: they are counted as left out', hits.take.events.length === 0 && hits.report.noNote === 2 && !hits.report.lossless);
   const live = await queryEvents('setcpm(120/4)\n$: note("c3 e3").s("sine").release(.3)', { from: 2, to: 4 });
@@ -1970,8 +1970,133 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Test board: loads with no cable removed, uses all ten new modules and the multi-input Slow and Fast, and the guard accepts its code', !removed.length && ['mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes', 'slow', 'fast', 'djf'].every((t) => types.has(t)) && !gc(r.code) && !gc(all.code) && g.groups.length === 9);
   const FT = (await import('../src/starters.js')).LESSONS.find((l) => l.id === 'feature-test'), ftGraph = FT && FT.graph(), LL = (await import('../src/starters.js')).LESSONS;
   const idxHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8'), teaching = LL.filter((l) => l.id !== 'feature-test').length;
-  check('Test board: it is also the last lesson, "34 · Feature test", with the same board as the file, and the lesson counts in the docs ignore it', !!FT && LL[LL.length - 1] === FT && FT.title === `${LL.length} · Feature test` && JSON.stringify(ftGraph.nodes.map((n) => n.type)) === JSON.stringify(JSON.parse(readFileSync(new URL('../tools/test-board.patchboard.json', import.meta.url), 'utf8')).nodes.map((n) => n.type)) && ftGraph.groups.length === 9 && idxHtml.includes(`${teaching} short lessons`));
+  check('Test board: it is also the last lesson, "34 · Feature test", with exactly the same board (every module, setting, cable and group) as the file, and the lesson counts in the docs ignore it', !!FT && LL[LL.length - 1] === FT && FT.title === `${LL.length} · Feature test` && JSON.stringify(ftGraph) === JSON.stringify(JSON.parse(readFileSync(new URL('../tools/test-board.patchboard.json', import.meta.url), 'utf8'))) && ftGraph.groups.length === 9 && idxHtml.includes(`${teaching} short lessons`));
   check('Test board: every group plays something, and the DJ filter warns once its group is unmuted', counts.length === 9 && counts.every((n) => n > 0) && all.issues.some((i) => /DJ filter filters the whole orbit/.test(i.msg)));
+}
+
+
+// ---------- the event record, adversarial cases (handoff 0002, findings 1 to 3) ----------
+{
+  const E = await import('../src/events.js');
+  const hapsOf = async (code, a, b) => (await evaluate(code, false)).queryArc(a, b);
+  const rec = async (c, a = 0, b = 1) => E.recordFromHaps(await hapsOf(c, a, b), { from: a, to: b, code: c });
+  const v = await rec('$: note("c3").velocity(".2 .8")'), two = await rec('$: stack(note("c3"), note("c3"))');
+  check('Events: a control changing part-way through one event is not a second attack (one onset, said so), while two real simultaneous notes stay two', E.onsets(v).length === 1 && v.warnings.some((w) => /folded/.test(w)) && E.onsets(two).length === 2);
+  const silent = E.recordToTake(await rec('$: note(60).gain(0)'));
+  check('Events -> Take: a silent note (gain 0) is not invented as a quiet one: it is left out and counted', silent.take.events.length === 0 && silent.report.silent === 1 && !silent.report.lossless);
+  const fine = E.recordToTake(await rec('$: note(60.4).fast(128)'), { beatsPerBar: 4 });
+  check('Events -> Take: a fractional pitch and notes shorter than a Take can hold are reported (not lossless)', fine.report.detuned === 128 && fine.report.tooShort === 128 && !fine.report.exactNotes && !fine.report.lossless && fine.report.maxCents === 40);
+  const carried = E.recordToTake(await rec('$: note("c3").s("sine").slow(2)', 0.5, 1.5), { beatsPerBar: 4 });
+  check('Events -> Take: a note carried across the edges of the span is rebased to beat 0, clipped to the span, and counted as clipped', carried.take.events.length === 1 && carried.take.events[0].t === 0 && Math.abs(carried.take.events[0].d - 4) < 1e-9 && carried.report.clipped === 1 && !carried.report.exactNotes);
+  const hm = await rec('$: note("c3").s("user").partials([1,.5,.25])');
+  check('Events: a short list control (Harmonics partials) is kept, and nothing that was left out disappears without a warning', JSON.stringify(hm.events[0].controls.partials) === '[1,0.5,0.25]' && E.recordToTake(hm).report.controlsLost.includes('partials'));
+  const clip = E.recordToTake(await rec('$: note("c3").clip(.2)'), { beatsPerBar: 4 });
+  check('Events -> Take: the note length is the slot times the clip (a clip of .2 on a whole-cycle note is 0.8 beat, not 4), and the clip is not reported as lost', Math.abs(clip.take.events[0].d - 0.8) < 1e-9 && !clip.report.controlsLost.includes('clip') && E.gateOf({ dur: [1, 1], controls: { clip: 0.2 } }) === 0.2);
+  const big = E.pairOf({ n: 2n ** 70n, d: 3n, s: 1n });
+  check('Events: a position too large for an exact fraction is marked approximate, and ordinary ones are exact', big.exact === false && E.pairOf({ n: 1n, d: 3n, s: 1n }).exact === true && E.pairOf({ n: 1n, d: 3n, s: -1n }).p[0] === -1);
+  const merged = E.recordToTake({ span: { from: 0, to: 1 }, warnings: [], events: [{ at: [0, 1], dur: [1, 4], controls: { note: 60, velocity: 0.3 } }, { at: [0, 1], dur: [1, 4], controls: { note: 64, velocity: 0.9 } }] }, { beatsPerBar: 4, grid: 4 });
+  check('Events -> Take: simultaneous notes that the writer would merge to one velocity are reported', merged.report.emitted.merged === 1 && !merged.report.exactNotes);
+}
+
+
+// ---------- the tap and the x-ray, adversarial cases (handoff 0002, findings 4 to 6, 8) ----------
+{
+  const { compileTap } = await import('../src/compile.js');
+  const { queryEvents } = await import('../src/snapshot.js');
+  const { summarize } = await import('../src/xray.js');
+  const { emptyGraph: eg, makeNode: mn } = await import('../src/graph.js');
+  const mk = () => { const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b, port = 'in') => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port } }); return { g, N, W }; };
+  {
+    const { g, N, W } = mk(), a = N('notetext', { text: 'c3' }), sy = N('synth', { wave: 'sine' }), sl = N('slider', { value: 0.25, min: 0, max: 1 }), out = N('output');
+    W(a, sy); W(sy, out); W(sl, out, 'p:mvol');
+    const t = compileTap(g, sy.id);
+    check('Tap: a Slider driving the master volume is not part of a raw tap, and the tap says a master control exists', !/postgain/.test(t.code) && t.outside.master);
+  }
+  {
+    const { g, N, W } = mk(), a = N('notetext', { text: 'c3' }), b = N('notetext', { text: 'e3' }), s1 = N('synth', { wave: 'sine' }), s2 = N('synth', { wave: 'sine' }), o1 = N('orbit', { n: 2 }), o2 = N('orbit', { n: 2 }), o3 = N('orbit', { n: 3 }), c = N('notetext', { text: 'g3' }), s3 = N('synth', { wave: 'sine' }), out = N('output');
+    W(a, s1); W(s1, o1); W(o1, out); W(b, s2); W(s2, o2); W(o2, out); W(c, s3); W(s3, o3); W(o3, out);
+    check('Tap: parts on the same orbit number are named as sharing it (their reverb, delay and DJ filter are shared); a part on its own orbit is not', compileTap(g, o1.id).outside.sharedOrbit.join() === '2' && compileTap(g, o1.id).outside.orbit && compileTap(g, o3.id).outside.sharedOrbit.length === 0 && !compileTap(g, o3.id).outside.orbit);
+  }
+  const rec = { v: 1, span: { from: 0, to: 4 }, warnings: [], events: Array.from({ length: 150000 }, (_, i) => ({ at: [i, 1], dur: [1, 1], controls: { note: 40 + (i % 40) } })) };
+  const sum = summarize(rec, { outside: { downstream: [], master: false, mixer: false, orbit: true, sharedOrbit: [2] } });
+  check('X-ray: a very long record is summarised without overflowing the call, and it says which orbit is shared', /150000 events/.test(sum.line) && /notes/.test(sum.line) && /orbit 2 is also used/.test(sum.notApplied));
+  const code = 'setcpm(120/4)\n$: note("c3").s("sine").lpf(slider(800,20,20000))', sid = 'slider_' + (code.indexOf('slider(') + 'slider('.length);
+  const withCtx = await queryEvents(code, { from: 0, to: 1, context: { sliders: { [sid]: 123 } } }), plain = await queryEvents(code, { from: 0, to: 1 });
+  check('Events: a live Slider value passed as context is applied to that query (and recorded), and the next query starts from the code again', withCtx.events[0].controls.cutoff === 123 && withCtx.context.sliders[sid] === 123 && plain.events[0].controls.cutoff === 800 && Object.keys(plain.context).length === 0);
+  let refused = ''; try { await queryEvents(code, { from: 0, to: 1000 }); } catch (e) { refused = e.message; }
+  check('Events: a query may ask for a bounded number of cycles only', /1 to 256 cycles/.test(refused));
+}
+
+
+// ---------- the guard refuses patterns that expand to absurd sizes (handoff 0002, finding 8) ----------
+{
+  const { guardCode: gc, expandedSize: ex } = await import('../src/guard.js');
+  const refused = ['$: s("bd*1000000")', '$: s("[bd*1000]*1000")', '$: s("x!100000")', '$: s("bd").fast(1000000)', '$: s("bd").chop(100000)', '$: note("c3").echo(1000, .1, .5)', '$: s("bd").euclid(5, 100000)'].map((c) => gc(c));
+  check('Guard: patterns that expand to millions of events, and absurd counts for fast, chop, echo and euclid, are refused with a reason', refused.every((r) => typeof r === 'string' && /expands to|larger than the limit/.test(r)));
+  check('Guard: ordinary and dense-but-sensible patterns are still accepted (a drum line with *16 parts, euclid, a long weighted melody, ranges)', ['$: s("bd*16 hh*16 sd*16")', '$: s("bd(5,8)*4").euclid(5, 8)', '$: n("0 .. 7")', '$: s("hh*32").fast(8).chop(64)', '$: note("c3@125 ~@66 e3@125 ~@250 g3@125 ~@188").slow(4)'].every((c) => gc(c) === null) && ex('bd*16 hh*16 sd*16') === 48 && ex('[a b]*3 c') === 7 && ex('[bd*1000]*1000') === 1000000);
+}
+
+
+// ---------- the playback gate fails closed (handoff 0002, finding 7) ----------
+{
+  const { judge, validateRuns } = await import('./perfjudge.mjs');
+  const run = (o = {}) => ({ playingStart: true, playingEnd: true, audioAdvanced: true, loadOk: true, skipped: 0, underruns: 0, stalls: 0, longTasks: 0, longTaskMs: 0, longestMs: 0, cpuMsPerSec: 250, rafMsPerSec: 50, heapGrowthMB: 1, ...o });
+  const base = { a: [run(), run()], b: [run()] }, ok = (res, load = '') => judge(res, base, 'base', { load });
+  check('Perf gate: runs as good as the baseline pass', ok({ a: [run(), run()], b: [run()] }).failed === 0);
+  check('Perf gate: an empty result, a missing scenario and a scenario with no runs all fail (it cannot pass by measuring nothing)', ok({}).failed > 0 && ok({ a: [run()] }).failed > 0 && ok({ a: [], b: [run()] }).failed > 0);
+  check('Perf gate: a rising counter fails (a skipped note, an underrun, a stall)', ok({ a: [run({ skipped: 1 })], b: [run()] }).failed === 1 && ok({ a: [run()], b: [run({ underruns: 2 })] }).failed === 1 && ok({ a: [run({ stalls: 1 })], b: [run()] }).failed === 1);
+  check('Perf gate: a counter the browser could not give (null) is not read as zero: lost since the baseline fails, never measured is noted', ok({ a: [run({ underruns: null })], b: [run()] }).failed === 1 && judge({ a: [run({ underruns: null })] }, { a: [run({ underruns: null })] }, 'x').failed === 0 && judge({ a: [run({ underruns: null })] }, { a: [run({ underruns: null })] }, 'x').notes.length === 1);
+  check('Perf gate: a run that was not playing at either end, or whose audio clock did not move, or whose load did not start, is no measurement', validateRuns({ a: [run({ playingStart: false })] }).length === 1 && validateRuns({ a: [run({ playingEnd: false })] }).length === 1 && validateRuns({ a: [run({ audioAdvanced: false })] }).length === 1 && validateRuns({ a: [run({ loadOk: false, loadError: 'no Instrument' })] }, { load: 'xray' }).length === 1 && validateRuns({ a: [run({ loadOk: true })] }, { load: 'xray' }).length === 0);
+  check('Perf gate: a cost more than 25% worse (plus the allowance) fails, a small one does not', ok({ a: [run({ cpuMsPerSec: 400 })], b: [run()] }).failed === 1 && ok({ a: [run({ cpuMsPerSec: 280 })], b: [run()] }).failed === 0 && ok({ a: [run({ longTaskMs: 200 })], b: [run()] }).failed === 1);
+}
+
+
+// ---------- the Feature test: what each group must do, not just that it makes events (handoff 0002, finding 10) ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { compileTap } = await import('../src/compile.js');
+  const { wiresInto: wi } = await import('../src/graph.js');
+  const { recordFromHaps, num, onsets, midiExact } = await import('../src/events.js');
+  const g = JSON.parse(readFileSync(new URL('../tools/test-board.patchboard.json', import.meta.url), 'utf8')), out = g.nodes.find((n) => n.type === 'output');
+  const wasMuted = new Map(g.nodes.map((n) => [n.id, n.muted]));
+  const headOf = (gr) => wi(g, out.id, 'in').find((w) => gr.nodes.includes(w.from.node)).from.node;
+  const evsOf = async (i, to = 4) => { g.nodes.forEach((n) => { n.muted = false; }); const code = compileTap(g, headOf(g.groups[i])).code; g.nodes.forEach((n) => { n.muted = wasMuted.get(n.id); }); return onsets(recordFromHaps((await evaluate(code, false)).queryArc(0, to), { from: 0, to, code })); };
+  const cyc = (evs, k) => evs.filter((e) => Math.floor(num(e.at) + 1e-9) === k);
+  const midi = (c) => (typeof c.note === 'number' ? c.note : { c3: 48, d3: 50, e3: 52, g3: 55, b3: 59, c4: 60, d4: 62, e4: 64, g4: 67, g2: 43, b4: 71 }[c.note]);
+  const names = (evs) => evs.map((e) => e.controls.note);
+  const e0 = await evsOf(0);   // 1 Mask + When: 8 notes, mask 1 0 1 1 keeps 6, when(<0 0 0 1>, rev) reverses cycle 4
+  check('Feature test 1: the mask silences two of the eight notes in each cycle, and the 4th cycle (When) is the 1st cycle played backwards', cyc(e0, 0).length === 6 && cyc(e0, 3).length === 6 && cyc(e0, 1).length === 6 && JSON.stringify(names(cyc(e0, 0))) === JSON.stringify(names(cyc(e0, 3)).slice().reverse()) && JSON.stringify(names(cyc(e0, 0))) === JSON.stringify(names(cyc(e0, 1))));
+  const e1 = await evsOf(1);   // 2 Iter: c4 d4 e4 g4 starting one step later each cycle
+  check('Feature test 2: Iter starts the four-note tune one step further along each cycle (c d e g, d e g c, e g c d, g c d e)', [0, 1, 2, 3].every((k) => names(cyc(e1, k)).join() === ['c4,d4,e4,g4', 'd4,e4,g4,c4', 'e4,g4,c4,d4', 'g4,c4,d4,e4'][k]));
+  const e2 = await evsOf(2);   // 3 Add notes + Superimpose + Off: 4 notes x 2 x 2 = 16 a cycle, base moved by 0, 3, 7, 0
+  const m1 = cyc(e2, 1).map((e) => midi(e.controls)).sort((a, b) => a - b);
+  check('Feature test 3: each cycle plays 16 notes (the riff, an octave copy, and a shifted fifth-up copy of both), and cycle 2 is the riff plus 3 semitones', cyc(e2, 0).length === 16 && m1.length === 16 && [48, 55, 52, 48].map((x) => x + 3).every((x) => m1.includes(x)) && [48, 55, 52, 48].map((x) => x + 15).every((x) => m1.includes(x)) && [48, 55, 52, 48].map((x) => x + 10).every((x) => m1.includes(x)));
+  const e3 = await evsOf(3);   // 4 Jux: pan 0 (forwards) and 1 (reversed copy)
+  check('Feature test 4: Jux plays every note twice, once hard left and once hard right, and the right side is the reverse', e3.length === 24 && e3.filter((e) => e.controls.pan === 0).length === 12 && e3.filter((e) => e.controls.pan === 1).length === 12 && JSON.stringify(names(cyc(e3, 0).filter((e) => e.controls.pan === 0))) === JSON.stringify(names(cyc(e3, 0).filter((e) => e.controls.pan === 1)).slice().reverse()));
+  const e4 = await evsOf(4);   // 5 Loop at + Chop: one break over 2 cycles in 8 slices
+  check('Feature test 5: the break is fitted to 2 cycles (loopAt: unit c, speed set for two cycles) and cut into 8 slices, four a cycle, that walk through the sample in order', e4.length === 16 && e4.every((e) => e.controls.s === 'breaks' && e.controls.unit === 'c') && cyc(e4, 0).length === 4 && e4.slice(0, 8).every((e, i) => Math.abs(e.controls.begin - i / 8) < 1e-9 && Math.abs(e.controls.end - (i + 1) / 8) < 1e-9) && Math.abs(e4[0].controls.speed - 0.25) < 1e-9);
+  const e5 = await evsOf(5), hit = e5.filter((e) => num(e.at) >= 0.375 - 1e-9 && num(e.at) < 0.75 - 1e-9 && Math.floor(num(e.at)) === 0);   // the hit at 3/8 and its two echoes
+  check('Feature test 6: each snare hit comes back twice more, an eighth of a cycle apart and at half and a quarter of the volume (the hit at 3/8: times .375, .5, .625 and gains 1, .5, .25)', e5.length === 36 && hit.length === 3 && hit.map((e) => num(e.at)).join() === '0.375,0.5,0.625' && hit.map((e) => e.controls.gain).join() === '1,0.5,0.25');
+  const e6 = await evsOf(6);   // 7 Slow with two cables
+  const pitches6 = new Set(names(e6));
+  check('Feature test 7: both melodies come through the Slow (the four-note one and the two-note bass), each stretched over two cycles', e6.length === 12 && ['c3', 'e3', 'g3', 'b3', 'g2', 'd3'].every((n) => pitches6.has(n)) && e6.filter((e) => ['c3', 'e3', 'g3', 'b3'].includes(e.controls.note)).every((e) => Math.abs(num(e.dur) - 0.5) < 1e-9) && e6.filter((e) => ['g2', 'd3'].includes(e.controls.note)).every((e) => Math.abs(num(e.dur) - 1) < 1e-9));
+  const e7 = await evsOf(7);   // 8 Fast with two cables
+  check('Feature test 8: both melodies come through the Fast, each twice as quick (c4 g4 and e4 b4, 4 a cycle each)', e7.length === 32 && cyc(e7, 0).length === 8 && ['c4', 'g4', 'e4', 'b4'].every((n) => new Set(names(e7)).has(n)) && e7.every((e) => Math.abs(num(e.dur) - 0.25) < 1e-9));
+  const e8 = await evsOf(8), PCS = [[3, 6, 10], [1, 5, 8], [8, 11, 3, 6], [10, 2, 5, 8]];   // 9 Chords: D#m, C#, G#m7, A#7
+  check('Feature test 9: the four chords of the progression are played one per cycle (D#m, C#, G#m7, A#7), each as exactly its own pitch classes', [0, 1, 2, 3].every((k) => { const pcs = new Set(cyc(e8, k).map((e) => ((Math.round(midiExact(e.controls)) % 12) + 12) % 12)); return PCS[k].every((p) => pcs.has(p)) && [...pcs].every((p) => PCS[k].includes(p)); }));
+  g.nodes.forEach((n) => { n.muted = wasMuted.get(n.id); });
+  const whole = (await evaluate(compile(g).code, false)).queryArc(0, 4).filter((h) => h.hasOnset()), sounds = new Set(whole.map((h) => h.value.s));
+  check('Feature test: as the board is saved, only groups 1 and 2 play (40 events in 4 cycles: a sawtooth and a triangle), and un-muting one more group adds exactly its events', whole.length === 40 && [...sounds].sort().join() === 'sawtooth,triangle' && await (async () => { const g2 = JSON.parse(JSON.stringify(g)); g2.groups[3].nodes.forEach((id) => { const n = g2.nodes.find((x) => x.id === id); if (n.muted) n.muted = false; }); return (await evaluate(compile(g2).code, false)).queryArc(0, 4).filter((h) => h.hasOnset()).length === 40 + 24; })());
+}
+
+
+// ---------- the generated documentation says only what is true (handoff 0002, finding 11) ----------
+{
+  const A = await import('../src/aidocs.js');
+  const all = A.siteFiles('https://example.test').map((f) => f.content).join('\n') + A.chatPack('$: s("bd")');
+  check('Docs: the privacy promises are scoped (boards kept on the device; the AI helper sends board text and the key to the provider you chose; the key is never put in a board), and the old overclaims are gone', !/Nothing you make is uploaded\./.test(all) && !/The key stays in your browser/.test(all) && /optional AI helper/.test(all) && /never written into a board/.test(all) && /sent to the AI provider you chose/.test(all));
+  check('Docs: the import and preload statements name their limits (fixed songs and cycles, about 64 cycles ahead, failures stay silent), not "every note" or "without gaps"', !/comparing every note/.test(all) && !/piece starts without gaps/.test(all) && /usually starts without gaps/.test(all) && /fixed stretch of cycles/.test(all) && /about 64 cycles/.test(all) && /stays silent/.test(all));
+  check('Docs: Copy for an AI chat says the code is not a recording and warns that the board text is shared; robots.txt shows real opt-out lines', /not a recording of how it sounds/.test(A.chatPack('$: s("bd")')) && /Before you share this/.test(A.chatPack('')) && /#   User-agent: GPTBot\n#   Disallow: \//.test(A.robotsTxt('https://example.test')));
 }
 
 process.exit(failures ? 1 : 0);

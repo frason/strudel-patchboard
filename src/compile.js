@@ -794,7 +794,7 @@ export function compile(g) {
 // The code for what travels on ONE cable: the pattern that comes out of module `nodeId`, written as its own $: line. It is the same compiler, run on a copy of the board in which
 // only that module is wired to the Output (everything upstream stays: its parameter cables, the Key, shared branches). This is a RAW TAP, not a final voice: what happens
 // further down is deliberately left out, and `outside` says which of it exists, so nobody mistakes the tap for what you hear.
-//   { code, issues, outside: { downstream: [titles], master: bool, mixer: bool, orbit: bool } } or { error }
+//   { code, issues, outside: { downstream: [titles], master: bool, mixer: bool, orbit: bool, sharedOrbit: [numbers] } } or { error }
 export function compileTap(g, nodeId) {
   const node = nodeById(g, nodeId), out = g.nodes.find((n) => n.type === 'output');
   if (!node || !out || node.type === 'output') return { error: 'there is no cable to tap here' };
@@ -802,19 +802,27 @@ export function compileTap(g, nodeId) {
   const after = new Set(), todo = [nodeId];
   while (todo.length) { const id = todo.pop(); for (const w of g.wires) if (w.from.node === id && !after.has(w.to.node)) { after.add(w.to.node); todo.push(w.to.node); } }
   const downstream = [...after].filter((id) => id !== out.id).map((id) => nodeById(g, id)).filter(Boolean);
+  // no master volume or master effect on a raw tap: neither the settings nor a cable driving them (the tempo and beats stay, so the cycles mean the same)
+  const MASTER_WIRE = /^p:(mvol|mphaser|mtrem|mchorus)$/, masterWired = g.wires.some((w) => w.to.node === out.id && MASTER_WIRE.test(w.to.port));
   const copy = {
     ...g,
-    nodes: g.nodes.map((n) => (n.id === out.id ? { ...n, params: { ...n.params, mvol: 1, mphaser: 0, mtrem: 0, mchorus: 0 } } : n)),   // no master volume or master effect on a raw tap
-    wires: [...g.wires.filter((w) => !(w.to.node === out.id && w.to.port === 'in')), { id: '_tap', from: { node: nodeId, port: 'out' }, to: { node: out.id, port: 'in' } }],
+    nodes: g.nodes.map((n) => (n.id === out.id ? { ...n, params: { ...n.params, mvol: 1, mphaser: 0, mtrem: 0, mchorus: 0 } } : n)),
+    wires: [...g.wires.filter((w) => !(w.to.node === out.id && (w.to.port === 'in' || MASTER_WIRE.test(w.to.port)))), { id: '_tap', from: { node: nodeId, port: 'out' }, to: { node: out.id, port: 'in' } }],
   };
+  // the mix bus is shared by name, not by cable: another Orbit module with the same number puts other parts on the same reverb, delay and DJ filter
+  const before = new Set([nodeId]), up = [nodeId];
+  while (up.length) { const id = up.pop(); for (const w of g.wires) if (w.to.node === id && !before.has(w.from.node)) { before.add(w.from.node); up.push(w.from.node); } }
+  const mine = new Set([...before].map((id) => nodeById(g, id)).filter((n) => n && n.type === 'orbit').map((n) => n.params.n));
+  const sharedOrbit = [...new Set(g.nodes.filter((n) => n.type === 'orbit' && !before.has(n.id) && mine.has(n.params.n)).map((n) => n.params.n))].sort();
   const r = compile(copy);
   return {
     code: r.code, issues: r.issues,
     outside: {
       downstream: downstream.map((n) => MODULES[n.type].title),
-      master: out.params.mvol !== 1 || out.params.mphaser > 0 || out.params.mtrem > 0,
+      master: out.params.mvol !== 1 || out.params.mphaser > 0 || out.params.mtrem > 0 || masterWired,
       mixer: downstream.some((n) => n.type === 'mixer'),
-      orbit: downstream.some((n) => n.type === 'orbit' || n.type === 'duck'),
+      orbit: downstream.some((n) => n.type === 'orbit' || n.type === 'duck') || sharedOrbit.length > 0,
+      sharedOrbit,   // orbit numbers that other parts of the board also use (reverb, delay and DJ filter are shared there)
     },
   };
 }

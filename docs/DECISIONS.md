@@ -49,11 +49,16 @@ Consequences: pictures and download lists can never reset a Slider held by the p
 
 ## D10. The event record is the one contract for inspection and capture (2026-11-26)
 Context: the x-ray, Grab, Bake and the form map all need "what does this pattern play over these cycles", and the old snapshot kept only a few fields (handoff 0001, F3).
-Decision: `src/events.js` defines a versioned record: exact fractional positions, event length (gate) separate from the controls that include release, every plain control, the span, a code revision, the engine build, a kind (queried, inferred, corrected), carry-in/out flags, and a conversion to a Take that reports every loss. The picture code (`queryPatch`) is unchanged; new tools use `queryEvents`.
-Consequences: nothing claims to be lossless unless the report says so; capture is worded as pattern events, not as a recording.
+Decision: `src/events.js` defines a versioned record: exact fractional positions (approximate and said so when too large), the event's SLOT in the pattern (`dur`; `gateOf` gives slot times clip, and the release is never added), every plain control and short list of plain values, the span, a code revision, the engine build, a kind (queried, inferred, corrected), carry-in/out flags, and a conversion to a Take that reports every loss. An event is an attack: later fragments of one event are folded into it. The picture code (`queryPatch`) is unchanged; new tools use `queryEvents`.
+Consequences: nothing claims to be lossless unless the report says so (`exactNotes` is the narrower claim about pitch, timing and loudness); capture is worded as pattern events, not as a recording. Revised after handoff 0002 (F1 to F3).
 
 ## D11. A cable tap is raw, and says what is outside it (2026-11-26)
 Context: removing the Output and the tail changes Mixer, master and orbit effects (handoff 0001, F4).
 Decision: `compileTap(graph, nodeId)` compiles the pattern as module `nodeId` leaves it, from the same compiler, with only that module wired to a neutral Output, and returns what lies outside the tap (downstream modules, master settings, Mixer, orbit/duck). A contextual "final voice" view is not built yet.
-Consequences: a replay test shows that for every lesson with a neutral master and no Mixer or Duck, the taps of the voices together play exactly what the whole board plays.
+Consequences: a replay test shows that for every lesson with a neutral master and no Mixer or Duck, the taps of the voices together play exactly what the whole board plays. The master volume and master effects are removed from the tap as settings and as cables, and `outside` also names orbit numbers shared with other parts (handoff 0002, F4 and F5).
+
+## D12. The x-ray holds back while music plays, and the playback gate fails closed (2026-11-26)
+Context: a query runs on the same thread as the player's scheduler and cannot be interrupted. The repaired playback harness (handoff 0002, F7) showed that steady x-ray reading on heavy boards could cost skipped notes. The first version of the harness had read counters that could not move.
+Decision: while music plays, the x-ray stops updating on its own once a reading took over 40 ms (it keeps the last picture, says why and offers a Refresh button). The playback gate (`scripts/perfjudge.mjs`) fails closed and is tested; a deliberate stall proves the counters move. The guard refuses patterns that expand to more than 50,000 events and absurd counts for fast, ply, chop and similar.
+Consequences: any new background work on the main thread proves itself with `npm run perf:play` (a load plus `--compare`), and the 25% margin stays a provisional guess until more data exists.
 

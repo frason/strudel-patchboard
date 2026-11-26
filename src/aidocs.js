@@ -94,7 +94,7 @@ export const GUIDES = () => [
         'Cables carry a pattern from one module to the next. The board only lets cables connect when the kinds match (notes into an instrument, a sound into an effect).',
         'The code panel always shows the Strudel code the board writes. Each note that plays lights up in the code and on the module that made it.',
         'It works both ways: change a number or a word in the code, or paste Strudel code from strudel.cc, and the board updates. Parts the modules cannot express are kept exactly as written in a Strudel Code module, or listed as skipped with a reason; nothing is guessed.',
-        'Audio is made in your browser by Strudel. Nothing you make is uploaded.',
+        'Audio is made in your browser by Strudel. Your boards are kept on your device, and nothing you make is uploaded unless you choose to use the optional AI helper (see Privacy).',
       ]],
       ['h2', 'What you can do with it'],
       ['ul', [
@@ -125,7 +125,7 @@ export const GUIDES = () => [
         'Many near-identical lines that play one sound can be folded into a single Instrument, with each line\'s volume turned into note velocities.',
       ]],
       ['h2', 'What is kept as written'],
-      ['p', 'A call with no module of its own (for example linger, pick, or a function you pass to when()) is kept as text inside a Strudel Code module, in the same place in the chain, so the piece still plays the same. Patchboard checks this by playing the original code and the imported board in real Strudel and comparing every note.'],
+      ['p', 'A call with no module of its own (for example linger, pick, or a function you pass to when()) is kept as text inside a Strudel Code module, in the same place in the chain, so the piece still plays the same. While Patchboard is being built, each real song used to test the importer is played as the original code and as the imported board in real Strudel, and the notes are compared over a fixed stretch of cycles. That check runs on those songs, not on every piece you import.'],
       ['h2', 'What is refused, and why'],
       ['p', 'Patchboard only evaluates code made of Strudel\'s own calls, from a fixed list. This check exists so that pasted code cannot read the settings and saved data stored in your browser. So code that defines its own functions, uses lookup tables (objects), indexes into lists, or calls things outside Strudel is not run here. Open that kind of piece on strudel.cc.'],
       ['h2', 'Sample packs'],
@@ -138,9 +138,9 @@ export const GUIDES = () => [
     slug: 'sample-packs-and-recording', title: 'Sample packs, recording and MIDI', summary: 'Downloading sounds, recording the output to a WAV file, and playing or importing MIDI.',
     blocks: [
       ['h2', 'Sample packs and the progress bar'],
-      ['p', 'When a piece plays recorded samples, Patchboard first downloads the exact sample files it will use. The play button turns into a progress bar (for example 7/10) and goes back to play when everything is in memory, so the piece starts without gaps. Click the bar to cancel.'],
+      ['p', 'When a piece plays recorded samples, Patchboard looks ahead over about 64 cycles and downloads the sample files that stretch uses. The play button turns into a progress bar (for example 7/10) and goes back to play when they are in memory, so the piece usually starts without gaps. A file that fails to download is reported and that part stays silent, and a sound that only appears later can still load while it plays. Click the bar to cancel.'],
       ['h2', 'Record the sound'],
-      ['p', 'The rec button next to play starts the piece if it is not playing and records what comes out of the speakers to a 16-bit stereo WAV file. Press it again to stop and save. A recording stops by itself at 15 minutes. The recording includes the safe-output limiter that protects your ears and speakers.'],
+      ['p', 'The rec button next to play starts the piece if it is not playing and records what comes out of the speakers to a 16-bit stereo WAV file. Press it again to stop and save. A recording stops by itself at 15 minutes. The recording includes the safe-output limiter that protects your ears and speakers; it is what the app sends to the speakers, so it can differ slightly from the same code on strudel.cc when a patch is very loud.'],
       ['h2', 'MIDI'],
       ['ul', [
         'Record notes from a MIDI keyboard (in browsers that support Web MIDI, such as Chrome and Edge) or from the computer keyboard into a Take module. A Take keeps when each note started, how long it lasted and how hard it was played, and writes them as a Strudel pattern.',
@@ -154,7 +154,7 @@ export const GUIDES = () => [
       ['ul', [
         'No account, no cookies, no analytics. Your boards, history and settings are kept in your browser\'s own storage on your device only.',
         'Sound libraries (drum machines, General MIDI instruments, sample packs) are downloaded from GitHub-hosted sources when a sound needs them.',
-        'The optional AI helper is off until you add your own API key. When you use it, your request and board text go to the AI provider you chose (Anthropic), with your key. The key stays in your browser.',
+        'The optional AI helper is off until you add your own API key. When you use it, your request and the board text it needs are sent to the AI provider you chose (Anthropic), together with your key, which that request requires. The key is stored only in your browser and is never written into a board, an export or a shared file.',
         'A shared or imported patch cannot run code outside Strudel\'s own calls (see the import guide), and sample packs never download without your yes.',
       ]],
       ['p', DISCLAIMER],
@@ -206,7 +206,7 @@ export function chatPack(code, site = SITE_DEFAULT) {
     `I am using ${NAME} (${site}/), ${TAGLINE.charAt(0).toLowerCase() + TAGLINE.slice(1)} Please help me with my board.`, '',
     'How it works: I build a piece from modules joined by cables. The board writes Strudel code (shown below), plays it with Strudel in the browser, and reads Strudel code back into modules. A line of code that no module can express is kept as written in a Strudel Code module. Code that defines its own functions or lookup tables cannot be imported (use strudel.cc for those).', '',
     `Modules (${docs.length}):`, ...lines, '',
-    'My board as Strudel code:', '```', String(code || '(the board is empty)').trim(), '```', '',
+    'My board as Strudel code (these are the notes and settings the board writes; it is not a recording of how it sounds):', '```', String(code || '(the board is empty)').trim(), '```', 'Before you share this: it contains the board code and any names or comments in it.', '',
     'When you suggest a change, tell me either which module to add or change and which cables to connect, or give Strudel code I can paste into Import. Say which parts you are sure of and which you are guessing.',
   ].join('\n');
 }
@@ -238,5 +238,5 @@ export function siteFiles(site = SITE_DEFAULT) {
   files.push({ path: 'sitemap.xml', content: sitemapXml(site, files.filter((f) => f.url && f.path.endsWith('.html')).map((f) => f.url)) });
   return files;
 }
-export const robotsTxt = (site = SITE_DEFAULT) => `# ${NAME}: everything public is welcome to search engines and AI assistants.\n# To keep a crawler out, add a block such as: User-agent: GPTBot / Disallow: /\nUser-agent: *\nAllow: /\n\nSitemap: ${site}/sitemap.xml\n`;
+export const robotsTxt = (site = SITE_DEFAULT) => `# ${NAME}: everything public is welcome to search engines and AI assistants.\n# To keep one crawler out, add a block like these two lines (one block per crawler):\n#   User-agent: GPTBot\n#   Disallow: /\nUser-agent: *\nAllow: /\n\nSitemap: ${site}/sitemap.xml\n`;
 export const sitemapXml = (site, urls) => `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${[`${site}/`, ...urls.map((u) => `${site}${u}`), `${site}/llms.txt`, `${site}/llms-full.txt`].map((u) => `  <url><loc>${esc(u)}</loc></url>`).join('\n')}\n</urlset>\n`;

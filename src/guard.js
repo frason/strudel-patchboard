@@ -19,18 +19,49 @@ degradeBy undegradeBy brak ply plyWith fastchunk slowchunk run gap legato note n
 // helper definitions the compiler writes word for word (nothing in them depends on the patch): allowed only when they match exactly
 const FIXED = new Set(["register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9).lps(.2).lpd(.12))"]);
 const MAX_CHARS = 600_000, MAX_NODES = 60_000;
+// Admission limits (not proofs of cheap work): a pattern string that expands to an absurd number of events, or a count that is absurd, is refused before anything is evaluated.
+const MAX_EXPANDED = 50_000;
+const NUM_LIMITS = { fast: 4096, ply: 1024, chop: 1024, striate: 1024, segment: 1024, seg: 1024, echo: 64, stut: 64, euclid: 1024, euclidRot: 1024, euclidLegato: 1024, euclidInv: 1024, linger: 1024, hurry: 1024, iter: 1024, iterBack: 1024, repeat: 1024 };
+// A rough upper bound on how many events a mini-notation string makes in a cycle: words and brackets count one, *n multiplies, !n copies, (k,n) places k hits. Nested brackets multiply.
+export function expandedSize(str) {
+  let i = 0; const n = str.length;
+  const seq = (close) => {
+    let total = 0;
+    while (i < n && str[i] !== close) {
+      const c = str[i];
+      if (/[\s,.|~-]/.test(c) && !(c === '-' && /\d/.test(str[i + 1] || ''))) { if (c === '~') total += 1; i++; continue; }
+      let base;
+      if (c === '[' || c === '<' || c === '{') { const cl = c === '[' ? ']' : c === '<' ? '>' : '}'; i++; base = seq(cl); if (str[i] === cl) i++; }
+      else { let j = i; while (j < n && !/[\s,|\[\]<>{}*!@(/]/.test(str[j])) j++; if (j === i) { i++; continue; } i = j; base = 1; }
+      let mult = 1, copies = 1;
+      for (;;) {
+        const m = /^([*!@/:?%])(\d+(?:\.\d+)?)?/.exec(str.slice(i));
+        if (m) { i += m[0].length; if (m[1] === '*' && m[2]) mult *= Math.max(1, Number(m[2])); else if (m[1] === '!') copies += m[2] ? Number(m[2]) - 1 : 1; continue; }
+        if (str[i] === '(') { const e = /^\(\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*-?\d+)?\s*\)/.exec(str.slice(i)); if (!e) break; i += e[0].length; mult *= Math.max(1, Number(e[1])); continue; }
+        break;
+      }
+      total += base * mult * copies;
+      if (total > 1e12) return total;
+    }
+    return total;
+  };
+  let all = 0; while (i < n) { all += seq(null); if (i < n) i++; }   // a stray closing bracket does not stop the count
+  return all;
+}
 
 class Refuse extends Error {}
 const at = (node, code) => { const line = code.slice(0, node.start).split('\n').length; return `line ${line}`; };
 
+const tooBig = (text, node, code) => { if (typeof text === 'string' && text.length > 3 && /[*!(]/.test(text)) { const n = expandedSize(text); if (n > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this pattern expands to about ${n > 1e9 ? 'billions of' : n} events (the limit is ${MAX_EXPANDED})`); } };
 function expr(node, code, ctx) {
   if (++ctx.nodes > MAX_NODES) throw new Refuse('the code is too large');
   switch (node.type) {
     case 'TemplateLiteral':   // `...` with nothing computed inside is just text
-      if (node.expressions.length === 0) return;
+      if (node.expressions.length === 0) { tooBig(node.quasis[0].value.cooked, node, code); return; }
       throw new Refuse(`${at(node, code)}: a template string with values inside is not allowed`);
     case 'Literal':
-      if (typeof node.value === 'string' || typeof node.value === 'number' || typeof node.value === 'boolean') return;
+      if (typeof node.value === 'string') { tooBig(node.value, node, code); return; }
+      if (typeof node.value === 'number' || typeof node.value === 'boolean') return;
       throw new Refuse(`${at(node, code)}: this kind of value is not allowed`);
     case 'Identifier':
       if (IDENTS.has(node.name) || (ctx.arrow && node.name === ctx.arrow)) return;
@@ -47,6 +78,8 @@ function expr(node, code, ctx) {
       if (c.type === 'Identifier') { if (!FUNCS.has(c.name)) throw new Refuse(`${at(node, code)}: "${c.name}" is not a function patches may call`); }
       else if (c.type === 'MemberExpression') member(c, code, ctx);
       else throw new Refuse(`${at(node, code)}: this kind of call is not allowed`);
+      const lim = c.type === 'MemberExpression' ? NUM_LIMITS[c.property.name] : null;
+      if (lim) for (const a of node.arguments) if (a.type === 'Literal' && typeof a.value === 'number' && Math.abs(a.value) > lim) throw new Refuse(`${at(node, code)}: ".${c.property.name}(${a.value})" is larger than the limit of ${lim}`);
       node.arguments.forEach((a) => {
         if (a.type === 'SpreadElement') throw new Refuse(`${at(node, code)}: spread is not allowed`);
         if (a.type === 'ArrowFunctionExpression') arrow(a, code, ctx); else expr(a, code, ctx);
