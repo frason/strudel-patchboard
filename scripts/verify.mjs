@@ -2139,7 +2139,7 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Grab: the Take written from cycles 4-8 plays the same notes at the same places over cycles 0-4', gr.takeReport.exactNotes && onsets(back).map((e) => num(e.at).toFixed(6) + ':' + mo(e.controls)).join() === onsets(a).map((e) => (num(e.at) - 4).toFixed(6) + ':' + mo(e.controls)).join());
   const dr = await queryEvents('$: stack(s("bd*2 [~ sd]").bank("RolandTR909"), s("hh*8").gain(.5), s("cp:3 ~ ~ ~"))', { from: 0, to: 2 }), gd = grabFrom(dr), key = (r) => r.events.map((e) => e.controls.s + (e.controls.n ? ':' + e.controls.n : '') + '@' + e.at.join('/')).sort().join();
   const hb = await queryEvents('$: ' + gd.hits.code, { from: 0, to: 2 });
-  check('Grab: sample hits are all found, with their sound and sample number', gd.kind === 'hits' && gd.hits.report.hits === 24 && gd.hits.report.sounds.join() === 'bd,cp:3,hh,sd');
+  check('Grab: sample hits are all found, with their sound and sample number', gd.kind === 'hits' && gd.hits.report.hits === 24 && gd.hits.report.sounds.join() === 'RolandTR909 bd,RolandTR909 sd,cp:3,hh' && /\.bank\("RolandTR909"\)/.test(gd.hits.code));
   check('Grab: the hit pattern replays exactly (same sound and place for every hit) and the guard accepts it', key(hb) === key(dr) && gc('$: ' + gd.hits.code) === null && gd.hits.report.gainLost === 16 && gd.hits.report.controlsLost.includes('gain'));
   const mixed = grabFrom(await queryEvents('$: stack(note("c3 e3"), s("bd hh"))', { to: 1 })), none = grabFrom(await queryEvents('$: silence', { to: 2 }));
   check('Grab: a voice with notes and hits offers both, and silence says nothing plays', mixed.kind === 'mixed' && mixed.take.events.length === 2 && !mixed.hits.empty && none.kind === 'empty' && /Nothing plays/.test(none.line));
@@ -2199,7 +2199,7 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const mel = map.voices.find((v) => v.id === cs.id), dr = map.voices.find((v) => v.id === cd.id);
   check('Form map: the voices are found through a Stack, and a mask("<0 0 1 1>/2") voice plays in the second half of each 8 cycles only while a steady voice plays in every cycle', vs.length === 2 && mel && dr && mel.counts.join() === '0,0,0,0,4,4,4,4,0,0,0,0,4,4,4,4' && dr.counts.every((n) => n === 4) && mel.readCycles === 16);
   const text = describeMap(map);
-  check('Form map: the words say which cycles each voice plays in (the text alternative of the picture)', /plays in cycles 5-8, 13-16/.test(text) && /plays in cycles 1-16/.test(text));
+  check('Form map: the words say which cycles each voice plays in (the text alternative of the picture)', /starts notes in cycles 5-8, 13-16/.test(text) && /starts notes in cycles 1-16/.test(text));
   const lesson = LESSONS.find((l) => l.id === 'song').graph(), m2 = await buildFormMap(lesson, { cycles: 8 });
   check('Form map: a real lesson board is read voice by voice with a count for every cycle', m2.voices.length >= 2 && m2.voices.every((v) => v.counts.length === 8) && m2.voices.some((v) => v.counts.some((n) => n > 0)));
   let cancelled = false; const part = await buildFormMap(g, { cycles: 64, cancelled: () => cancelled, onProgress: (d) => { if (d >= 2) cancelled = true; } });
@@ -2273,6 +2273,79 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Docs: the privacy promises are scoped (boards kept on the device; the AI helper sends board text and the key to the provider you chose; the key is never put in a board), and the old overclaims are gone', !/Nothing you make is uploaded\./.test(all) && !/The key stays in your browser/.test(all) && /optional AI helper/.test(all) && /never written into a board/.test(all) && /sent to the AI provider you chose/.test(all));
   check('Docs: the import and preload statements name their limits (fixed songs and cycles, about 64 cycles ahead, failures stay silent), not "every note" or "without gaps"', !/comparing every note/.test(all) && !/piece starts without gaps/.test(all) && /usually starts without gaps/.test(all) && /fixed stretch of cycles/.test(all) && /about 64 cycles/.test(all) && /stays silent/.test(all));
   check('Docs: Copy for an AI chat says the code is not a recording and warns that the board text is shared; robots.txt shows real opt-out lines', /not a recording of how it sounds/.test(A.chatPack('$: s("bd")')) && /Before you share this/.test(A.chatPack('')) && /#   User-agent: GPTBot\n#   Disallow: \//.test(A.robotsTxt('https://example.test')));
+}
+
+// ---------- Handoff 0005: Grab, Bake, share links, evidence labels, form map, reused queries ----------
+{
+  const { queryEvents, bindPlayerClock } = await import('../src/snapshot.js'), { grabFrom, lossesOf } = await import('../src/grab.js'), { makeNode } = await import('../src/graph.js');
+  const { cleanParams } = await import('../src/validate.js'), { compile } = await import('../src/compile.js'), { onsets: ons, num: nm } = await import('../src/events.js');
+  // build the Take the way the app does (main.js onAddTake), then play it
+  const board = async (code, to, grid, from = 0) => {
+    const rec = await queryEvents(code, { from, to }), r = grabFrom(rec, { grid });
+    const t = makeNode('take', 0, 0, cleanParams('take', { grid, bpm: r.take.bpm, beats: r.take.beatsPerBar, events: r.take.events, len: r.take.length, versions: [] })), o = makeNode('output', 0, 0);
+    const g = { v: 1, nodes: [t, o], wires: [{ id: 'w', from: { node: t.id, port: 'out' }, to: { node: o.id, port: 'in' } }] };
+    return { rec, r, played: await queryEvents(compile(g).code, { to: to - from }) };
+  };
+  const a1 = await board('$: note("c3 ~").slow(2)', 2, 12);
+  check('0005 F3: the trailing rest of a capture stays in the Take that is added (the final board plays the source: one attack at 0, none at 1)', a1.r.takeReport.exactNotes && ons(a1.played).map((e) => nm(e.at)).join() === '0' && ons(a1.rec).length === 1);
+  const a2 = await board('$: note("c3*48")', 64, 12);
+  check('0005 F3: a capture the Take cannot hold (more than 2000 notes) is reported as lossy and not exact, and Add is not offered by the window rule (storage.dropped)', !a2.r.takeReport.exactNotes && a2.r.takeReport.storage.dropped === 3072 - 2000 && /keeps at most 2000/.test(lossesOf(a2.r, a2.rec).join(' ')));
+  const a3 = await board('$: note("~ c3").early(1/96)', 1, 12);
+  check('0005 F3: a grid the Take has is the one previewed and reported (12), and a note off that grid is said to move', a3.r.takeReport.snap.grid === 12 && a3.r.takeReport.snap.snapped === 1 && /moved onto the grid/.test(lossesOf(a3.r, a3.rec).join(' ')));
+  const hd = async (code) => { const rec = await queryEvents(code, { to: 1 }), r = grabFrom(rec); return { r, text: lossesOf(r, rec).join(' | '), rec }; };
+  const h1 = await hd('$: s("rim").bank("RolandTR909")');
+  check('0005 F4: a banked hit is written with its bank and replays as the same sample name and bank', /\.bank\("RolandTR909"\)/.test(h1.r.hits.code) && onsets_eq(await queryEvents('$: ' + h1.r.hits.code, { to: 1 }), h1.rec, ['s', 'bank']));
+  function onsets_eq(x, y, keys) { const f = (r) => ons(r).map((e) => keys.map((k) => e.controls[k]).join('/') + '@' + e.at.join('/')).sort().join(); return f(x) === f(y); }
+  const h2 = await hd('$: stack(s("bd"),s("bd"))'), h3 = await hd('$: s("bd").n(-1)'), h4 = await hd('$: s("bd").velocity(.2)');
+  check('0005 F4: two attacks that played together and became one, a sample number that cannot be written and a loudness that is not kept are all said in the window text', /became one/.test(h2.text) && /sample number that cannot be written/.test(h3.text) && /nor their loudness/.test(h4.text));
+  // F5: a pattern read twice with one reuse object plays the same both times (the lazy tempo callback sees the evaluated pattern's own tempo), and another code string never gets the old events
+  {
+    const core = await import('../node_modules/@strudel/core/dist/index.mjs'), { transpiler } = await import('../node_modules/@strudel/transpiler/dist/index.mjs');
+    const player = core.repl({ defaultOutput() {}, getTime: () => 0, transpiler, onEvalError: (e) => { throw e; } });
+    const live = await player.evaluate('setcpm(180/4)\n$: note("c3 e3").when("1",x=>x.cpm(30))', false);
+    bindPlayerClock(() => player.scheduler.cps, () => player.scheduler.now());
+    const sig = (pat) => pat.queryArc(0, 3, { _cps: 0.75 }).filter((x) => x.hasOnset()).map((x) => x.whole.begin.valueOf()).join();
+    const before = sig(live), reuse = {}, code = 'setcpm(60/4)\n$: note("c4 e4").when("1",x=>x.cpm(30))';
+    const r1 = await queryEvents(code, { to: 3, reuse }), r2 = await queryEvents(code, { to: 3, reuse }), r3 = await queryEvents('$: note("g6")', { to: 1, reuse });
+    check('0005 F5: reading one evaluated pattern twice gives the same events twice (12 and 12), the player pattern is untouched, and a different code string is evaluated afresh', r1.events.length === 12 && r2.events.length === 12 && sig(live) === before && r3.events.length === 1 && r3.events[0].controls.note === 'g6');
+    bindPlayerClock(null, null);
+  }
+  // F2: a few modules whose cables fan out are refused before anything is written, in the share link and in the compiler
+  {
+    const { readShareFragment } = await import('../src/share.js'), { deflateRawSync } = await import('node:zlib');
+    const dag = (depth) => { const src = makeNode('codesource', 0, 0, { code: 's("bd")' }), o = makeNode('output', 0, 0), g = { v: 1, nodes: [src, o], wires: [] }; let prev = src; for (let i = 0; i < depth; i++) { const n = makeNode('stack', 0, 0); g.nodes.push(n); for (let j = 0; j < 2; j++) g.wires.push({ id: 'w' + g.wires.length, from: { node: prev.id, port: 'out' }, to: { node: n.id, port: 'in' + (j + 1) } }); prev = n; } g.wires.push({ id: 'last', from: { node: prev.id, port: 'out' }, to: { node: o.id, port: 'in' } }); return g; };
+    const enc = (g) => '#share=' + deflateRawSync(JSON.stringify({ v: 1, kind: 'patchboard-board', graph: g })).toString('base64url');
+    const t0 = performance.now(), bad = await readShareFragment(enc(dag(30))), ms = performance.now() - t0, ok = await readShareFragment(enc(dag(6))), c = compile(dag(40));
+    check('0005 F2: a board of 32 modules that fans out to over a billion writings is refused by the share link and the compiler at once (under a second, nothing built), while a small fan-out still opens', /too tangled/.test(bad.error || '') && ms < 1000 && c.code.length < 300 && c.issues.length === 1 && ok.code && !ok.error);
+    const g2 = { v: 1, nodes: [{ id: 's', type: 'codesource', params: { code: 's("bd")' } }, { id: 'o', type: 'output' }], wires: [{ id: 'bad', from: { node: 's', port: 'out' }, to: { node: 'o', port: 'absent' } }] };
+    check('0005 F2: a cable that normalising removes is reported in the link\'s issues, not dropped quietly', (await readShareFragment(enc(g2))).issues.some((m) => /1 cable was removed/.test(m)));
+  }
+  // F6: changing a field drops the result at once: Add right after a change adds nothing
+  {
+    const { openGrab } = await import('../src/grabui.js');
+    const n = makeNode('codesource', 0, 0, { code: 'note("<c3 d3 e3 f3 g3 a3 b3 c4>")' }), o = makeNode('output', 0, 0), g = { v: 1, nodes: [n, o], wires: [] }, els = []; let hook, added = null;
+    const h = (tag, attrs = {}, ...kids) => { const es = kids.flat(), el = { tag, attrs, children: es, style: {}, textContent: es.filter((c) => typeof c === 'string').join(''), value: attrs.value ?? (tag === 'select' ? es.find((c) => c.attrs?.selected)?.attrs.value : undefined), disabled: !!attrs.disabled, events: {}, addEventListener(t, f) { this.events[t] = f; }, click() { if (!this.disabled) this.events.click?.(); }, getContext() { return new Proxy({}, { get: () => () => {} }); } }; Object.assign(el, attrs); el.style = {}; els.push(el); return el; };
+    openGrab({ h, showModal() {}, closeModal() { hook?.(); }, onClose(f) { hook = f; }, getGraph: () => g, nodeId: n.id, onAddTake(t) { added = t; }, onAddHits() {} });
+    await new Promise((r) => setTimeout(r, 1500));
+    const start = els.find((e) => e.attrs['aria-label'] === 'Start at cycle'), add = els.find((e) => e.textContent === 'Add as a Take');
+    const ready = !add.disabled; start.value = 4; start.events.input(); add.click();
+    check('0005 F6: Add is on after the read, and a field changed before the new read finishes turns it off at once (nothing from the old span is added)', ready && add.disabled && added === null);
+    hook?.();
+  }
+  // F7: the read-back label compares every control and no longer rounds
+  {
+    const { evidenceFor } = await import('../src/evidence.js'), one = (code) => { const c = makeNode('codesource', 0, 0, { code }), o = makeNode('output', 0, 0); return { v: 1, nodes: [c, o], wires: [{ id: 'w', from: { node: c.id, port: 'out' }, to: { node: o.id, port: 'in' } }] }; };
+    const e1 = await evidenceFor(one('note("c3").s("sine").clip(.12345)'), { cycles: 4 }), e2 = await evidenceFor(one('note("eb3").s("sine")'), { cycles: 4 });
+    check('0005 F7: a control that the round trip changes (clip .12345 becomes .123) is no longer "the same", while a pitch spelled differently (eb3 and d#3) still is, and the label says every control was compared', !e1.ok && e2.ok && /every control/.test(e2.labels.find((l) => l.id === 'readback').text));
+  }
+  // F8: a capped read is marked incomplete, and the words say notes START
+  {
+    const { buildFormMap, describeMap, voicesOf } = await import('../src/formmap.js'), c = makeNode('codesource', 0, 0, { code: 's("hh*32").fast(8).chop(64)' }), o = makeNode('output', 0, 0), g = { v: 1, nodes: [c, o], wires: [{ id: 'w', from: { node: c.id, port: 'out' }, to: { node: o.id, port: 'in' } }] };
+    const m = await buildFormMap(g, { cycles: 4 });
+    check('0005 F8: a voice whose read was cut is marked incomplete and says so, and the text says "starts notes" (attacks), never "plays"', m.voices[0].incomplete === true && /cut or left things out/.test(m.voices[0].note) && /starts notes/.test(describeMap(m)) && !/plays in/.test(describeMap(m)));
+    const many = { v: 1, nodes: [o, ...Array.from({ length: 30 }, (_, i) => makeNode('codesource', 0, 0, { code: 's("bd")' }))], wires: [] }; many.nodes.slice(1).forEach((n, i) => many.wires.push({ id: 'm' + i, from: { node: n.id, port: 'out' }, to: { node: o.id, port: 'in' } }));
+    check('0005 F8: voices past the limit of 24 are counted as not shown', voicesOf(many).omitted === 6 && voicesOf(many).length === 24);
+  }
 }
 
 process.exit(failures ? 1 : 0);

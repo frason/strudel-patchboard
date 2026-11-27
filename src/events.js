@@ -16,6 +16,7 @@
 // Converting to something with fewer features (a Take) reports every loss in a `report`; it never claims to be exact when it is not.
 // Plain functions, no DOM: tested without a browser.
 import { quantizeTake, takeToPattern } from './takecode.js';
+import { cleanTakeEvents, TAKE_MAX_EVENTS } from './validate.js';
 
 export const EVENTS_V = 1;
 export const ENGINE_ID = '@strudel/web 1.3.0 (core 1.2.6)';
@@ -108,7 +109,7 @@ export const midiOfControl = (c) => { const m = midiExact(c); return m === null 
 // `grid` is the grid the Take will be written on (default 24, the finest the writer uses); the returned Take is never snapped, the report says what snapping would do.
 export function recordToTake(rec, { bpm = 120, beatsPerBar = 4, grid = 24 } = {}) {
   const from = rec.span.from, to = rec.span.to, events = [], lost = new Set(), sounds = new Set();
-  const report = { lossless: true, exactNotes: true, noNote: 0, silent: 0, clipped: 0, detuned: 0, maxCents: 0, tooShort: 0, dynamicsClamped: 0, dynamicsChanged: 0, pitchOverridden: 0, badValues: 0, spanPadded: 0, controlsLost: [], sounds: [], snap: { grid, snapped: 0, maxSnapBeats: 0, preview: true }, emitted: { shortened: 0, dropped: 0, merged: 0, changed: 0, extra: 0 }, warnings: rec.warnings.slice() };
+  const report = { lossless: true, exactNotes: true, noNote: 0, silent: 0, clipped: 0, detuned: 0, maxCents: 0, tooShort: 0, dynamicsClamped: 0, dynamicsChanged: 0, pitchOverridden: 0, badValues: 0, spanPadded: 0, controlsLost: [], sounds: [], snap: { grid, snapped: 0, maxSnapBeats: 0, preview: true }, emitted: { shortened: 0, dropped: 0, merged: 0, changed: 0, extra: 0 }, storage: { dropped: 0, changed: 0, limit: TAKE_MAX_EVENTS }, warnings: rec.warnings.slice() };
   for (const e of rec.events) {
     const exact = midiExact(e.controls);
     if (exact === null || Math.round(exact) < 0 || Math.round(exact) > 127) { report.noNote++; continue; }
@@ -139,9 +140,12 @@ export function recordToTake(rec, { bpm = 120, beatsPerBar = 4, grid = 24 } = {}
   for (const st of w.debugSteps) for (const n of st.notes) { const k = key(st.s, st.s + st.dur, n, Math.round(st.vel * 100) / 100), c = tally.get(k) || 0; if (c > 0) tally.set(k, c - 1); else report.emitted.extra++; }
   for (const c of tally.values()) report.emitted.changed += c;   // Take notes with no identical emitted note
   report.emitted.merged = Math.max(0, events.length - w.debugSteps.reduce((m, st) => m + st.notes.length, 0));   // notes that became fewer on the way out
+  // what the Take module keeps (validate.js cleanTakeEvents: at most TAKE_MAX_EVENTS notes, positions to a thousandth of a beat): writing THOSE notes must give the same pattern, or the capture is not what is stored
+  const kept = cleanTakeEvents(events); report.storage.dropped = events.length - kept.length;
+  if (!report.storage.dropped) { const ws = takeToPattern({ ...take, events: kept }, { grid }).debugSteps, sk = (st) => [st.s, st.dur, st.notes.join('+'), Math.round(st.vel * 100)].join(':'), seen = new Map(); for (const st of w.debugSteps) seen.set(sk(st), (seen.get(sk(st)) || 0) + 1); for (const st of ws) { const c = seen.get(sk(st)) || 0; if (c > 0) seen.set(sk(st), c - 1); else report.storage.changed++; } }
   report.controlsLost = [...lost].sort(); report.sounds = [...sounds].sort();
   report.maxSnapBeats = report.snap.maxSnapBeats; report.snapped = report.snap.snapped;   // the same numbers at the top, for the callers that already read them
-  report.exactNotes = !(report.noNote || report.silent || report.clipped || report.detuned || report.tooShort || report.dynamicsChanged || report.pitchOverridden || report.badValues || report.spanPadded || report.snap.snapped || report.emitted.shortened || report.emitted.dropped || report.emitted.merged || report.emitted.changed || report.emitted.extra);
+  report.exactNotes = !(report.noNote || report.silent || report.clipped || report.detuned || report.tooShort || report.dynamicsChanged || report.pitchOverridden || report.badValues || report.spanPadded || report.snap.snapped || report.storage.dropped || report.storage.changed || report.emitted.shortened || report.emitted.dropped || report.emitted.merged || report.emitted.changed || report.emitted.extra);
   report.lossless = report.exactNotes && !report.controlsLost.length && !report.sounds.length && !report.warnings.length;
   return { take, report };
 }

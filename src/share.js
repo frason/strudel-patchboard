@@ -1,7 +1,7 @@
 // Share a board as a link (no server): the graph, compressed, in the part of the address after '#'. Nothing else goes in it: never settings, an AI key, sample-pack approvals or saved boards.
 // Opening a shared link NEVER loads anything by itself: it shows what the board is and checks it first (validateShape, the guard, a read-back), and only the person at the keyboard opens it, as a copy.
 // Plain functions around the browser's CompressionStream (also in Node 18+), so they are tested without a page.
-import { validateShape, normalize } from './graph.js';
+import { validateShape, normalize, expansionCost, MAX_EXPANSION } from './graph.js';
 import { compile } from './compile.js';
 import { guardCode } from './guard.js';
 import { LIMITS } from './validate.js';
@@ -38,11 +38,14 @@ export async function readShareFragment(fragment) {
   let env;
   try { env = JSON.parse(text); } catch { return { error: 'This link does not contain a board.' }; }
   if (!env || env.v !== 1 || env.kind !== 'patchboard-board' || typeof env.graph !== 'object') return { error: 'This link is from a different kind of share, or a newer Patchboard.' };
-  let graph;
-  try { graph = validateShape(env.graph); normalize(graph); } catch (e) { return { error: 'The board in this link is not valid: ' + String((e && e.message) || e).slice(0, 140) }; }
-  const r = compile(graph), code = r.code, bad = guardCode(code);   // (the compiler already leaves out code the guard refuses and says so in `issues`; this is the second check, on what would really run)
+  let graph, removed = 0;
+  try { graph = validateShape(env.graph); const wires0 = graph.wires.length; normalize(graph); removed = Math.max(0, wires0 - graph.wires.length); } catch (e) { return { error: 'The board in this link is not valid: ' + String((e && e.message) || e).slice(0, 140) }; }
+  // the compiler writes a module once for every path that reaches it, so a few modules wired in a fan-out can ask for an enormous amount of text: counted BEFORE anything is built, and refused past a limit
+  const cost = expansionCost(graph); if (cost > MAX_EXPANSION) return { error: `The board in this link is too tangled to open safely: its cables fan out so that it would be written ${cost > 1e9 ? 'billions of' : cost.toLocaleString('en')} times over (the limit is ${MAX_EXPANSION.toLocaleString('en')}).` };
+  let r; try { r = compile(graph); } catch (e) { return { error: 'The board in this link could not be turned into code: ' + String((e && e.message) || e).slice(0, 100) }; }
+  const code = r.code, bad = guardCode(code);   // (the compiler already leaves out code the guard refuses and says so in `issues`; this is the second check, on what would really run)
   if (bad) return { error: 'The code this board makes is refused by the safety check: ' + bad };
-  return { graph, code, issues: r.issues.map((i) => i.msg) };
+  return { graph, code, issues: [...(removed ? [`${removed} cable${removed === 1 ? ' was' : 's were'} removed because ${removed === 1 ? 'it does' : 'they do'} not connect modules properly`] : []), ...r.issues.map((i) => i.msg)] };
 }
 
 // what to tell the person before they open it: plain facts about the board, none of them a promise about how it sounds

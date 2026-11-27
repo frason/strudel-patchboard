@@ -5,7 +5,7 @@ import { parseArrangeOrder, portsOf, LAYER_FNS, MODULES, MUTE_KIND, EVERY_FNS, S
 import { chordSymbol } from './chords.js';
 import { guardCalls, guardCode } from './guard.js';
 import { takeToPattern } from './takecode.js';
-import { nodeById, wiresInto, outType, effectiveKey, scopeId } from './graph.js';
+import { nodeById, wiresInto, outType, effectiveKey, scopeId, expansionCost, MAX_EXPANSION } from './graph.js';
 const FM_WAVES = new Set(['sine', 'sawtooth', 'square', 'triangle', 'supersaw', 'pulse', 'sin', 'saw', 'sqr', 'tri', 'z_sine', 'z_sawtooth', 'z_square', 'z_triangle']);   // oscillators FM can modulate
 
 const S = (t, meta = {}) => ({ t, ...meta });
@@ -71,6 +71,9 @@ export function audibleLimit(g, n, picked = null) {
 export const EMPTY_NOTE = '// Add an Output module and wire a sound into it';
 export function compile(g) {
   const issues = [];
+  // the compiler writes a module once for every path that reaches it: a board whose cables fan out so that this is past the limit is not written at all (a few modules can ask for gigabytes), on every route a board takes in
+  const cost = expansionCost(g);
+  if (cost > MAX_EXPANSION) return { code: 'setcpm(120/4)\n\n// this board is too tangled to write: its cables fan out so that modules would be written over and over', segments: [], lines: [{ from: 0, to: 0, text: '', notes: [] }], issues: [{ msg: `The cables fan out so that this board would be written ${cost >= 1e12 ? 'more than a trillion' : cost.toLocaleString('en')} times over (the limit is ${MAX_EXPANSION.toLocaleString('en')}): nothing is written.` }], played: 0 };
   let acidNode = null;
   const mutedOut = new Set(); // modules that are silent on purpose (muted, or fed only by muted ones): not worth a warning
   const stack = [];
@@ -636,7 +639,7 @@ export function compile(g) {
       case 'take': {   // a recording, written as a pattern (see takecode.js)
         const ev = Array.isArray(p.events) ? p.events : [];
         if (!ev.length) return silent(n, 'recording');
-        const r = takeToPattern({ bpm: p.bpm, beatsPerBar: p.beats, events: ev }, { grid: Number(p.grid) || 4 });
+        const r = takeToPattern({ bpm: p.bpm, beatsPerBar: p.beats, events: ev, length: Number(p.len) > 0 ? Number(p.len) : undefined }, { grid: Number(p.grid) || 4 });
         const say = `Your recording "${p.name || 'Take'}": ${r.notes} note${r.notes === 1 ? '' : 's'} over ${r.bars} bar${r.bars === 1 ? '' : 's'}, snapped to the grid and written as a pattern.`;
         // the quoted notes are mini-notation: written as their own pieces, so the code panel lights up each note as it plays (like a Note Pattern)
         const tag = S(`/* Take "${String(p.name || 'Take').replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 40)}" snap ${Number(p.grid) || 4} bpm ${Number(p.bpm) || 120} beats ${Number(p.beats) || 4} bars ${r.bars} */ `, { ...m, role: 'comment', note: 'A comment that says this pattern is a recording from a Take module, so pasting the code back brings the Take back.' });

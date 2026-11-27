@@ -717,7 +717,7 @@ const hooks = {
       const n = nodeById(g, id); if (!n || n.type !== 'take') return;
       const old = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, events: n.params.events || [] };
       const versions = old.events.length ? [old, ...(n.params.versions || [])] : (n.params.versions || []);
-      Object.assign(n.params, cleanParams('take', { ...n.params, events: take.events, bpm: take.bpm, beats: take.beatsPerBar, grid: grid || n.params.grid, versions: versions.slice(0, 5) }));
+      Object.assign(n.params, cleanParams('take', { ...n.params, events: take.events, len: 0, bpm: take.bpm, beats: take.beatsPerBar, grid: grid || n.params.grid, versions: versions.slice(0, 5) }));
     }, { label: 're-record a take' });
     toast('Take replaced. The one before is under Earlier takes.', [undoAction], 5000);
   },
@@ -725,7 +725,7 @@ const hooks = {
     store.update((g) => {
       const n = nodeById(g, id), v = n?.params.versions?.[i]; if (!n || !v) return;
       const cur = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, events: n.params.events || [] }, rest = n.params.versions.filter((_, k) => k !== i);
-      Object.assign(n.params, cleanParams('take', { ...n.params, events: v.events, bpm: v.bpm, beats: v.beats, versions: (cur.events.length ? [cur, ...rest] : rest).slice(0, 5) }));
+      Object.assign(n.params, cleanParams('take', { ...n.params, events: v.events, len: 0, bpm: v.bpm, beats: v.beats, versions: (cur.events.length ? [cur, ...rest] : rest).slice(0, 5) }));
     }, { label: 'go back to an earlier take' });
     toast('Earlier take restored. The one you had is kept too.', [undoAction], 4000);
   },
@@ -1366,7 +1366,7 @@ function openGrabFor(id, bake = false) {
       if (opts.bake) return bakeInto(id, take, grid);
       const names = new Set(store.graph.nodes.filter((n) => n.type === 'take').map((n) => n.params.name));
       let k = 1; while (names.has('Grab ' + k)) k++;
-      const t = makeNode('take', 0, 0, cleanParams('take', { name: 'Grab ' + k, grid, bpm: take.bpm, beats: take.beatsPerBar, events: take.events, versions: [] }));
+      const t = makeNode('take', 0, 0, cleanParams('take', { name: 'Grab ' + k, grid, bpm: take.bpm, beats: take.beatsPerBar, events: take.events, len: take.length, versions: [] }));
       const sy = makeNode('synth', 0, 0, { wave: 'triangle' }), o = makeNode('output', 0, 0);
       const g = { v: 1, nodes: [t, sy, o], wires: [{ id: uid('w'), from: { node: t.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: uid('w'), from: { node: sy.id, port: 'out' }, to: { node: o.id, port: 'in' } }] };
       let added = []; store.update((cur) => { added = mergeGraph(cur, g); }, { label: 'grab a take' });
@@ -1387,7 +1387,7 @@ function bakeInto(id, take, grid) {
   const src = nodeById(store.graph, id); if (!src) return;
   const names = new Set(store.graph.nodes.filter((n) => n.type === 'take').map((n) => n.params.name));
   let k = 1; while (names.has('Baked ' + k)) k++;
-  const t = makeNode('take', src.x + 40, src.y + 170, cleanParams('take', { name: 'Baked ' + k, grid, bpm: take.bpm, beats: take.beatsPerBar, events: take.events, versions: [] }));
+  const t = makeNode('take', src.x + 40, src.y + 170, cleanParams('take', { name: 'Baked ' + k, grid, bpm: take.bpm, beats: take.beatsPerBar, events: take.events, len: take.length, versions: [] }));
   let moved = 0;
   store.update((g) => { g.nodes.push(t); for (const w of g.wires) if (w.from.node === id) { w.from.node = t.id; moved++; } }, { label: 'bake into a take' });
   requestAnimationFrame(() => board.reveal?.(t.id));
@@ -1407,18 +1407,18 @@ function openFormMap() {
       if (!alive || mine !== run) return;
       map = m; drawFormMap(canvas, m, width());
       words.textContent = describeMap(m); canvas.setAttribute('aria-label', 'Song form map. ' + describeMap(m));
-      status.textContent = m.voices.length ? `${m.voices.length} voice${m.voices.length === 1 ? '' : 's'} over ${m.cycles} cycles. Brighter means more notes in that cycle.` : 'Nothing is plugged into the Output yet, so there is no form to show.';
+      status.textContent = m.voices.length ? `${m.voices.length} voice${m.voices.length === 1 ? '' : 's'} over ${m.cycles} cycles. Brighter means more notes start in that cycle; an orange outline means the read was cut and the count is too low.${m.omitted ? ` ${m.omitted} more voice${m.omitted === 1 ? ' is' : 's are'} not shown.` : ''}` : 'Nothing is plugged into the Output yet, so there is no form to show.';
     } catch (e) { if (alive && mine === run) status.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 140); }
     go.disabled = false;
   };
-  go.addEventListener('click', read); len.addEventListener('change', read);
+  go.addEventListener('click', read); len.addEventListener('change', () => { if (!engine.playing) read(); });
   showModal('Song form map', h('div', {},
     h('p', { class: 'imp-hint' }, 'Each lane is a voice (a module plugged into the Output); each cell is a cycle. Intros, breaks and drops show as where the lanes light up. It reads what each voice\'s module outputs, so master volume and effects further along are not applied.'),
     h('label', { style: 'display:flex;gap:8px;align-items:center;margin:4px 0' }, h('span', {}, 'Length'), len), status, canvas, words,
     engine.playing ? h('p', { class: 'imp-hint' }, 'The music is playing: reading a long map takes a moment on the player\'s thread, so a note may come late. It reads in small pieces to keep that short.') : null,
     h('div', { class: 'modal-btns' }, go, close)));
   modalCloseHooks.push(() => { alive = false; });   // after showModal, which runs the hooks of the window it replaces
-  read();
+  if (engine.playing) { status.textContent = 'The music is playing. Press Read again when you are ready: reading works on the player\'s thread and a note may come late.'; go.textContent = 'Read the map'; len.addEventListener('change', () => { run++; go.disabled = false; status.textContent = 'Press Read the map to read this length.'; }); } else read();   // while music plays nothing is read until it is asked for
 }
 function openImport() {
   const area = h('textarea', { class: 'imp-area', id: 'import-text', spellcheck: 'false', placeholder: 'Paste Strudel code here, e.g.\n\nsetcpm(120/4)\n\$: s("bd*2 ~ sd").bank("RolandTR909")' });

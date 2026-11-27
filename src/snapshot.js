@@ -55,8 +55,15 @@ async function queryHaps(code, from, to, sliders = null, timing = null, reuse = 
       const t0 = performance.now();   // the cost of the query itself: waiting for the turn and building the evaluator for the first time are not counted
       globalThis.sliderWithID = makeSliderWithID(o.ref, offlineSliders);
       try { o.repl.scheduler.setCps(0.5); } catch { /* the default tempo, so a patch that sets none is read the way the player reads it */ }
+      if (reuse && reuse.pat && (reuse.code !== code || reuse.owner !== o)) reuse.pat = null;   // a cached pattern is only good for the code and the evaluator it came from
       let pat = reuse && reuse.pat, cps0 = reuse && reuse.cps;
-      if (!pat) { pat = await o.repl.evaluate(code, false); cps0 = Number(o.repl.scheduler.cps) || 0.5; if (reuse) { reuse.pat = pat; reuse.cps = cps0; } }
+      if (!pat) {
+        pat = await o.repl.evaluate(code, false); cps0 = Number(o.repl.scheduler.cps) || 0.5;
+        if (reuse) { reuse.pat = pat; reuse.cps = cps0; reuse.code = code; reuse.owner = o; reuse.proto = {}; if (proto) for (const k of PROTO) reuse.proto[k] = proto[k]; }   // the scheduler-bound methods this evaluation installed belong to the pattern
+      } else {
+        if (proto && reuse.proto) for (const k of PROTO) if (reuse.proto[k] !== undefined) proto[k] = reuse.proto[k];
+        try { o.repl.scheduler.setCps(cps0 || 0.5); } catch { /* the tempo this code set when it was evaluated, for the lazy callbacks that read the scheduler */ }
+      }   // a later read of the same pattern puts them back for its lazy callbacks (the finally below restores the player's)
       const applied = {};
       for (const [id, v] of Object.entries(sliders || {})) if (typeof v === 'number' && Number.isFinite(v)) { offlineSliders[id] = v; applied[id] = v; }   // a captured live value replaces the one in the code, for this query only; anything else is ignored and not reported as applied
       const cps = cps0 || 0.5;

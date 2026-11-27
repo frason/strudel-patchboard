@@ -17,6 +17,9 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const cleanText = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max) : null);
 const num = (v, lo, hi, dflt) => (isNum(v) ? clamp(v, lo, hi) : dflt);
 const int = (v, lo, hi, dflt) => (isNum(v) ? clamp(Math.round(v), lo, hi) : dflt);
+export const TAKE_MAX_EVENTS = 2000;
+// the notes of a Take as they are kept: at most TAKE_MAX_EVENTS, positions and lengths to a thousandth of a beat (Grab checks what this does to a capture)
+export const cleanTakeEvents = (arr) => (Array.isArray(arr) ? arr.slice(0, TAKE_MAX_EVENTS) : []).filter((e) => e && isNum(e.t) && isNum(e.d) && isNum(e.n)).map((e) => ({ t: Math.round(clamp(e.t, 0, 4096) * 1000) / 1000, d: Math.round(clamp(e.d, 0.05, 4096) * 1000) / 1000, n: int(e.n, 0, 127, 60), v: Math.round(num(e.v, 0, 1, 0.8) * 100) / 100 }));
 
 function cleanLeaf(c, kind) {
   const o = {};
@@ -95,8 +98,8 @@ export function cleanParams(type, raw) {
   }
   if (def.data?.notefilter) { const pc = Array.isArray(src.pcs) ? src.pcs : []; out.pcs = Array.from({ length: 12 }, (_, i) => pc[i] === true); }
   if (def.data?.take) {   // a recording: notes with start and length in beats, kept to sensible sizes
-    const evs = (arr) => (Array.isArray(arr) ? arr.slice(0, 2000) : []).filter((e) => e && isNum(e.t) && isNum(e.d) && isNum(e.n)).map((e) => ({ t: Math.round(clamp(e.t, 0, 4096) * 1000) / 1000, d: Math.round(clamp(e.d, 0.05, 4096) * 1000) / 1000, n: int(e.n, 0, 127, 60), v: Math.round(num(e.v, 0, 1, 0.8) * 100) / 100 }));
-    out.events = evs(src.events); out.bpm = num(src.bpm, 20, 300, 120); out.beats = int(src.beats, 1, 12, 4);
+    const evs = cleanTakeEvents;
+    out.events = evs(src.events); out.len = num(src.len, 0, 4096, 0); out.bpm = num(src.bpm, 20, 300, 120); out.beats = int(src.beats, 1, 12, 4);
     out.versions = (Array.isArray(src.versions) ? src.versions.slice(0, 5) : []).filter((v) => v && typeof v === 'object').map((v) => ({ at: num(v.at, 0, 9e15, 0), bpm: num(v.bpm, 20, 300, 120), beats: int(v.beats, 1, 12, 4), events: evs(v.events) }));
   }
   if (def.data?.harmonics) {

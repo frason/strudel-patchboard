@@ -90,5 +90,5 @@ Same method (15 s windows, 3 runs, baseline `r3-idle`, headless Chrome, one mach
 - First version (8-cycle chunks, every chunk evaluated again): no skipped notes, but one 72 ms long task on whole-song and 6 to 20 MB of heap still held after a collection on every board.
 - 4-cycle chunks removed the long tasks; the heap growth stayed (10 to 20 MB per window). The cause was evaluating the same voice many times (about 360 evaluations a window): each Strudel evaluation appears to keep some memory. Reading one voice in pieces from a single evaluation (`reuse` in `queryEvents`) brought it back inside the gate.
 - Final: all three boards pass the gate against idle (0 skipped notes, underruns, stalls and long tasks; heap growth 3 MB or less).
-- What it does not show: whether the memory per evaluation is released later (the window is short), so a very long session of repeated x-ray readings (two evaluations per reading) is still unmeasured; a form map on a board with many dense voices; a phone.
+- What it does not show: whether the memory per evaluation is released later (the window is short), so a very long session of repeated x-ray readings (one evaluation and two queries per reading) is still unmeasured; a form map on a board with many dense voices; a phone.
 
