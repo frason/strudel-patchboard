@@ -95,17 +95,19 @@ Same method (15 s windows, 3 runs, baseline `r3-idle`, headless Chrome, one mach
 ## Whole boards: compile, guard, one reading and a form map (Node, `npm run bench:board`, 2026-11-26)
 `scripts/bench-board.mjs` runs the real compile, guard, one 4-cycle reading and a 32-cycle form map on the library boards and on deliberately heavy boards (median of 5; the map is one run). Node numbers, not browser numbers.
 
-| board | writings | code chars | compile ms | guard ms | read 4 cycles ms | events | map 32 cycles ms |
+| board | writings | code chars | compile ms | guard ms | read 4 cycles ms | events | map ms (asked 32 cycles) |
 |---|---|---|---|---|---|---|---|
 | library: whole song | 23 | 865 | 0.2 | 0.2 | 5.3 | 99 | 148 |
 | library: chords / song / trance | 9 / 10 / 21 | 249 / 370 / 596 | 0.0 to 0.2 | 0.0 to 0.2 | 2.3 / 3.6 / 5.6 | 83 / 64 / 146 | 31 / 53 / 37 |
 | Take 600 notes | 3 | 4,567 | 0.5 | 0.0 | 57 | 64 | 349 |
 | Take 2,000 notes (the cap) | 3 | 15,038 | 0.8 | 0.1 | 90 | 64 | 478 |
-| Take 2,000 notes, len 64 beats | 3 | 15,038 | 1.3 | 0.1 | 94 | 64 | 485 |
+| Take 2,000 notes, len 640 beats (past the last note at beat 500; 0007 fixed the old len 64 row, which wrote identical code) | 3 | 15,050 | 1.1 | 0.1 | 129 | 64 | 614 |
 | fan-out depth 8 | 512 | 14,863 | 2.2 | 0.3 | 12 | 1,024 | 15 |
 | fan-out depth 11 (4,095 writings) | 4,096 | 155,663 | 73 | 2.6 | 100 | 8,192 | 39 |
-| chain of 30 transforms (ten `fast`) | 32 | 384 | 0.1 | 0.0 | **1,189** | 32,769 | **3,704** |
+| chain of 30 transforms (ten `fast`) | 32 | 384 | 0.1 | 0.0 | **1,189** | 32,769 | **3,704 for the first 8 of 32 cycles**: the map stopped at its 2.5 s per-voice budget (0007 found the benchmark had hidden this; it now prints cycles read) |
 | chain of 120 transforms | 122 | 1,404 | 0.3 | 0.2 | refused by the guard (65,536 events per cycle, limit 50,000) | | |
 
-What this shows: compiling and the guard are cheap everywhere, including the deepest admitted fan-out (73 ms). The cost is in reading. A Take at the 2,000-note cap reads in about 90 ms; library boards read in under 6 ms. A short chain of ten `fast` modules (32 modules, 384 characters) is admitted by the guard and takes 1.2 s to read once and 3.7 s for a 32-cycle map, because it makes about 8,000 events per cycle: the guard's 50,000 events per cycle limit is far above what the player or the readings can take comfortably. That is the existing mitigation's job (x-ray reads one cycle first; Grab, Bake and the map wait for a button while music plays), not a fix: a lower event limit would change what boards are allowed and is the owner's call. Not measured: the browser, live edits while playing, a phone, a long session.
+What this shows: compiling and the guard take milliseconds on library boards and about 70 ms on the deepest admitted fan-out, which is not nothing under a performance-first goal (0007 corrected "cheap everywhere"). The cost is in reading. A Take at the 2,000-note cap reads in about 90 ms; library boards read in under 6 ms. A short chain of ten `fast` modules (32 modules, 384 characters) is admitted by the guard and takes 1.2 s to read once and 3.7 s for a 32-cycle map, because it makes about 8,000 events per cycle: the guard's 50,000 events per cycle limit is far above what the player or the readings can take comfortably. That is the existing mitigation's job (x-ray reads one cycle first; Grab, Bake and the map wait for a button while music plays), not a fix: a lower event limit would change what boards are allowed and is the owner's call. Not measured: the browser, live edits while playing, a phone, a long session.
 
+
+Corrections from review 0007 (2026-11-27): the map column is a *budgeted request*: a voice stops at 2.5 s, so a heavy board's map time is the budget, not the cost of a full 32-cycle read; the benchmark now prints the cycles each map really read and its note. Still not measured: cold versus reused phases, tail latency, hardware and runtime details, the browser, a phone, dense live playback. Codex measured the benchmark's Fast/Rev/Late shape at rising rates (4-cycle median): 128 per cycle 12 ms, 256 22 ms, 512 52 ms, 1,024 142 ms, 2,048 319 ms. An event limit alone cannot bound cost: a 2,000-note Take that makes 64 events, and `s("bd*4000").mask("0")` (zero events, about 63 ms), are cheap or costly without showing in an event count.

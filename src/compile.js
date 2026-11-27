@@ -11,7 +11,7 @@ const FM_WAVES = new Set(['sine', 'sawtooth', 'square', 'triangle', 'supersaw', 
 let spent = 0, cap = Infinity;   // characters written so far in this compile, and the most the guard would accept: writing stops there instead of building megabytes the guard then refuses
 const OVER = new Error('the board would write more code than the guard accepts');
 const S = (t, meta = {}) => { spent += String(t).length; if (spent > cap) throw OVER; return { t, ...meta }; };
-const NL = (d) => ({ nl: d });
+const NL = (d) => { spent += 1 + 2 * d; if (spent > cap) throw OVER; return { nl: d }; };   // a new line and its indentation count too: the guard measures the whole code
 
 function chain(base, calls, depth, inline) {
   const out = [...base];

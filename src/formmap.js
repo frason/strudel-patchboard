@@ -32,8 +32,8 @@ export function activityFromRecord(rec, from, cycles) {
 }
 
 const breathe = () => new Promise((r) => setTimeout(r, 0));
-// reads every voice over `cycles` cycles from `from`. onProgress(done, total) between chunks; `cancelled()` stops it. Returns { voices: [{ id, title, muted, counts, lo, hi, readCycles, note }], from, cycles }.
-export async function buildFormMap(graph, { from = 0, cycles = 32, onProgress = () => {}, cancelled = () => false } = {}) {
+// reads every voice over `cycles` cycles from `from`. onProgress(done, total) between chunks; `cancelled()` stops it between pieces; `admit()` is asked again inside each piece's turn and a refusal stops the read with `declined: true`. Returns { voices: [{ id, title, muted, counts, lo, hi, readCycles, note }], from, cycles }.
+export async function buildFormMap(graph, { from = 0, cycles = 32, onProgress = () => {}, cancelled = () => false, admit = null } = {}) {
   cycles = Math.max(1, Math.min(MAX_RANGE, Math.floor(cycles)));
   const vs = voicesOf(graph), res = { voices: [], from, cycles, omitted: vs.omitted || 0 }, total = Math.max(1, vs.length * Math.ceil(cycles / CHUNK)); let done = 0;
   for (const v of vs) {
@@ -46,12 +46,13 @@ export async function buildFormMap(graph, { from = 0, cycles = 32, onProgress = 
       if (cancelled()) return res;
       const t0 = performance.now();
       try {
-        const rec = await queryEvents(tap.code, { from: from + c, to: from + Math.min(cycles, c + CHUNK), reuse }), a = activityFromRecord(rec, from + c, Math.min(CHUNK, cycles - c));
+        const rec = await queryEvents(tap.code, { from: from + c, to: from + Math.min(cycles, c + CHUNK), reuse, admit }), a = activityFromRecord(rec, from + c, Math.min(CHUNK, cycles - c));
         a.counts.forEach((n, i) => { row.counts[c + i] = n; });
         if (a.lo !== null) { row.lo = row.lo === null ? a.lo : Math.min(row.lo, a.lo); row.hi = row.hi === null ? a.hi : Math.max(row.hi, a.hi); }
         if (a.warnings.length) { row.incomplete = true; if (!row.note) row.note = 'the read was cut or left things out, so some counts are lower than the truth'; }   // a capped read is not shown as a full one
         row.readCycles = Math.min(cycles, c + CHUNK);
-      } catch (e) { row.note = 'could not be read: ' + String((e && e.message) || e).slice(0, 80); break; }
+      } catch (e) { if (e && e.declined) { res.declined = true; return res; }   // asked again at the turn of every piece: the window closed, or the music started, while it queued
+        row.note = 'could not be read: ' + String((e && e.message) || e).slice(0, 80); break; }
       spent += performance.now() - t0; done++; onProgress(done, total);
       if (spent > VOICE_BUDGET_MS && c + CHUNK < cycles) { row.note = `heavy to read: only the first ${row.readCycles} cycles are shown`; done += Math.ceil((cycles - c - CHUNK) / CHUNK); break; }
       await breathe();

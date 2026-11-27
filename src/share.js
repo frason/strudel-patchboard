@@ -44,7 +44,7 @@ export async function readShareFragment(fragment) {
 // a board that came from outside (a link, a library file): the shape, the expansion count, the compile and the guard. Returns { graph, code, issues } or { error }.
 export function checkBoard(raw) {
   let graph, removed = 0;
-  try { graph = validateShape(raw); const wires0 = graph.wires.length; normalize(graph); removed = Math.max(0, wires0 - graph.wires.length); } catch (e) { return { error: 'The board in this link is not valid: ' + String((e && e.message) || e).slice(0, 140) }; }
+  try { graph = validateShape(raw); if (JSON.stringify({ nodes: graph.nodes, wires: graph.wires, groups: graph.groups || [] }).length > MAX_INFLATED) return { error: 'The board in this link is larger than a board may be here (' + Math.round(MAX_INFLATED / 1000) + ' KB of data).' }; const wires0 = graph.wires.length; normalize(graph); removed = Math.max(0, wires0 - graph.wires.length); } catch (e) { return { error: 'The board in this link is not valid: ' + String((e && e.message) || e).slice(0, 140) }; }
   // the compiler writes a module once for every path that reaches it, so a few modules wired in a fan-out can ask for an enormous amount of text: counted BEFORE anything is built, and refused past a limit
   const cost = expansionCost(graph); if (cost > MAX_EXPANSION) return { error: `The board in this link is too tangled to open safely: its cables fan out so that it would be written ${cost > 1e9 ? 'billions of' : cost.toLocaleString('en')} times over (the limit is ${MAX_EXPANSION.toLocaleString('en')}).` };
   let r; try { r = compile(graph); } catch (e) { return { error: 'The board in this link could not be turned into code: ' + String((e && e.message) || e).slice(0, 100) }; }

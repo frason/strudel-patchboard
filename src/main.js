@@ -31,6 +31,7 @@ import { chatPack } from './aidocs.js';
 import { createXray } from './xray.js';
 import { openGrab } from './grabui.js';
 import { evidenceFor } from './evidence.js';
+import { isTooDense, MAX_EXPANDED } from './guard.js';
 import { buildFormMap, drawFormMap, describeMap, MAP_LENGTHS } from './formmap.js';
 import { makeShareFragment, readShareFragment, describeBoard, SHARE_PREFIX } from './share.js';
 import { loadLibrary } from './library.js';
@@ -716,7 +717,7 @@ const hooks = {
   setTake(id, take, grid) {
     store.update((g) => {
       const n = nodeById(g, id); if (!n || n.type !== 'take') return;
-      const old = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, len: n.params.len || 0, events: n.params.events || [] };
+      const old = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, len: n.params.len || 0, grid: n.params.grid, events: n.params.events || [] };
       const versions = old.events.length ? [old, ...(n.params.versions || [])] : (n.params.versions || []);
       Object.assign(n.params, cleanParams('take', { ...n.params, events: take.events, len: 0, bpm: take.bpm, beats: take.beatsPerBar, grid: grid || n.params.grid, versions: versions.slice(0, 5) }));
     }, { label: 're-record a take' });
@@ -725,8 +726,8 @@ const hooks = {
   restoreTake(id, i) {
     store.update((g) => {
       const n = nodeById(g, id), v = n?.params.versions?.[i]; if (!n || !v) return;
-      const cur = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, len: n.params.len || 0, events: n.params.events || [] }, rest = n.params.versions.filter((_, k) => k !== i);
-      Object.assign(n.params, cleanParams('take', { ...n.params, events: v.events, len: v.len || 0, bpm: v.bpm, beats: v.beats, versions: (cur.events.length ? [cur, ...rest] : rest).slice(0, 5) }));
+      const cur = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, len: n.params.len || 0, grid: n.params.grid, events: n.params.events || [] }, rest = n.params.versions.filter((_, k) => k !== i);
+      Object.assign(n.params, cleanParams('take', { ...n.params, events: v.events, len: v.len || 0, grid: v.grid || n.params.grid, bpm: v.bpm, beats: v.beats, versions: (cur.events.length ? [cur, ...rest] : rest).slice(0, 5) }));
     }, { label: 'go back to an earlier take' });
     toast('Earlier take restored. The one you had is kept too.', [undoAction], 4000);
   },
@@ -889,7 +890,16 @@ async function runEval() {
   await engine.evaluate(current.code);
 }
 function renderIssues() {
-  issuesEl.replaceChildren(...current.issues.map((i) => h('div', { class: 'issue', onmouseenter: () => hooks.hover({ node: i.node }), onmouseleave: () => hooks.hover(null) }, '• ' + i.msg)));
+  issuesEl.replaceChildren(...current.issues.map((i) => h('div', { class: 'issue', onmouseenter: () => hooks.hover({ node: i.node }), onmouseleave: () => hooks.hover(null) }, '• ' + i.msg)), ...(current.issues.some((i) => isTooDense(i.msg)) && getAI().key ? [lightenButton(current.issues)] : []));
+}
+// A board the guard refuses as too dense (more than MAX_EXPANDED events per cycle in one chain): if an AI key is set, offer to have it lightened. The AI's answer comes in through Import like any other: nothing changes until the person accepts it.
+function lightenButton(issues) { return h('button', { class: 'btn sm', id: 'ai-lighten', title: 'Asks the AI to rewrite the board so that nothing is over the limit. You see the result in Import before anything changes.', onclick: () => lightenWithAI(issues) }, `Ask the AI to lighten this (under ${MAX_EXPANDED.toLocaleString('en')} events per cycle)`); }
+async function lightenWithAI(issues = [], say = (t) => toast(t, [], 3000)) {
+  if (!getAI().key) return toast('Set an AI key first (AI button).', [], 4000);
+  const dense = issues.filter((i) => isTooDense(i.msg)), left = dense.map((i) => nodeById(store.graph, i.node)).filter((n) => n && (n.type === 'codesource' || n.type === 'code') && n.params.code).map((n) => n.params.code);
+  const request = `This patch is too dense: Patchboard refuses any chain that would make more than ${MAX_EXPANDED} events per cycle (a typical song uses a few hundred). Make it lighter so that every chain is under ${MAX_EXPANDED}, by lowering the counts (fast, ply, chop, segment, echo, repeats like *64) and thinning the busiest rhythms, while keeping the character of the music as much as you can.${dense.length ? `\nThe refusal said: ${dense.map((i) => i.msg).slice(0, 3).join(' | ')}` : ''}${left.length ? `\nCode that was left out because it was too dense:\n${left.slice(0, 3).join('\n---\n').slice(0, 3000)}` : ''}`;
+  say('Asking the AI to lighten the board…');
+  try { await aiRefine(request, say); } catch (e) { toast('The AI could not do this: ' + String((e && e.message) || e).slice(0, 140), [], 8000); }
 }
 store.subscribe((g, meta) => {
   afterChange(meta);
@@ -973,10 +983,13 @@ function toggleStatusFull() {
 statusEl.addEventListener('click', toggleStatusFull);
 statusEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleStatusFull(); } });
 document.addEventListener('pointerdown', (e) => { if (statusFull && !statusFull.contains(e.target) && e.target !== statusEl) closeStatusFull(); }, true);
+let lastDenseOffer = '';
 engine.onStatus((s) => {
   if (s.state === 'playing') syncOutScope();
   if (s.state !== 'playing') xray.playingChanged();   // paused updates can run again once the music stops
   statusEl.textContent = { idle: 'ready', loading: s.message, ok: 'ok', ready: 'stopped', playing: 'playing', error: 'error: ' + s.message, warn: s.message }[s.state] || s.state;
+  if (s.state === 'ok' || s.state === 'playing') lastDenseOffer = '';
+  if (s.state === 'error' && isTooDense(s.message) && s.message !== lastDenseOffer) { lastDenseOffer = s.message; toast('This board is too dense to play (more than ' + MAX_EXPANDED.toLocaleString('en') + ' events per cycle in one chain).', getAI().key ? [{ label: 'Ask the AI to lighten it', fn: () => lightenWithAI([{ msg: s.message }]) }] : [], 12000); }   // said once per message; without an AI key the status line already says what to lower
   statusEl.className = 'status ' + s.state;
   const long = (s.state === 'error' || s.state === 'warn') && s.message;   // the toolbar cuts long messages short: hover shows all of it, a click opens it in a box
   statusEl.title = long ? statusEl.textContent + '\n(click to read it in full)' : '';
@@ -1419,21 +1432,22 @@ function openFormMap() {
   const go = h('button', { class: 'btn', type: 'button' }, 'Read again'), close = h('button', { class: 'btn ghost', type: 'button', onclick: () => closeModal() }, 'Close');
   let run = 0, alive = true, map = null;
   const width = () => Math.min(900, window.innerWidth - 80);
-  const read = async () => {
+  const read = async (auto = false) => {   // auto: started by opening the window or changing the length, not by the button
     const mine = ++run; go.disabled = true; status.textContent = 'Reading…';
     try {
-      const m = await buildFormMap(store.graph, { from: 0, cycles: Number(len.value), cancelled: () => !alive || mine !== run, onProgress: (d, t) => { if (alive && mine === run) status.textContent = `Reading… ${Math.round((d / t) * 100)}%`; } });
+      const m = await buildFormMap(store.graph, { from: 0, cycles: Number(len.value), cancelled: () => !alive || mine !== run, admit: () => alive && mine === run && (!auto || !engine.playing), onProgress: (d, t) => { if (alive && mine === run) status.textContent = `Reading… ${Math.round((d / t) * 100)}%`; } });
       if (!alive || mine !== run) return;
+      if (m.declined) { go.disabled = false; go.textContent = 'Read the map'; status.textContent = (map ? `Showing the last read (${map.cycles} cycles). ` : '') + 'Not read: the music started while this waited. Press Read the map when you are ready.'; return; }
       map = m; drawFormMap(canvas, m, width());
       words.textContent = describeMap(m); canvas.setAttribute('aria-label', 'Song form map. ' + describeMap(m));
       status.textContent = m.voices.length ? `${m.voices.length} voice${m.voices.length === 1 ? '' : 's'} over ${m.cycles} cycles. Brighter means more notes start in that cycle; an orange outline means the read was cut and the count is too low.${m.omitted ? ` ${m.omitted} more voice${m.omitted === 1 ? ' is' : 's are'} not shown.` : ''}` : 'Nothing is plugged into the Output yet, so there is no form to show.';
     } catch (e) { if (alive && mine === run) status.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 140); }
     go.disabled = false;
   };
-  go.addEventListener('click', read);
+  go.addEventListener('click', () => read());
   len.addEventListener('change', () => {   // one handler for both states, decided when the length changes: a read in flight is dropped, and a picture that no longer matches the selector says what it shows
     run++; go.disabled = false;
-    if (engine.playing) { go.textContent = 'Read the map'; status.textContent = map ? `Showing the last read (${map.cycles} cycles). Press Read the map to read ${len.value}.` : 'Press Read the map to read this length.'; } else read();
+    if (engine.playing) { go.textContent = 'Read the map'; status.textContent = map ? `Showing the last read (${map.cycles} cycles). Press Read the map to read ${len.value}.` : 'Press Read the map to read this length.'; } else read(true);
   });
   showModal('Song form map', h('div', {},
     h('p', { class: 'imp-hint' }, 'Each lane is a voice (a module plugged into the Output); each cell is a cycle. Intros, breaks and drops show as where the lanes light up. It reads what each voice\'s module outputs, so master volume and effects further along are not applied.'),
@@ -1441,7 +1455,7 @@ function openFormMap() {
     engine.playing ? h('p', { class: 'imp-hint' }, 'The music is playing: reading a long map takes a moment on the player\'s thread, so a note may come late. It reads in small pieces to keep that short.') : null,
     h('div', { class: 'modal-btns' }, go, close)));
   modalCloseHooks.push(() => { alive = false; });   // after showModal, which runs the hooks of the window it replaces
-  if (engine.playing) { status.textContent = 'The music is playing. Press Read again when you are ready: reading works on the player\'s thread and a note may come late.'; go.textContent = 'Read the map'; } else read();   // while music plays nothing is read until it is asked for
+  if (engine.playing) { status.textContent = 'The music is playing. Press Read again when you are ready: reading works on the player\'s thread and a note may come late.'; go.textContent = 'Read the map'; } else read(true);   // while music plays nothing is read until it is asked for
 }
 function openImport() {
   const area = h('textarea', { class: 'imp-area', id: 'import-text', spellcheck: 'false', placeholder: 'Paste Strudel code here, e.g.\n\nsetcpm(120/4)\n\$: s("bd*2 ~ sd").bank("RolandTR909")' });
@@ -1735,7 +1749,8 @@ function openLibrary() {
     const out = h('div', { 'aria-live': 'polite' }), kinds = Object.entries(e.facts.types).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, n]) => `${n} ${MODULES[t]?.title || t}`).join(', ');
     return h('div', { class: 'lib-entry', style: 'border-top:1px solid #2a323b;padding:8px 0' },
       h('strong', {}, e.title), e.by ? h('span', { class: 'imp-hint' }, ' · ' + e.by) : null,
-      h('p', { class: 'imp-hint' }, `${e.about} ${e.facts.modules} modules (${kinds}).`), out,
+      h('p', { class: 'imp-hint' }, `${e.about} ${e.facts.modules} modules (${kinds}).`),
+      e.issues.length ? h('p', { class: 'imp-hint', style: 'color:#ffb347' }, 'Parts that were left out: ' + e.issues.slice(0, 4).join('; ') + '.') : null, out,
       h('div', { class: 'modal-btns' },
         h('button', { class: 'btn ghost', dataset: { check: e.id }, title: 'Reads the board back into modules and plays 8 cycles of both offline to compare them', onclick: async (ev) => {
           const b = ev.currentTarget; b.disabled = true; out.textContent = engine.playing ? 'Checking (the music is playing: this can make a note late)…' : 'Checking…';

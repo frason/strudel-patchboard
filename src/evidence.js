@@ -27,9 +27,11 @@ function firstDiff(a, b) {
 }
 const quiet = (rec) => rec.warnings.length === 0;   // a record that was cut, folded or left things out is not a full-fidelity comparison
 export async function evidenceFor(graph, { cycles = 8, sounds = () => true } = {}) {
-  const labels = [], code = compile(graph).code, bad = guardCode(code);
+  const labels = [], made = compile(graph), code = made.code, bad = guardCode(code);
+  if (made.refused) return { labels: [{ id: 'guard', ok: false, text: 'The board cannot be written safely: ' + (made.issues[0]?.msg || 'too large') }], ok: false };
   labels.push(bad ? { id: 'guard', ok: false, text: 'The code is refused by the safety check: ' + bad } : { id: 'guard', ok: true, text: 'The code passes the safety check.' });
   if (bad) return { labels, ok: false };
+  if (made.issues && made.issues.length) labels.push({ id: 'left-out', ok: false, text: `The compiler left ${made.issues.length} part${made.issues.length === 1 ? '' : 's'} of the board out (${made.issues.slice(0, 2).map((i) => i.msg).join('; ')}), so the checks below describe only the code that was kept, not the whole board.` });
   try {
     const imp = importStrudel(code, { sounds });
     if (imp.error || !imp.graph) { labels.push({ id: 'readback', ok: false, text: 'The code could not be read back into modules: ' + (imp.error || 'unknown') }); return { labels, ok: false }; }
@@ -37,7 +39,7 @@ export async function evidenceFor(graph, { cycles = 8, sounds = () => true } = {
     const a = await queryEvents(code, { from: 0, to: cycles }), b = await queryEvents(again, { from: 0, to: cycles }), n = onsets(a).length;
     const same = sig(a) === sig(b) && quiet(a) && quiet(b);
     const eq = sig(a) === sig(b), cut = !(quiet(a) && quiet(b)), fd = eq ? null : firstDiff(a, b);
-    labels.push({ id: 'readback', ok: same, equal: eq, text: same ? `Read back into modules and written again, it plays the same ${n} attacks over ${cycles} cycles (${ENGINE_ID}): same start, same slot and the same value for every control it sets. That is a replay of those cycles, not a proof for every cycle.` : eq ? `Read back into modules and written again, the ${n} attacks over ${cycles} cycles match, but the read ${cut ? 'folded or left out some events (' + [...new Set([...a.warnings, ...b.warnings])].slice(0, 2).join('; ') + ')' : 'was cut'}, so it is not a full comparison.` : `Read back into modules and written again, it gives a different event record over ${cycles} cycles (${n} attacks before, ${onsets(b).length} after; first difference: ${fd}${cut ? '; the read was also cut or left things out, so it cannot show they are equal' : ''}). A different record is not always a different sound: a control the importer drops because it is the default shows up here.` });
+    labels.push({ id: 'readback', ok: same, equal: eq, warnings: [...new Set([...a.warnings, ...b.warnings])], text: same ? `Read back into modules and written again, it plays the same ${n} attacks over ${cycles} cycles (${ENGINE_ID}): same start, same slot and the same value for every control it sets. That is a replay of those cycles, not a proof for every cycle.` : eq ? `Read back into modules and written again, the ${n} attacks over ${cycles} cycles match, but the read ${cut ? 'folded or left out some events (' + [...new Set([...a.warnings, ...b.warnings])].slice(0, 2).join('; ') + ')' : 'was cut'}, so it is not a full comparison.` : `Read back into modules and written again, it gives a different event record over ${cycles} cycles (${n} attacks before, ${onsets(b).length} after; first difference: ${fd}${cut ? '; the read was also cut or left things out, so it cannot show they are equal' : ''}). A different record is not always a different sound: a control the importer drops because it is the default shows up here.` });
     if (imp.report && imp.report.skipped && imp.report.skipped.length) labels.push({ id: 'skipped', ok: false, text: `${imp.report.skipped.length} part${imp.report.skipped.length === 1 ? '' : 's'} of the code could not be turned into modules.` });
   } catch (e) { labels.push({ id: 'readback', ok: false, text: 'The read-back check failed: ' + String((e && e.message) || e).slice(0, 120) }); }
   labels.push({ id: 'not-checked', ok: null, text: 'Not checked: that the sample files exist and download, and how it sounds.' });

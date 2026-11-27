@@ -21,7 +21,8 @@ const FIXED = new Set(["register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9
 export const MAX_CHARS = 600_000;
 const MAX_NODES = 60_000;
 // Admission limits (not proofs of cheap work): a pattern string that expands to an absurd number of events, or a count that is absurd, is refused before anything is evaluated.
-const MAX_EXPANDED = 50_000;
+export const MAX_EXPANDED = 1024;   // events per cycle one chain may be estimated to make (a song uses a few hundred; Node readings of 1,024 took ~140 ms and 2,048 ~320 ms). A partial static estimate, not a total bound: see D18/D19
+export const isTooDense = (msg) => /events per cycle|larger than the limit/.test(String(msg || ''));   // so the page can offer help for this refusal and no other
 const NUM_LIMITS = { fast: 4096, fastGap: 4096, ply: 1024, chop: 1024, striate: 1024, segment: 1024, seg: 1024, echo: 64, stut: 64, euclid: 1024, euclidRot: 1024, euclidLegato: 1024, euclidLegatoRot: 1024, euclidInv: 1024, linger: 1024, hurry: 1024, iter: 1024, iterBack: 1024, repeat: 1024 };
 // which arguments are counts (echo(times, time, feedback): only the first; euclid(pulses, steps): both)
 const COUNT_ARGS = { echo: [0], stut: [0], euclid: [0, 1], euclidRot: [0, 1], euclidLegato: [0, 1], euclidLegatoRot: [0, 1], euclidInv: [0, 1] };
@@ -84,7 +85,7 @@ export function expandedSize(str) {
 class Refuse extends Error {}
 const at = (node, code) => { const line = code.slice(0, node.start).split('\n').length; return `line ${line}`; };
 
-const tooBig = (text, node, code) => { if (typeof text === 'string' && text.length > 3 && /[*!(]/.test(text)) { const n = expandedSize(text); if (n > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this pattern expands to about ${n > 1e9 ? 'billions of' : n} events (the limit is ${MAX_EXPANDED})`); return Math.max(1, n); } return 1; };
+const tooBig = (text, node, code) => { if (typeof text === 'string' && text.length > 3 && /[*!(]/.test(text)) { const n = expandedSize(text); if (n > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this pattern is too dense: it expands to about ${n > 1e9 ? 'billions of' : n.toLocaleString('en')} events per cycle, and Patchboard plays at most ${MAX_EXPANDED.toLocaleString('en')} (a typical song uses a few hundred). Lower the repeat counts (the number after * or !), or thin the rhythm`); return Math.max(1, n); } return 1; };
 function expr(node, code, ctx) {
   if (++ctx.nodes > MAX_NODES) throw new Refuse('the code is too large');
   switch (node.type) {
@@ -121,7 +122,7 @@ function expr(node, code, ctx) {
         if (a.type === 'ArrowFunctionExpression') arrow(a, code, ctx); else { const v = expr(a, code, ctx) || 1; if (base === 0) extra += v; }
       });
       const total = c.type === 'Identifier' ? extra : base * factor;
-      if (total > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this chain makes about ${total > 1e9 ? 'billions of' : Math.round(total)} events per cycle (the limit is ${MAX_EXPANDED})`);
+      if (total > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this is too dense: it would make about ${total > 1e9 ? 'billions of' : Math.round(total).toLocaleString('en')} events per cycle, and Patchboard plays at most ${MAX_EXPANDED.toLocaleString('en')} (a typical song uses a few hundred). Lower a number in it${name && MULTIPLIES.has(name) ? ` (the .${name}(...) count is the likely one)` : ' (fast, ply, chop, segment or echo)'}, or thin the rhythm`);
       return total || 1;
     }
     case 'MemberExpression': return member(node, code, ctx);

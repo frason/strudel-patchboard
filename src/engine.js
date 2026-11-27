@@ -7,7 +7,7 @@ import { exclusive } from './evallock.js';
 import { getPrefs, onPrefs } from './prefs.js';
 import { makeSliderWithID, sliderValues } from './slider.js';
 import { registerSoundfonts } from './soundfonts.js';
-import { guardCode } from './guard.js';
+import { guardCode, isTooDense } from './guard.js';
 import { bindPlayerClock } from './snapshot.js';
 
 const DS = 'https://raw.githubusercontent.com/felixroos/dough-samples/main';
@@ -277,7 +277,7 @@ export function createEngine() {
     async evaluate(code) {
       if (!repl) return false;
       const refused = guardCode(code);   // only code made of the shapes the compiler writes is ever evaluated
-      if (refused) { setStatus('error', 'Not played: ' + refused + '. This patch contains something Patchboard does not allow, so nothing was run.'); return false; }
+      if (refused) { setStatus('error', 'Not played: ' + refused + (isTooDense(refused) ? '. Nothing was run.' : '. This patch contains something Patchboard does not allow, so nothing was run.')); return false; }
       const seq = ++evalSeq;
       setStatus('ok', '');
       // An orbit (mix bus) only exists once the first sound has played on it, and .duck("3") on a kick that hits before that logs

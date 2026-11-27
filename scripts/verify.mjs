@@ -2033,7 +2033,8 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const { guardCode: gc, expandedSize: ex } = await import('../src/guard.js');
   const refused = ['$: s("bd*1000000")', '$: s("[bd*1000]*1000")', '$: s("x!100000")', '$: s("bd").fast(1000000)', '$: s("bd").chop(100000)', '$: note("c3").echo(1000, .1, .5)', '$: s("bd").euclid(5, 100000)'].map((c) => gc(c));
   check('Guard: patterns that expand to millions of events, and absurd counts for fast, chop, echo and euclid, are refused with a reason', refused.every((r) => typeof r === 'string' && /expands to|larger than the limit/.test(r)));
-  check('Guard: ordinary and dense-but-sensible patterns are still accepted (a drum line with *16 parts, euclid, a long weighted melody, ranges)', ['$: s("bd*16 hh*16 sd*16")', '$: s("bd(5,8)*4").euclid(5, 8)', '$: n("0 .. 7")', '$: s("hh*32").fast(8).chop(64)', '$: note("c3@125 ~@66 e3@125 ~@250 g3@125 ~@188").slow(4)'].every((c) => gc(c) === null) && ex('bd*16 hh*16 sd*16') === 48 && ex('[a b]*3 c') === 7 && ex('[bd*1000]*1000') === 1000000);
+  { const r = ['$: s("hh*2000")', '$: s("bd").fast(2000)', '$: s("hh*64").fast(32)'].map((c) => gc(c)); check('Guard 0007 D19: a chain estimated above 1,024 events per cycle is refused with a plain message that names the way out (a count to lower), and 1,024 itself is allowed', r.every((x) => typeof x === 'string' && /too dense/.test(x) && /Lower /.test(x)) && gc('$: s("hh*1024")') === null); }
+  check('Guard: ordinary and dense-but-sensible patterns are still accepted (a drum line with *16 parts, euclid, a long weighted melody, ranges)', ['$: s("bd*16 hh*16 sd*16")', '$: s("bd(5,8)*4").euclid(5, 8)', '$: n("0 .. 7")', '$: s("hh*16").fast(4).chop(8)', '$: note("c3@125 ~@66 e3@125 ~@250 g3@125 ~@188").slow(4)'].every((c) => gc(c) === null) && ex('bd*16 hh*16 sd*16') === 48 && ex('[a b]*3 c') === 7 && ex('[bd*1000]*1000') === 1000000);
 }
 
 
@@ -2340,9 +2341,10 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   }
   // F8: a capped read is marked incomplete, and the words say notes START
   {
-    const { buildFormMap, describeMap, voicesOf } = await import('../src/formmap.js'), c = makeNode('codesource', 0, 0, { code: 's("hh*32").fast(8).chop(64)' }), o = makeNode('output', 0, 0), g = { v: 1, nodes: [c, o], wires: [{ id: 'w', from: { node: c.id, port: 'out' }, to: { node: o.id, port: 'in' } }] };
-    const m = await buildFormMap(g, { cycles: 4 });
-    check('0005 F8: a voice whose read was cut is marked incomplete and says so, and the text says "starts notes" (attacks), never "plays"', m.voices[0].incomplete === true && /cut or left things out/.test(m.voices[0].note) && /starts notes/.test(describeMap(m)) && !/plays in/.test(describeMap(m)));
+    const { describeMap, voicesOf, activityFromRecord } = await import('../src/formmap.js'), o = makeNode('output', 0, 0);
+    // (a capped read cannot be made through a chain any more: the guard allows at most 1,024 events per cycle in one chain, a read is 4 cycles, and the cap is 50,000; so the record and the map are built by hand)
+    const act = activityFromRecord({ warnings: ['only the first 50000 events were kept (10 more were left out)'], events: [] }, 0, 4), m = { from: 0, cycles: 4, omitted: 0, voices: [{ title: 'Sample', muted: false, counts: [5, 5, 0, 0], readCycles: 4, note: 'the read was cut or left things out, so some counts are lower than the truth', incomplete: true }] };
+    check('0005 F8: a read that was cut is reported as a warning, a voice marked incomplete says so, and the text says "starts notes" (attacks), never "plays"', act.warnings.length === 1 && /cut or left things out/.test(m.voices[0].note) && /starts notes/.test(describeMap(m)) && !/plays in/.test(describeMap(m)));
     const many = { v: 1, nodes: [o, ...Array.from({ length: 30 }, (_, i) => makeNode('codesource', 0, 0, { code: 's("bd")' }))], wires: [] }; many.nodes.slice(1).forEach((n, i) => many.wires.push({ id: 'm' + i, from: { node: n.id, port: 'out' }, to: { node: o.id, port: 'in' } }));
     check('0005 F8: voices past the limit of 24 are counted as not shown', voicesOf(many).omitted === 6 && voicesOf(many).length === 24);
   }
@@ -2352,6 +2354,12 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
     const { cleanParams } = await import('../src/validate.js');
     const p = cleanParams('take', { events: [{ t: 0, d: 4, n: 60, v: 1 }], len: 8, versions: [{ at: 1, bpm: 120, beats: 4, len: 8, events: [{ t: 0, d: 4, n: 60, v: 1 }] }, { at: 2, bpm: 120, beats: 4, events: [] }] });
     check('0006 F1: a Take version keeps its captured length (len 8), and an old version without one is 0', p.versions[0].len === 8 && p.versions[1].len === 0 && p.len === 8);
+  }
+  // 0007 F3: a Take version also keeps the grid its notes were snapped to (0 = a version saved before grids were kept)
+  {
+    const { cleanParams } = await import('../src/validate.js'), { compile } = await import('../src/compile.js');
+    const p = cleanParams('take', { grid: 12, events: [{ t: 0.0833, d: 1, n: 60, v: 1 }], versions: [{ at: 1, bpm: 120, beats: 4, len: 8, grid: 12, events: [] }, { at: 2, bpm: 120, beats: 4, events: [] }, { at: 3, bpm: 120, beats: 4, grid: 7, events: [] }] });
+    check('0007 F3: a Take version keeps its grid (12), a version without one or with an unknown one is 0 and takes the Take\'s own on restore', p.versions[0].grid === 12 && p.versions[1].grid === 0 && p.versions[2].grid === 0 && p.grid === 12);
   }
   // F2: an automatic Grab read that was waiting when the music started is not run, and not run inside its turn either
   {
@@ -2370,6 +2378,17 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
     const { queryEvents } = await import('../src/snapshot.js');
     let err = null; try { await queryEvents('$: note(60)', { to: 1, admit: () => false }); } catch (e) { err = e; }
     check('0006 F2: a query whose admit check says no inside its turn is declined (declined: true) and reads nothing', err && err.declined === true);
+  }
+  // 0007 F1: a map read that is still waiting for its first turn when the music starts is declined, and so is one whose window closed: nothing is queried
+  {
+    const { buildFormMap } = await import('../src/formmap.js'), { exclusive } = await import('../src/evallock.js'), { LESSONS } = await import('../src/starters.js');
+    const lesson = LESSONS.find((l) => l.id === 'song').graph(); await buildFormMap(lesson, { cycles: 4 });   // the evaluator is built and warm
+    let playing = false, release; const held = exclusive(() => new Promise((r) => { release = r; }));
+    const waiting = buildFormMap(lesson, { cycles: 16, admit: () => !playing });
+    await new Promise((r) => setTimeout(r, 5)); playing = true; release(); await held; const m = await waiting;
+    check('0007 F1: a form-map read queued behind another evaluation and then overtaken by playback is declined at its first turn, with no cycle read', m.declined === true && m.voices.every((v) => v.readCycles === 0));
+    let open = true; const m2 = await buildFormMap(lesson, { cycles: 8, admit: () => open, onProgress: (d) => { if (d >= 1) open = false; } });
+    check('0007 F1: closing the window stops a map before its next piece, and the piece that was waiting is not read', m2.declined === true && m2.voices.some((v) => v.readCycles > 0) && m2.voices.some((v) => v.readCycles < 8));
   }
   // F3: a reused pattern gets its own Slider values back after another query changed the shared ones
   {
@@ -2428,11 +2447,31 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
     const files = Object.fromEntries(readdirSync(new URL('../library/', import.meta.url)).filter((f) => f.endsWith('.json')).map((f) => [f, JSON.parse(readFileSync(new URL('../library/' + f, import.meta.url), 'utf8'))]));
     const lib = loadLibrary(files);
     check('Library: every file in library/ is a valid entry (shape, expansion, compile, guard), none is left out, and ids are unique', lib.entries.length === Object.keys(files).length && lib.errors.length === 0 && lib.entries.length >= 4 && new Set(lib.entries.map((e) => e.id)).size === lib.entries.length);
-    const results = []; for (const e of lib.entries) { const r = await evidenceFor(e.graph, { cycles: 4 }); const rb = r.labels.find((l) => l.id === 'readback'); results.push([e.id, r.ok || (rb && rb.equal === true && r.labels.every((l) => l.ok !== false || l.id === 'readback')), r.labels.filter((l) => l.ok === false).map((l) => l.text.slice(0, 80))]); }
+    const results = []; for (const e of lib.entries) { const r = await evidenceFor(e.graph, { cycles: 4 }); const rb = r.labels.find((l) => l.id === 'readback'); results.push([e.id, r.ok || (rb && rb.equal === true && rb.warnings && rb.warnings.length > 0 && rb.warnings.every((w) => /folded into the event/.test(w)) && r.labels.every((l) => l.ok !== false || l.id === 'readback')), r.labels.filter((l) => l.ok === false).map((l) => l.text.slice(0, 80))]); }
     check('Library: each shipped board reads back to the same events over 4 cycles on this engine (a board whose read folded events is allowed only when the records still match)' + (results.some((r) => !r[1]) ? ' ' + JSON.stringify(results.filter((r) => !r[1])) : ''), results.every((r) => r[1]));
     const bad = [parseEntry({ v: 1, kind: 'other', id: 'x', graph: {} }), parseEntry({ v: 1, kind: 'patchboard-library-entry', id: 'Bad Id', graph: {} }), parseEntry({ v: 1, kind: 'patchboard-library-entry', id: 'ok', graph: { v: 1, nodes: [{ id: 'a', type: 'nonsense', params: {} }], wires: [] } }), parseEntry(null)];
     check('Library: a wrong kind, a bad id, an unknown module and null are each refused with a reason, never thrown', bad.every((b) => b.error && !b.entry));
     const twice = loadLibrary({ a: files['song.json'], b: files['song.json'] });
+    const evil = { toString: null }, sib = JSON.parse(JSON.stringify(files['song.json']));
+    const meta = [parseEntry({ ...sib, id: evil }), parseEntry({ ...sib, title: evil, about: evil, by: evil })];
+    check('0007 F7: an id that cannot be turned into text is refused with a reason; odd title, about or by fall back to blanks; neither throws, and a valid sibling still loads', meta[0].error && meta[1].entry && meta[1].entry.title === sib.id && (() => { try { return loadLibrary({ a: { ...sib, id: evil }, b: sib }).entries.length === 1; } catch { return false; } })());
+    const big = JSON.parse(JSON.stringify(files['song.json'])); const evs = Array.from({ length: 2000 }, (_, k) => ({ t: k * 0.25, d: 0.2, n: 60 + (k % 12), v: 0.5 })), stuff = Array.from({ length: 6 }, (_, i) => ({ id: 'tk' + i, type: 'take', x: 0, y: 0, params: { events: evs, versions: Array.from({ length: 5 }, () => ({ at: 1, bpm: 120, beats: 4, len: 8, events: evs })) } }));
+    const bigR = parseEntry({ ...big, id: 'big', graph: { ...big.graph, nodes: [...big.graph.nodes, ...stuff] } });
+    check('0007 F6: a library board larger than the size a share link may unpack to is refused (the same limit as a link)', bigR.error && !bigR.entry);
+    const lost = { ...sib, id: 'lost', graph: { v: 1, nodes: [{ id: 'c1', type: 'code', x: 0, y: 0, params: { code: 's("bd").bogus(1)' } }, { id: 'c2', type: 'code', x: 0, y: 100, params: { code: 's("hh")' } }, { id: 'o', type: 'output', x: 300, y: 0, params: {} }], wires: [{ id: 'w1', from: { node: 'c1', port: 'out' }, to: { node: 'o', port: 'in' } }, { id: 'w2', from: { node: 'c2', port: 'out' }, to: { node: 'o', port: 'in' } }] } };
+    const lostR = parseEntry(lost), lostE = lostR.entry ? await evidenceFor(lostR.entry.graph, { cycles: 2 }) : null;
+    check('0007 F8: a board whose compiler left a source out is not reported as fully checked: the entry lists the omission and the evidence has a failing "left out" label', lostR.entry && lostR.entry.issues.length > 0 && lostE && lostE.ok === false && lostE.labels.some((l) => l.id === 'left-out' && l.ok === false));
+    {   // 0007 F2: a board whose tokens fit but whose new lines and indentation push the code past the guard's size is refused while writing, not after
+      const { normalize, validateShape, expansionCost } = await import('../src/graph.js'), { compile } = await import('../src/compile.js'), { MAX_CHARS } = await import('../src/guard.js');
+      const nodes = [], wires = []; let prev = []; const add = (type, params = {}) => { const id = 'n' + nodes.length; nodes.push({ id, type, x: 0, y: 0, params }); return id; };
+      const src = add('sample', { name: 'bd' }); prev = [src];
+      for (let i = 0; i < 10; i++) { const st = add('stack'); for (const p of prev) wires.push({ id: 'w' + wires.length, from: { node: p, port: 'out' }, to: { node: st, port: 'in1' } }), wires.push({ id: 'w' + wires.length, from: { node: p, port: 'out' }, to: { node: st, port: 'in2' } }); prev = [st]; }
+      let last = prev[0]; for (let i = 0; i < 100; i++) { const st = add('stack'); wires.push({ id: 'w' + wires.length, from: { node: last, port: 'out' }, to: { node: st, port: 'in1' } }); last = st; }
+      const out = add('output'); wires.push({ id: 'w' + wires.length, from: { node: last, port: 'out' }, to: { node: out, port: 'in' } });
+      const g = { v: 1, nodes, wires }; let ok = true; try { validateShape(g); normalize(g); } catch { ok = false; }
+      const r = ok ? compile(g) : null;
+      check('0007 F2: a board whose tokens fit but whose new lines and indentation would push the code past the guard size is refused while writing (refused, short code), never built whole', ok && expansionCost(g) < 5000 && r.refused === true && r.code.length < 1000);
+    }
     check('Library: a duplicate id is listed once and the second is reported', twice.entries.length === 1 && twice.errors.length === 1);
   }
 }

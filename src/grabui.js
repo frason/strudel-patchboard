@@ -26,7 +26,7 @@ export function openGrab({ h, showModal, closeModal, onClose, getGraph, nodeId, 
     const from = Math.max(0, Math.floor(Number(start.value) || 0)), cycles = Number(len.value), grid = Number(snap.value), tap = compileTap(getGraph(), nodeId);
     if (tap.error) { status.textContent = tap.error; return; }
     try {
-      const rec = await queryEvents(tap.code, { from, to: from + cycles, kind: 'queried', context: { sliders: sliders() }, admit: auto === true ? () => !isPlaying() : null });   // an automatic read is asked again inside its turn: the music may have started while it queued
+      const rec = await queryEvents(tap.code, { from, to: from + cycles, kind: 'queried', context: { sliders: sliders() }, admit: () => mine === gen && (auto !== true || !isPlaying()) });   // asked again inside the read's turn: a window closed or a field changed while it queued, and for an automatic read, the music may have started
       if (mine !== gen) return;
       const r = grabFrom(rec, { bpm, beatsPerBar: beats, grid }); last = { r, rec, grid };
       status.textContent = r.line + '.';
@@ -55,6 +55,6 @@ export function openGrab({ h, showModal, closeModal, onClose, getGraph, nodeId, 
   showModal(`${bake ? 'Bake' : 'Grab from'} ${MODULES[node.type].title}`, body);
   onClose?.(() => { clearTimeout(timer); gen++; });   // a read still on its way is dropped when the window closes
   close.addEventListener('click', () => closeModal());
-  if (isPlaying()) { caveat.textContent = 'The music is playing: a read works on the same thread as the player and cannot be stopped part-way, so a dense one can make a note late. It starts only when you press Read now.'; idle('Press Read now to read these cycles.'); readBtn.style.display = ''; } else read();
+  if (isPlaying()) { caveat.textContent = 'The music is playing: a read works on the same thread as the player and cannot be stopped part-way, so a dense one can make a note late. It starts only when you press Read now.'; idle('Press Read now to read these cycles.'); readBtn.style.display = ''; } else read(true);   // the first read is automatic too
   return { close: () => close.click() };
 }
