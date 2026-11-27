@@ -1300,12 +1300,29 @@ function showHelp(type) {
   helpEl.querySelector('.help-body').focus?.();
 }
 const modalCloseHooks = [];   // things a window cleans up when it closes (a recording window stops listening to the keyboard)
-function closeModal() { modalEl?.remove(); modalEl = null; while (modalCloseHooks.length) { try { modalCloseHooks.pop()(); } catch { /* ignore */ } } }
+let modalReturn = null;   // the control that had focus when a window opened: focus goes back there when it closes
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function closeModal() { dropModal(false); }
+function dropModal(keepReturn) {
+  const had = !!modalEl; modalEl?.remove(); modalEl = null; while (modalCloseHooks.length) { try { modalCloseHooks.pop()(); } catch { /* ignore */ } }
+  if (had && !keepReturn) { const r = modalReturn; modalReturn = null; if (r && r.isConnected) { try { r.focus({ preventScroll: true }); } catch { /* ignore */ } } }
+}
 function showModal(title, body) {
-  closeModal();
-  modalEl = h('div', { class: 'modal-back', onpointerdown: (e) => { if (e.target === modalEl) closeModal(); } },
-    h('div', { class: 'modal', role: 'dialog', 'aria-label': title }, h('h3', {}, title), body));
+  const opener = modalEl ? modalReturn : document.activeElement;   // a window that replaces another keeps the first one's way back
+  dropModal(true); modalReturn = opener && opener !== document.body ? opener : null;
+  const heading = h('h3', { id: 'modal-title' }, title);
+  const dlg = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'modal-title', tabindex: '-1' }, heading, body);
+  modalEl = h('div', { class: 'modal-back', onpointerdown: (e) => { if (e.target === modalEl) closeModal(); } }, dlg);
+  modalEl.addEventListener('keydown', (e) => {   // Tab stays inside the window while it is open
+    if (e.key !== 'Tab') return;
+    const f = [...dlg.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === document.activeElement);
+    if (!f.length) { e.preventDefault(); dlg.focus(); return; }
+    const first = f[0], last = f[f.length - 1], a = document.activeElement;
+    if (e.shiftKey && (a === first || a === dlg)) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+  });
   document.body.append(modalEl);
+  const first = dlg.querySelector('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])') || dlg.querySelector('button:not([disabled])');
+  (first || dlg).focus({ preventScroll: true });   // a screen reader reads the window's name and the first control; a keyboard starts inside it
 }
 function importText(text, label, back) {
   const t = text.trim();
