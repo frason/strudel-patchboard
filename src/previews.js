@@ -95,7 +95,7 @@ export function drawPreview(kind, canvas, p, ctxInfo = {}) {
     ctx.strokeStyle = A; ctx.lineWidth = 2; ctx.stroke();
     if (ctxInfo.driven) { ctx.fillStyle = '#4cc3f0'; ctx.textAlign = 'left'; ctx.fillText('cutoff moved by a cable', L + 4, T + 10); }
   } else if (kind === 'euclid') {
-    const n = Math.max(1, p.steps), k = Math.min(p.pulses, n), pat = bjorklund(k, n);
+    const n = Math.max(1, p.steps), k = Math.min(p.pulses, n), r0 = Math.max(0, Math.min(Math.floor(Number(p.rot) || 0), n - 1)), b0 = bjorklund(k, n), pat = b0.slice(r0).concat(b0.slice(0, r0));   // rotation moves the start, as euclidRot does
     const cx = 36, cy = H / 2, r = Math.min(26, H / 2 - 8);
     const pts = pat.map((on, i) => ({ on, x: cx + Math.sin((i / n) * 2 * Math.PI) * r, y: cy - Math.cos((i / n) * 2 * Math.PI) * r }));
     ctx.strokeStyle = COLORS.grid; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
@@ -106,7 +106,7 @@ export function drawPreview(kind, canvas, p, ctxInfo = {}) {
     const row = pat.map((on) => (on ? 'x' : '.')).join(' ');
     ctx.fillText(row.length > 30 ? row.slice(0, 30) + '…' : row, 84, cy - 2);
     ctx.fillStyle = COLORS.text; ctx.font = '10px ui-monospace, monospace';
-    ctx.fillText(`${k} hits in ${n} steps`, 84, cy + 16);
+    ctx.fillText(`${k} hits in ${n} steps${r0 ? `, rotated ${r0}` : ''}${p.legato === 'on' ? ', held' : ''}`, 84, cy + 16);
   } else if (kind === 'every') {
     const n = Math.min(16, Math.max(2, p.n)), cell = Math.min(22, (W - 16) / n - 3);
     ctx.fillStyle = COLORS.text; ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left';

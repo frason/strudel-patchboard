@@ -1348,10 +1348,10 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const evs = async (c) => (await evaluate(c, false)).queryArc(0, 8).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.entries(h.value).filter(([k]) => k !== 'color').sort())}`).sort().join('|');
   const run = async (code) => { const r = imp(code); return { g: r.graph, skipped: r.report.skipped.length, ok: !r.error && (await evs(code)) === (await evs(compile(r.graph).code)) }; };
   const has = (g, t, re) => g.nodes.some((n) => n.type === t && (!re || re.test(n.params.code ?? n.params.text ?? '')));
-  let t = await run('$: s("bd*8").linger(0.25)');
-  check('Kept as code: a call with no module (linger) becomes a Strudel Code module and plays the same', t.ok && t.skipped === 0 && has(t.g, 'code', /linger\(0\.25\)/));
-  t = await run('$: s("bd*4 sd").linger(0.5).fast(2).gain(0.5).lpf(800)');
-  check('Kept as code: order is kept: a later fast() goes into the code module with the linger, while the gain and filter stay modules', t.ok && t.skipped === 0 && has(t.g, 'code', /linger\(0\.5\)\.fast\(2\)/) && !has(t.g, 'fast'));
+  let t = await run('$: s("bd*8").brak()');
+  check('Kept as code: a call with no module (brak) becomes a Strudel Code module and plays the same', t.ok && t.skipped === 0 && has(t.g, 'code', /brak\(\)/));
+  t = await run('$: s("bd*4 sd").brak().fast(2).gain(0.5).lpf(800)');
+  check('Kept as code: order is kept: a later fast() goes into the code module with the brak, while the gain and filter stay modules', t.ok && t.skipped === 0 && has(t.g, 'code', /brak\(\)\.fast\(2\)/) && !has(t.g, 'fast'));
   t = await run('const VOL = 0.4\n$: s("bd*4").gain(VOL).mask("1 0 1 1")');
   check('Kept as code: a const number is used as its value (the gain is a plain knob, 0.4)', t.ok && t.skipped === 0 && t.g.nodes.some((n) => n.type === 'sample' && n.params.gain === 0.4));
   t = await run('$: note("c3 e3").s("sawtooth").gain("<0.4 0.8>")');
@@ -1364,8 +1364,8 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Kept as code: nothing that is not an allowed Strudel call is ever kept (an unknown function is left out with a reason)', t.report.skipped.length === 1 && !has(t.graph, 'code'));
   t = imp('$: s("bd").chorus(0.3)');
   check('Kept as code: effects the browser player cannot play are still left out with the reason', t.report.skipped.length === 1 && !has(t.graph, 'code'));
-  const rb = imp(compile(imp('$: s("bd*8").linger(0.25).gain(0.5)').graph).code);
-  check('Kept as code: code written by the board (with a Strudel Code module) imports back to the same board', !rb.error && rb.report.skipped.length === 0 && has(rb.graph, 'code', /linger\(0\.25\)/));
+  const rb = imp(compile(imp('$: s("bd*8").brak().gain(0.5)').graph).code);
+  check('Kept as code: code written by the board (with a Strudel Code module) imports back to the same board', !rb.error && rb.report.skipped.length === 0 && has(rb.graph, 'code', /brak\(\)/));
   const { guardCalls: gc } = await import('../src/guard.js');
   check('Kept as code: the Strudel Code module only takes Strudel calls: no assignments, no unknown functions, no values computed from variables', gc('.mask("1 0")') === null && !!gc('.mask(foo)') && !!gc('; fetch("x")') && !!gc('.constructor("x")') && !!gc('mask("1")'));
 }
@@ -1783,7 +1783,8 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const { importStrudel: imp } = await import('../src/importer.js');
   const { guardCode: gc } = await import('../src/guard.js');
   const { cleanParams } = await import('../src/validate.js');
-  const evs = async (c) => (await evaluate(c, false)).queryArc(0, 8).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).filter(([k]) => k !== 'color').sort().map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v])))}`).sort().join('|');
+  const evs = async (c) => { try { return await evs0(c); } catch (e) { return 'ERROR: ' + String((e && e.message) || e); } };   // a call Strudel cannot run is a failed check with its message, not a crash
+  const evs0 = async (c) => (await evaluate(c, false)).queryArc(0, 8).filter((h) => h.hasOnset()).map((h) => `${h.whole.begin.toFraction()}-${h.whole.end.toFraction()} ${JSON.stringify(Object.fromEntries(Object.entries(h.value).filter(([k]) => k !== 'color').sort().map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v])))}`).sort().join('|');
   const build = (type, params, notes = true) => {
     const g = eg(), N = (ty, p = {}) => { const n = mn(ty, 0, 0, p); g.nodes.push(n); return n; }, W = (a, b) => g.wires.push({ id: 'w' + g.wires.length, from: { node: a.id, port: 'out' }, to: { node: b.id, port: 'in' } });
     const src = notes ? N('notetext', { text: 'c3 e3 g3 b3' }) : N('sample', { name: 'bd sd hh*2' }), m = N(type, cleanParams(type, params)), out = N('output');
@@ -1805,11 +1806,29 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
     ['iter', { n: 4, mode: 'iter' }, true, 'note("c3 e3 g3 b3").iter(4).s("sawtooth")'],
     ['iter', { n: 3, mode: 'iterBack' }, true, 'note("c3 e3 g3 b3").iterBack(3).s("sawtooth")'],
     ['addnotes', { pat: '<0 7>' }, true, 'note("c3 e3 g3 b3").add(note("<0 7>")).s("sawtooth")'],
+    // seven more (batch 1 of the next ten): Segment, Linger, Hurry, Chunk, Inside/Outside, Press (Rolled was dropped: this Strudel version has no rolled)
+    ['segment', { n: 6 }, true, 'note("c3 e3 g3 b3").segment(6).s("sawtooth")'],
+    ['linger', { t: 0.25 }, true, 'note("c3 e3 g3 b3").linger(0.25).s("sawtooth")'],
+    ['linger', { t: 0.5 }, true, 'note("c3 e3 g3 b3").linger(0.5).s("sawtooth")'],
+    ['hurry', { n: 2 }, false, 's("bd sd hh*2").hurry(2)'],
+    ['hurry', { n: 0.5 }, false, 's("bd sd hh*2").hurry(0.5)'],
+    ['chunk', { n: 4, fn: 'up12', mode: 'chunk' }, true, 'note("c3 e3 g3 b3").chunk(4, x=>x.transpose(12)).s("sawtooth")'],
+    ['chunk', { n: 2, fn: 'rev', mode: 'chunkBack' }, true, 'note("c3 e3 g3 b3").chunkBack(2, rev).s("sawtooth")'],
+    ['inside', { n: 2, fn: 'rev', mode: 'inside' }, true, 'note("c3 e3 g3 b3").inside(2, rev).s("sawtooth")'],
+    ['inside', { n: 2, fn: 'up7', mode: 'outside' }, true, 'note("c3 e3 g3 b3").outside(2, x=>x.transpose(7)).s("sawtooth")'],
+    ['euclid', { pulses: 3, steps: 8, rot: 2, legato: 'off' }, true, 'note("c3 e3 g3 b3").euclidRot(3,8,2).s("sawtooth")'],
+    ['euclid', { pulses: 5, steps: 8, rot: 0, legato: 'on' }, true, 'note("c3 e3 g3 b3").euclidLegato(5,8).s("sawtooth")'],
+    ['euclid', { pulses: 3, steps: 8, rot: 1, legato: 'on' }, true, 'note("c3 e3 g3 b3").euclidLegatoRot(3,8,1).s("sawtooth")'],
+    ['euclid', { pulses: 3, steps: 8, rot: 0, legato: 'off' }, true, 'note("c3 e3 g3 b3").euclid(3,8).s("sawtooth")'],
+    ['palindrome', {}, true, 'note("c3 e3 g3 b3").palindrome().s("sawtooth")'],
+    ['palindrome', {}, false, 's("bd sd hh*2").palindrome()'],
+    ['press', { by: 0.5 }, true, 'note("c3 e3 g3 b3").pressBy(0.5).s("sawtooth")'],
+    ['press', { by: 0.25 }, false, 's("bd sd hh*2").pressBy(0.25)'],
   ];
   for (const [type, params, notes, ref] of cases) {
     const { g, m } = build(type, params, notes), code = compile(g).code, tag = `${type} ${JSON.stringify(params)}`;
     const back = imp(code), bm = back.graph.nodes.find((n) => n.type === type);
-    check(`${tag}: plays what the same call written by hand plays, and the code passes the guard`, (await evs(code)) === (await evs('$: ' + ref)) && !gc(code));
+    check(`${tag}: plays what the same call written by hand plays, and the code passes the guard`, (await evs(code)) === (await evs('$: ' + ref)) && !String(await evs(code)).startsWith('ERROR') && !gc(code));
     check(`${tag}: the code reads back into the same module with the same settings, nothing skipped`, !back.report.skipped.length && !!bm && Object.keys(params).every((k) => bm.params[k] === m.params[k]) && (await evs(compile(back.graph).code)) === (await evs(code)));
   }
   // order matters: Jux sets the pan and Echo the volume, so on a line that also sets them the calls stay as written
@@ -1821,9 +1840,38 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Chop and Loop at: together on one line they stay as written (the order of the two calls matters), and play the same', !t.report.skipped.length && !t.graph.nodes.some((n) => n.type === 'chop' || n.type === 'loopat') && (await evs('$: s("break").loopAt(2).chop(8)')) === (await evs(compile(t.graph).code)));
   t = imp('$: note("c3 e3").s("sawtooth").when("<0 1>", x=>x.shape(.1).lpf(500))');
   check('When: a function that is not one of its choices stays as written, and plays the same', !t.report.skipped.length && !t.graph.nodes.some((n) => n.type === 'when') && (await evs('$: note("c3 e3").s("sawtooth").when("<0 1>", x=>x.shape(.1).lpf(500))')) === (await evs(compile(t.graph).code)));
+  // order matters: Hurry sets the sample speed, and timing calls on a line that reads a continuous signal change what the signal is read at
+  t = imp('$: s("bd sd").speed(2).hurry(2)');
+  check('Hurry: on a line that also sets speed() it stays as written, and plays the same', !t.report.skipped.length && !t.graph.nodes.some((n) => n.type === 'hurry') && (await evs('$: s("bd sd").speed(2).hurry(2)')) === (await evs(compile(t.graph).code)));
+  for (const line of ['$: note("c3 e3 g3 b3").gain(sine.range(.2,.9)).linger(0.5).s("sawtooth")', '$: note("c3 e3 g3 b3").s("sawtooth").gain(saw).segment(4)', '$: note("c3 e3 g3 b3").pan(sine).pressBy(0.25).s("sawtooth")']) {
+    t = imp(line);
+    check('Timing calls after a continuous signal stay as written, and play the same: ' + line.slice(4, 60), !t.report.skipped.length && !t.graph.nodes.some((n) => ['linger', 'segment', 'press'].includes(n.type)) && (await evs(line)) === (await evs(compile(t.graph).code)));
+  }
+  t = imp('$: note("c3 e3").press().s("sawtooth")');
+  check('Press: press() is Press at 0.5, and plays the same', t.graph.nodes.some((n) => n.type === 'press' && n.params.by === 0.5) && (await evs('$: note("c3 e3").press().s("sawtooth")')) === (await evs(compile(t.graph).code)));
+  for (const line of ['$: s("bd(3,8,2)")', '$: s("bd(3,8)").euclidRot(3,8,1)', '$: s("hh*8").euclidLegato(3,8)']) {
+    t = imp(line);
+    check('Euclid: rotations and held hits play the same after a round trip: ' + line.slice(4), !t.report.skipped.length && (await evs(line)) === (await evs(compile(t.graph).code)) && !String(await evs(line)).startsWith('ERROR'));
+  }
+  for (const line of ['$: s("bd sd hh*2").begin(0.25).end(0.75)', '$: s("break").chop(4).begin(0.5)', '$: s("break").begin(0.25).chop(4)', '$: s("break").loopAt(2).end(0.5)']) {
+    t = imp(line);
+    check('Sample begin/end: plays the same after a round trip, and next to a call that cuts the sample they stay as written: ' + line.slice(4), !t.report.skipped.length && (await evs(line)) === (await evs(compile(t.graph).code)) && !String(await evs(line)).startsWith('ERROR'));
+  }
+  t = imp('$: s("bd sd").begin(0.25).end(0.75)');
+  check('Sample: begin and end become the Sample\'s own settings (start at 0.25, end at 0.75)', t.graph.nodes.some((n) => n.type === 'sample' && n.params.begin === 0.25 && n.params.end === 0.75));
+  t = imp('$: s("break").chop(4).begin(0.5)');
+  check('Sample: begin() after chop() is not folded into the Sample (the order of the two calls matters)', !t.graph.nodes.some((n) => n.type === 'sample' && n.params.begin === 0.5));
+  for (const line of ['$: chord("<C Am>/2").voicing().s("piano")', '$: chord("<Bbm9 Fm9>/4").offset(-1).voicing().s("piano")', '$: chord("<C Am F G>").dict("lefthand").anchor("c5").octaves(2).voicing().s("piano")', '$: chord("<C Am>").mode("below:c5").voicing().s("piano")', '$: chord("<C Am>").mode("root:g2").voicing().s("piano")', '$: chord("<C Am>").mode("above:c4").voicing().s("piano")']) {
+    t = imp(line);
+    check('Chords: voicing settings and a slowdown after the turns play the same after a round trip: ' + line.slice(4, 78), !t.report.skipped.length && (await evs(line)) === (await evs(compile(t.graph).code)) && !String(await evs(line)).startsWith('ERROR'));
+  }
+  t = imp('$: chord("<C Am>").offset(-1).mode("root:g2").voicing().s("piano")');
+  check('Chords: offset and a root mode become the Chord Sequencer\'s own settings', t.graph.nodes.some((n) => n.type === 'chords' && n.params.offset === -1 && n.params.voice === 'root:g2'));
+  t = imp('$: chord("<C Am>").anchor("<c5 e5>").voicing().s("piano")');
+  check('Chords: an anchor that is a pattern, not a plain note name, keeps the whole line as written, and plays the same', !t.report.skipped.length && t.graph.nodes.some((n) => n.type === 'codesource') && !t.graph.nodes.some((n) => n.type === 'chords') && (await evs('$: chord("<C Am>").anchor("<c5 e5>").voicing().s("piano")')) === (await evs(compile(t.graph).code)) && !String(await evs(compile(t.graph).code)).startsWith('ERROR'));
   // the module list itself
   const { MODULES: MM } = await import('../src/modules.js');
-  check('The ten new modules are in the module list, each with a plain-language description, and can be muted (they pass the sound through)', ['mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes'].every((k) => MM[k] && MM[k].blurb.length > 40 && MM[k].cat === 'transform'));
+  check('The ten new modules are in the module list, each with a plain-language description, and can be muted (they pass the sound through)', ['mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes', 'segment', 'linger', 'hurry', 'chunk', 'inside', 'press', 'palindrome'].every((k) => MM[k] && MM[k].blurb.length > 40 && MM[k].cat === 'transform'));
 }
 
 
@@ -2234,7 +2282,7 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   const { compileTap } = await import('../src/compile.js');
   const { wiresInto: wi } = await import('../src/graph.js');
   const { recordFromHaps, num, onsets, midiExact } = await import('../src/events.js');
-  const g = JSON.parse(readFileSync(new URL('../tools/test-board.patchboard.json', import.meta.url), 'utf8')), out = g.nodes.find((n) => n.type === 'output');
+  const { validateShape: vShape } = await import('../src/graph.js'), g = vShape(JSON.parse(readFileSync(new URL('../tools/test-board.patchboard.json', import.meta.url), 'utf8'))), out = g.nodes.find((n) => n.type === 'output');
   const wasMuted = new Map(g.nodes.map((n) => [n.id, n.muted]));
   const headOf = (gr) => wi(g, out.id, 'in').find((w) => gr.nodes.includes(w.from.node)).from.node;
   const evsOf = async (i, to = 4) => { g.nodes.forEach((n) => { n.muted = false; }); const code = compileTap(g, headOf(g.groups[i])).code; g.nodes.forEach((n) => { n.muted = wasMuted.get(n.id); }); return onsets(recordFromHaps((await evaluate(code, false)).queryArc(0, to), { from: 0, to, code })); };

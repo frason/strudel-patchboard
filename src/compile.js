@@ -324,7 +324,13 @@ function compileBoard(g) {
         str.push(S(wrap[1] + '"', meta));
         const base = [S('chord(', { ...m, role: 'fn', note: `chord("…") is a progression written as chord names${key ? ', worked out from the Key you plugged in' : ''}: C is C major, Am is A minor, G7 is G seventh, ^7 is major seventh.${p.mode === 'turns' ? ' <> plays one chord per cycle.' : ''}` }), ...str, S(')', m)];
         const calls = [];
-        if (p.register) calls.push([S(`.mode(${q(p.register)})`, { ...m, role: 'knob', key: 'register', note: `mode("${p.register}") places the chords ${p.register.endsWith('c3') ? 'low' : p.register.endsWith('c4') ? 'in the middle' : 'high'}: the notes start above ${p.register.slice(6)}.` })]);
+        const VMODE = /^(above|below|duck|root):[a-g][#b]?\d$/, vmode = VMODE.test(String(p.voice || '')) ? p.voice : p.register, anchor = /^[a-g][#b]?\d$/.test(String(p.anchor || '')) ? p.anchor : '', off = Math.round(Number(p.offset) || 0), oct = Math.round(Number(p.octaves) || 1);
+        if (['ireal-ext', 'lefthand', 'legacy'].includes(p.dict)) calls.push([S(`.dict(${q(p.dict)})`, { ...m, role: 'knob', key: 'dict', note: `dict("${p.dict}") picks the list of chord shapes the voicing chooses from.` })]);
+        if (anchor) calls.push([S(`.anchor(${q(anchor)})`, { ...m, role: 'knob', key: 'anchor', note: `anchor("${anchor}") places the chords around ${anchor}.` })]);
+        if (off) calls.push([S(`.offset(${off})`, { ...m, role: 'knob', key: 'offset', note: `offset(${off}) uses the chord shape ${Math.abs(off)} ${off > 0 ? 'above' : 'below'} the usual one in the voicing list.` })]);
+        if (oct > 1) calls.push([S(`.octaves(${oct})`, { ...m, role: 'knob', key: 'octaves', note: `octaves(${oct}) lets the chord notes spread over ${oct} octaves.` })]);
+        if (vmode) calls.push([S(`.mode(${q(vmode)})`, { ...m, role: 'knob', key: VMODE.test(String(p.voice || '')) ? 'voice' : 'register', note: `mode("${vmode}") places the chords ${vmode.startsWith('root') ? 'with their root note at' : vmode.startsWith('below') ? 'below' : vmode.startsWith('duck') ? 'out of the way of' : 'above'} ${vmode.split(':')[1]}.` })]);
+        if (false && p.register) calls.push([S(`.mode(${q(p.register)})`, { ...m, role: 'knob', key: 'register', note: `mode("${p.register}") places the chords ${p.register.endsWith('c3') ? 'low' : p.register.endsWith('c4') ? 'in the middle' : 'high'}: the notes start above ${p.register.slice(6)}.` })]);
         calls.push([S('.voicing()', { ...m, role: 'fn', note: 'voicing() turns each chord name into real notes, spaced so one chord flows smoothly into the next.' })]);
         return chain(base, calls, depth, inline);
       }
@@ -470,7 +476,8 @@ function compileBoard(g) {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'input');
         const pulses = Math.min(p.pulses, p.steps);
-        return chain(up, [[S(`.euclid(${pulses},${p.steps})`, { ...m, role: 'knob', key: 'pulses', note: `euclid(${pulses},${p.steps}) spreads ${pulses} hits as evenly as possible over ${p.steps} steps.` })]], depth, inline);
+        const rot = Math.max(0, Math.min(Math.floor(Number(p.rot) || 0), p.steps - 1)), held = p.legato === 'on', fname = held ? (rot ? 'euclidLegatoRot' : 'euclidLegato') : (rot ? 'euclidRot' : 'euclid');
+        return chain(up, [[S(`.${fname}(${pulses},${p.steps}${rot ? ',' + rot : ''})`, { ...m, role: 'knob', key: 'pulses', note: `${fname}(${pulses},${p.steps}${rot ? ',' + rot : ''}) spreads ${pulses} hits as evenly as possible over ${p.steps} steps${rot ? `, starting ${rot} step${rot === 1 ? '' : 's'} later` : ''}${held ? ', each lasting until the next hit' : ''}.` })]], depth, inline);
       }
       case 'randnotes': {
         const key = effectiveKey(g, n);
@@ -509,11 +516,11 @@ function compileBoard(g) {
         if (p.loop > 0) calls.push([S(`.ribbon(${p.loop}, 1)`, { ...m, role: 'knob', key: 'loop', note: `ribbon(${p.loop}, 1) takes cycle ${p.loop} and repeats it forever, so the choices stop changing.` })]);
         return chain(up, calls, depth, inline);
       }
-      case 'mask': case 'chop': case 'loopat': case 'when': case 'superimpose': case 'off': case 'jux': case 'echo': case 'iter': case 'addnotes': {
+      case 'mask': case 'chop': case 'loopat': case 'when': case 'superimpose': case 'off': case 'jux': case 'echo': case 'iter': case 'addnotes': case 'segment': case 'linger': case 'hurry': case 'chunk': case 'inside': case 'press': case 'palindrome': {
         const up = input(n, 'in', depth, inline);
         if (!up) return silent(n, 'input');
         const [text, key, say] = CALLS[n.type](p);
-        if (['when', 'superimpose', 'off', 'jux'].includes(n.type) && layerFn(p).notesOnly && outType(g, n.id) !== 'notes') issues.push({ node: n.id, msg: `${MODULES[n.type].title}: "${layerFn(p).label}" only makes sense for notes` });
+        if (['when', 'superimpose', 'off', 'jux', 'chunk', 'inside'].includes(n.type) && layerFn(p).notesOnly && outType(g, n.id) !== 'notes') issues.push({ node: n.id, msg: `${MODULES[n.type].title}: "${layerFn(p).label}" only makes sense for notes` });
         if ((n.type === 'chop' || n.type === 'loopat') && outType(g, n.id) === 'notes') issues.push({ node: n.id, msg: `${MODULES[n.type].title} cuts recorded samples: it does nothing to a synth or piano melody.` });
         return chain(up, [[S(text, { ...m, role: 'knob', key, note: say })]], depth, inline);
       }
@@ -873,6 +880,13 @@ const CALLS = {
   jux: (p) => [p.width === 1 ? `.jux(${layerFn(p).code})` : `.juxBy(${fmt(p.width)}, ${layerFn(p).code})`, 'width', `${p.width === 1 ? 'jux' : 'juxBy'}(…) plays the pattern on the left and a copy that ${layerFn(p).say} on the right.`],
   echo: (p) => [`.echo(${fmt(p.times)}, ${fmt(p.time)}, ${fmt(p.fb)})`, 'times', `echo(${fmt(p.times)}, ${fmt(p.time)}, ${fmt(p.fb)}) repeats each event ${fmt(p.times)} more times, ${fmt(p.time)} of a cycle apart, each at ${fmt(p.fb)} of the volume of the one before.`],
   iter: (p) => [`.${p.mode === 'iterBack' ? 'iterBack' : 'iter'}(${fmt(p.n)})`, 'n', `${p.mode === 'iterBack' ? 'iterBack' : 'iter'}(${fmt(p.n)}) starts the pattern one step ${p.mode === 'iterBack' ? 'earlier' : 'later'} each cycle, back at the start after ${fmt(p.n)} cycles.`],
+  palindrome: () => ['.palindrome()', null, 'palindrome() plays the pattern forwards in one cycle and backwards in the next, over and over.'],
+  segment: (p) => [`.segment(${fmt(p.n)})`, 'n', `segment(${fmt(p.n)}) looks at the pattern ${fmt(p.n)} times a cycle and plays what it finds each time.`],
+  linger: (p) => [`.linger(${fmt(p.t)})`, 't', `linger(${fmt(p.t)}) keeps the first ${fmt(p.t)} of each cycle and repeats it to fill the cycle.`],
+  hurry: (p) => [`.hurry(${fmt(p.n)})`, 'n', `hurry(${fmt(p.n)}) plays the pattern ${fmt(p.n)}× as fast and the samples ${fmt(p.n)}× as fast too, so they rise in pitch.`],
+  chunk: (p) => [`.${p.mode === 'chunkBack' ? 'chunkBack' : 'chunk'}(${fmt(p.n)}, ${layerFn(p).code})`, 'n', `${p.mode === 'chunkBack' ? 'chunkBack' : 'chunk'}(${fmt(p.n)}, …) splits each cycle into ${fmt(p.n)} parts and, one part per cycle${p.mode === 'chunkBack' ? ' going backwards' : ''}, ${layerFn(p).say}.`],
+  inside: (p) => [`.${p.mode === 'outside' ? 'outside' : 'inside'}(${fmt(p.n)}, ${layerFn(p).code})`, 'n', `${p.mode === 'outside' ? 'outside' : 'inside'}(${fmt(p.n)}, …) works ${p.mode === 'outside' ? `across ${fmt(p.n)} cycles at once` : `on each ${fmt(p.n)}th of a cycle as if it were a cycle`}: ${layerFn(p).say}.`],
+  press: (p) => [`.pressBy(${fmt(p.by)})`, 'by', `pressBy(${fmt(p.by)}) starts each event ${fmt(p.by)} of the way through its step.`],
   addnotes: (p) => [`.add(note(${q(maskText(p.pat))}))`, 'pat', `add(note("${maskText(p.pat)}")) moves every note up by that many semitones, following the pattern.`],
 };
 

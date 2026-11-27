@@ -203,6 +203,7 @@ Ranking also uses how prominent each function is in everyday Strudel patches (my
 | 9 | `iter`, `iterBack` | rotating melodies | built: Iter |
 | 10 | `add(note(...))` | Oleander; moves a riff through a progression | built: Add notes |
 
+**Second batch (2026-11-27, D20).** Built: `segment` (Segment), `linger` (Linger), `hurry` (Hurry), `chunk`/`chunkBack` (Chunk), `inside`/`outside` (Inside), `pressBy`/`press` (Press), `palindrome` (Palindrome); `euclidRot`/`euclidLegato`/`euclidLegatoRot` as Rotate and "hits last" on Euclid; `begin`/`end` as settings on Sample; chord voicing options (`dict`, `anchor`, `offset`, `octaves`, and `mode` beyond the three registers) on the Chord Sequencer. `rolled` was dropped: the Strudel version the app runs (core 1.2.6) has no `rolled`, and a negative `linger` fails there too, so Linger holds 1/16 to 1. Found on the way: `chord("<C Am>/2")` lost its slowdown on import (fixed).
 **Next candidates** (not built): chord voicing options `dict`/`anchor`/`offset`/`mode` (3 songs, and an `IDEAS.md` item); `pick`/`pickOut`/`pickRestart` (table lookups; needs a design for the table values);
 `slice`/`splice`; `linger`; `hurry`; `chunk`; `inside`/`outside`; `rolled`; `press`; `segment`; `euclidRot`/`euclidLegato` as options on Euclid; `begin`/`end` on Sample; `velocity` on samples; `whenKey`; `stut` as an alias of Echo.
 

@@ -15,7 +15,7 @@ struct sustain pw pwrate pwsweep tremolo tremolosync tremolodepth tremoloshape t
 add sub div mask seg palindrome adsr someCycles someCyclesBy sometimes often rarely almostNever almostAlways always never superimpose off jux juxBy chunk chunkBack linger iter iterBack hurry inside outside
 early dict set when cpm press pressBy rolled rolledBy slice splice chop striate begin end loopAt cut unit accelerate nudge cutoff resonance hcutoff hresonance bandf bandq sz rsize roomfade roomlp roomdim lpattack lprelease hpattack hprelease
 delayfb delayt dt dfb att dec sus rel amp vel sound freq stut echo euclidRot euclidLegato euclidInv euclidLegatoRot fastGap compress zoom focus rangex inv bite squeeze toggle pick scaleTranspose trans rootNotes
-degradeBy undegradeBy brak ply plyWith fastchunk slowchunk run gap legato note n s ftype color colour anchor echoWith rib offset partials phases`.split(/\s+/).filter(Boolean));
+degradeBy undegradeBy brak ply plyWith fastchunk slowchunk run gap legato note n s ftype color colour anchor echoWith rib offset octaves partials phases`.split(/\s+/).filter(Boolean));
 // helper definitions the compiler writes word for word (nothing in them depends on the patch): allowed only when they match exactly
 const FIXED = new Set(["register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9).lps(.2).lpd(.12))"]);
 export const MAX_CHARS = 600_000;

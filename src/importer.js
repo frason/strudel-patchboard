@@ -393,7 +393,7 @@ export function importStrudel(code, { sounds = null } = {}) {
 
   // methods that set one parameter on the sound maker itself (order does not matter in Strudel: they just set values)
   const SYNTH_P = { gain: 'gain', pan: 'pan', attack: 'attack', att: 'attack', decay: 'decay', dec: 'decay', sustain: 'sustain', sus: 'sustain', release: 'release', rel: 'release', lpf: 'lpf', cutoff: 'lpf', lp: 'lpf', lpq: 'lpq', resonance: 'lpq', detune: 'detune' };
-  const SAMP_P = { gain: 'gain', pan: 'pan', speed: 'speed', attack: 'attack', att: 'attack', decay: 'decay', dec: 'decay', release: 'release', rel: 'release', lpf: 'lpf', cutoff: 'lpf', lp: 'lpf' };
+  const SAMP_P = { gain: 'gain', pan: 'pan', speed: 'speed', attack: 'attack', att: 'attack', decay: 'decay', dec: 'decay', release: 'release', rel: 'release', lpf: 'lpf', cutoff: 'lpf', lp: 'lpf', begin: 'begin', end: 'end' };
   // effect modules: [module, parameter, extra fixed params]
   const FM_FX = { fm3: ['fm', 'index3'], fmh3: ['fm', 'harm3'], fm4: ['fm', 'index4'], fmh4: ['fm', 'harm4'], fm33: ['fm', 'fb3'], fm44: ['fm', 'fb4'] };
   for (const i of [1, 2, 3, 4]) for (const j of [0, 1, 2, 3, 4]) if (j !== i && i !== j + 1) FM_FX['fm' + i + j] = ['fm', 'r' + i + j];
@@ -433,6 +433,11 @@ export function importStrudel(code, { sounds = null } = {}) {
     for (const [k, f] of Object.entries(LAYER_FNS)) if (t === f.code) return k;
     throw new Skip(`${what}() with this function cannot be shown`);
   }
+
+  // a call that changes WHEN things happen, on a line that also reads a continuous signal (sine, rand...): the module sits before the instrument, so the signal would be read at different moments. Such lines stay as written.
+  const SIGNALS = /\b(sine|cosine|saw|isaw|tri|square|rand|perlin|irand|brand|envL|envR|time)\b/;
+  const timeSafe = (S, what) => { if (S.stmt && typeof S.stmt.start === 'number' && SIGNALS.test(code.slice(S.stmt.start, S.stmt.end))) throw new Skip(`${what}() on a line that also uses a continuous signal, where the order of the calls changes what the signal is read at`); };
+  const TIMING = new Set(['segment', 'seg', 'linger', 'hurry', 'chunk', 'chunkBack', 'inside', 'outside', 'press', 'pressBy', 'palindrome']);
 
   function sometimesFn(node) {
     const s = code.slice(node.start, node.end).replace(/\s+/g, '');
@@ -562,10 +567,12 @@ export function importStrudel(code, { sounds = null } = {}) {
       if (!calls.some((c) => c.name === 'voicing')) throw new Skip('chord() without voicing() plays nothing by itself in Strudel, so it is kept as written');
       const { items, mode, fast, slow } = readSteps(text, 'rhythm', (l) => l);
       void items;
-      const parsed = parseMiniChords(text);
+      const tail = /^\s*(.*[>\]])\s*\/\s*(\d+(?:\.\d+)?)\s*$/.exec(text), tailSlow = tail ? Number(tail[2]) : 1;   // "<Am Dm>/4": the slowdown after the turns was dropped before, so every chord lasted one cycle
+      const parsed = parseMiniChords(tail ? tail[1] : text);
       S.root = add('chords', { steps: parsed.cells.length, mode: parsed.mode, cells: parsed.cells }, stmt);
       if (parsed.fast !== 1) S.pre.push({ type: 'fast', params: { n: parsed.fast } });
-      if (slow !== 1) S.pre.push({ type: 'slow', params: { n: slow } });   // <Am Dm>/4: each chord lasts four cycles
+      if (slow !== 1) S.pre.push({ type: 'slow', params: { n: slow } });
+      else if (tailSlow !== 1) S.pre.push({ type: 'slow', params: { n: tailSlow } });   // <Am Dm>/4: each chord lasts four cycles
       S.kind = 'notes';
       S.instrument = add('synth', { wave: 'triangle' }, stmt);
       S.sources.push(S.instrument);
@@ -805,8 +812,17 @@ export function importStrudel(code, { sounds = null } = {}) {
       return;
     }
     if (n === 'voicing') return;
-    if (n === 'mode' && S.root?.type === 'chords') { const t = str(a[0]); if (t && ['above:c3', 'above:c4', 'above:c5'].includes(t)) { S.root.params.register = t; return; } throw new Skip('this voicing mode'); }
-    if (n === 'dict' && str(a[0]) === 'ireal') return;   // the voicing dictionary the Chords module already uses
+    if (S.root?.type === 'chords' && (n === 'mode' || n === 'dict' || n === 'anchor' || n === 'offset' || n === 'octaves')) {   // how the chords are voiced: only the shapes the Chord Sequencer can write; the rest keeps the whole line as written
+      const P = S.root.params;
+      if (n === 'mode') { const t = str(a[0]); if (t && /^(above|below|duck|root):[a-g][#b]?\d$/.test(t)) { if (['above:c3', 'above:c4', 'above:c5'].includes(t)) P.register = t; else P.voice = t; return; } throw new Skip('this voicing mode'); }
+      if (n === 'dict') { const t = str(a[0]); if (t === 'ireal') { P.dict = ''; return; } if (t && ['ireal-ext', 'lefthand', 'legacy'].includes(t)) { P.dict = t; return; } throw new Skip('this voicing list'); }
+      if (n === 'anchor') { const t = str(a[0]); if (t && /^[a-g][#b]?\d$/.test(t)) { P.anchor = t; return; } throw new Skip('anchor() with something other than a note name'); }
+      const v = num(a[0]);
+      if (n === 'offset') { if (a.length === 1 && v !== null && Number.isInteger(v) && v >= -3 && v <= 3) { P.offset = v; return; } throw new Skip('offset() with something other than a whole number from -3 to 3'); }
+      if (a.length === 1 && v !== null && Number.isInteger(v) && v >= 1 && v <= 4) { P.octaves = v; return; }
+      throw new Skip('octaves() with something other than a whole number from 1 to 4');
+    }
+    if (n === 'voicing') return;
     if (n === 'anchor' || n === 'dict' || n === 'offset' || n === 'octaves') throw new Skip(`${n}() voicing setting`);
     if (n === 'velocity' && S.melody) { const t = str(a[0]); if (t === null) throw new Skip('velocity with something other than a pattern string'); velocity.push({ text: t, line: c.prop.loc.start.line }); return; }
     if ((n === 's' || n === 'sound') && str(a[0]) === 'user' && S.kind === 'notes') { S.userWave = true; return; }   // sound("user") builds the wave from .partials([...]): that is the Harmonics module
@@ -911,6 +927,11 @@ export function importStrudel(code, { sounds = null } = {}) {
     if (n === 'rev') { S.pre.push({ type: 'rev', params: {} }); return; }
     if (n === 'transpose' || n === 'trans') { const v = num(a[0]); if (v === null) throw new Skip('transpose() with something other than a number'); if (S.kind !== 'notes') throw new Skip('transpose() only works on notes'); S.pre.push({ type: 'transpose', params: { n: v } }); return; }
     if (n === 'euclid') { const p = num(a[0]), st = num(a[1]); if (p === null || st === null) throw new Skip('euclid() with something other than numbers'); S.pre.push({ type: 'euclid', params: { pulses: p, steps: st } }); return; }
+    if (n === 'euclidRot' || n === 'euclidLegato' || n === 'euclidLegatoRot') {   // the same module with Rotate and "until the next hit"; only whole numbers the module holds, anything else stays as written
+      const rotated = n !== 'euclidLegato', p = num(a[0]), st = num(a[1]), r = rotated ? num(a[2]) : 0;
+      if (a.length !== (rotated ? 3 : 2) || p === null || st === null || r === null || ![p, st, r].every(Number.isInteger) || p < 1 || p > 16 || st < 1 || st > 16 || p > st || r < 0 || r >= st) throw new Skip(`${n}() with something other than whole numbers (hits 1 to 16, steps 1 to 16 and a rotation below the steps)`);
+      S.pre.push({ type: 'euclid', params: { pulses: p, steps: st, rot: r, legato: n === 'euclidRot' ? 'off' : 'on' } }); return;
+    }
     // the ten transform modules that write one call each: only the shapes the module can write back exactly; anything else stays as written
     if (n === 'mask' || n === 'when' || n === 'addnotes' || n === 'add') {
       const textArg = (x) => { const t = str(x); return t !== null && t.length <= 500 && !/["\\\n]/.test(t) ? t : null; };
@@ -951,6 +972,39 @@ export function importStrudel(code, { sounds = null } = {}) {
       if (S.callNames.has('gain') || S.callNames.has('velocity') || S.callNames.has('postgain')) throw new Skip('echo() on a line that also sets the volume, where the order of the calls matters');
       S.pre.push({ type: 'echo', params: { times: t, time: d, fb: f } }); return;
     }
+    if (TIMING.has(n)) timeSafe(S, n);
+    if (n === 'palindrome') { if (a.length) throw new Skip('palindrome() with something inside'); S.pre.push({ type: 'palindrome', params: {} }); return; }
+    if (n === 'segment' || n === 'seg') {
+      const v = num(a[0]);
+      if (a.length !== 1 || v === null || !Number.isInteger(v) || v < 1 || v > 64) throw new Skip(`${n}() with something other than a whole number from 1 to 64`);
+      S.pre.push({ type: 'segment', params: { n: v } }); return;
+    }
+    if (n === 'linger') {
+      const v = num(a[0]);
+      if (a.length !== 1 || v === null || v < 0.0625 || v > 1) throw new Skip('linger() with something other than a fraction from 1/16 to 1');
+      S.pre.push({ type: 'linger', params: { t: v } }); return;
+    }
+    if (n === 'hurry') {
+      const v = num(a[0]);
+      if (a.length !== 1 || v === null || v < 0.25 || v > 8) throw new Skip('hurry() with something other than a number from 0.25 to 8');
+      if (S.callNames.has('speed')) throw new Skip('hurry() on a line that also sets speed(), where the order of the calls matters');
+      S.pre.push({ type: 'hurry', params: { n: v } }); return;
+    }
+    if (n === 'chunk' || n === 'chunkBack') {
+      const v = num(a[0]);
+      if (a.length !== 2 || v === null || !Number.isInteger(v) || v < 2 || v > 8) throw new Skip(`${n}() with something other than a whole number from 2 to 8 and a function`);
+      S.pre.push({ type: 'chunk', params: { n: v, fn: layerFnKey(a[1], n), mode: n } }); return;
+    }
+    if (n === 'inside' || n === 'outside') {
+      const v = num(a[0]);
+      if (a.length !== 2 || v === null || !Number.isInteger(v) || v < 2 || v > 8) throw new Skip(`${n}() with something other than a whole number from 2 to 8 and a function`);
+      S.pre.push({ type: 'inside', params: { n: v, fn: layerFnKey(a[1], n), mode: n } }); return;
+    }
+    if (n === 'press' || n === 'pressBy') {
+      const v = n === 'press' ? 0.5 : num(a[0]);
+      if (a.length !== (n === 'press' ? 0 : 1) || v === null || v < 0 || v > 0.9) throw new Skip('pressBy() with something other than a fraction from 0 to 0.9');
+      S.pre.push({ type: 'press', params: { by: v } }); return;
+    }
     if (n === 'iter' || n === 'iterBack') {
       const v = num(a[0]);
       if (a.length !== 1 || v === null || !Number.isInteger(v) || v < 2 || v > 16) throw new Skip(`${n}() with something other than a whole number from 2 to 16`);
@@ -969,7 +1023,8 @@ export function importStrudel(code, { sounds = null } = {}) {
     if (OTHER_VIZ.has(n)) throw new Skip(`${n}() is a visual that has no module (pianoroll, punchcard, spiral, pitchwheel and scope do)`);
     if (n === 'cpm' || n === 'cps') throw new Skip(`${n}() on one pattern (the tempo is set for the whole patch by the Output module)`);
     // gain and friends: parameters of the sound maker
-    const synthKey = SYNTH_P[n], sampKey = SAMP_P[n];
+    const cutsSample = ['chop', 'striate', 'loopAt', 'slice', 'splice', 'hurry', 'segment', 'linger', 'chunk', 'chunkBack'].some((k) => S.callNames.has(k));   // begin and end next to a call that cuts or re-times the sample: which one comes first changes the sound, so they stay as written
+    const synthKey = SYNTH_P[n], sampKey = (n === 'begin' || n === 'end') && cutsSample ? undefined : SAMP_P[n];
     if (src.length && (src.some((s) => s.type === 'synth' && synthKey) || src.some((s) => s.type === 'sample' && sampKey))) {
       const targets = src.filter((s) => (s.type === 'synth' ? SYNTH_P : SAMP_P)[n]);
       targets.forEach((t) => setParam(t, (t.type === 'synth' ? SYNTH_P : SAMP_P)[n], a[0], S.stmt));

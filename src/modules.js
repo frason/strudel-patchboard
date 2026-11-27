@@ -172,6 +172,11 @@ export const MODULES = {
       { key: 'steps', label: 'chords', kind: 'select', def: 4, options: [1, 2, 3, 4, 5, 6, 7, 8], num: true, fold: true },
       { key: 'mode', label: 'play', kind: 'select', def: 'turns', options: [['steps', 'all chords in a cycle'], ['turns', 'one chord per cycle <>']], fold: true },
       { key: 'register', label: 'register', kind: 'select', def: '', options: [['', 'default'], ['above:c3', 'low'], ['above:c4', 'middle'], ['above:c5', 'high']], fold: true },
+      { key: 'voice', label: 'voicing mode', kind: 'text', def: '', fold: true, tip: 'how chords are placed around a note: above:c3, below:c5, duck:c4 or root:g2 (root puts the chord\'s root note there: a bass line). Replaces the register when set.' },
+      { key: 'anchor', label: 'anchor note', kind: 'text', def: '', fold: true, tip: 'the note chords are placed around, such as c5; leave empty for the default' },
+      { key: 'offset', label: 'offset', kind: 'knob', min: -3, max: 3, step: 1, def: 0, fold: true, tip: 'use the next chord shape up (positive) or down (negative) in the voicing list' },
+      { key: 'octaves', label: 'octaves', kind: 'knob', min: 1, max: 4, step: 1, def: 1, fold: true, tip: 'how many octaves the chord notes may spread over' },
+      { key: 'dict', label: 'voicing list', kind: 'select', def: '', options: [['', 'default (ireal)'], ['ireal-ext', 'ireal extended'], ['lefthand', 'left hand (piano)'], ['legacy', 'legacy']], fold: true, tip: 'which list of chord shapes is used' },
     ],
     data: { cells: true, chords: true },
   },
@@ -234,6 +239,8 @@ export const MODULES = {
       { key: 'lpf', label: 'lpf', kind: 'knob', min: 50, max: 20000, step: 1, def: 20000, call: 'lpf', unit: 'Hz', log: true, wire: true, tip: 'low-pass filter cutoff (20000 = open)' },
       { key: 'gain', label: 'gain', kind: 'knob', min: 0, max: 1.5, step: 0.01, def: 1, call: 'gain', wire: true, tip: 'volume' },
       { key: 'pan', label: 'pan', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0.5, call: 'pan', wire: true, tip: 'left (0) to right (1)' },
+      { key: 'begin', label: 'start at', kind: 'knob', min: 0, max: 1, step: 0.01, def: 0, call: 'begin', tip: 'where in the sample it starts: 0 is the very start, 0.5 halfway', fold: true },
+      { key: 'end', label: 'end at', kind: 'knob', min: 0, max: 1, step: 0.01, def: 1, call: 'end', tip: 'where in the sample it stops: 1 is the very end', fold: true },
     ],
   },
 
@@ -331,10 +338,12 @@ export const MODULES = {
   euclid: {
     title: 'Euclid', cat: 'transform', out: 'through', preview: 'euclid',
     inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
-    blurb: 'Spreads some hits as evenly as possible over some steps: euclid(3,8) is a classic rhythm.',
+    blurb: 'Spreads some hits as evenly as possible over some steps: euclid(3,8) is a classic rhythm. Rotate moves where the pattern starts, so the same rhythm lands in a different place (euclidRot). Held makes each hit last until the next one (euclidLegato), for long notes instead of short ones.',
     params: [
       { key: 'pulses', label: 'hits', kind: 'knob', min: 1, max: 16, step: 1, def: 3, always: true },
       { key: 'steps', label: 'steps', kind: 'knob', min: 1, max: 16, step: 1, def: 8, always: true },
+      { key: 'rot', label: 'rotate', kind: 'knob', min: 0, max: 15, step: 1, def: 0, fold: true, tip: 'start this many steps later in the rhythm' },
+      { key: 'legato', label: 'hits last', kind: 'select', def: 'off', options: [['off', 'a short hit'], ['on', 'until the next hit']], fold: true },
     ],
     call: 'euclid',
   },
@@ -420,6 +429,56 @@ export const MODULES = {
       { key: 'n', label: 'steps', kind: 'knob', min: 2, max: 16, step: 1, def: 4, always: true },
       { key: 'mode', label: 'direction', kind: 'select', def: 'iter', options: [['iter', 'forward'], ['iterBack', 'back']] },
     ],
+  },
+  palindrome: {
+    title: 'Palindrome', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Plays the pattern forwards, then backwards, and so on: one cycle forwards, the next one reversed. Over two cycles it makes a melody go there and back.',
+    params: [],
+  },
+  segment: {
+    title: 'Segment', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Looks at the pattern a fixed number of times per cycle and plays what it finds there: segment(8) gives eight evenly spaced events a cycle. It is how a smooth, changing value (a wave or a random number) becomes steps. It multiplies the events, so very large numbers are refused.',
+    params: [{ key: 'n', label: 'per cycle', kind: 'knob', min: 1, max: 64, step: 1, def: 8, always: true }],
+  },
+  linger: {
+    title: 'Linger', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Keeps only the first part of each cycle and repeats it to fill the cycle: linger(0.25) loops the first quarter four times, a stutter.',
+    params: [{ key: 't', label: 'part kept', kind: 'knob', min: 0.0625, max: 1, step: 0.0625, def: 0.25, always: true, tip: 'a fraction of the cycle: 0.25 is the first quarter' }],
+  },
+  hurry: {
+    title: 'Hurry', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Speeds the pattern up and plays the samples faster too, so they rise in pitch with it: hurry(2) is twice as fast and an octave higher. Below 1 it slows everything down. It sets the sample speed, so it stays as written on a line that also sets speed.',
+    params: [{ key: 'n', label: 'rate', kind: 'knob', min: 0.25, max: 8, step: 0.25, def: 2, always: true }],
+  },
+  chunk: {
+    title: 'Chunk', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Splits each cycle into parts and changes one part per cycle, moving along: chunk(4, …) changes the first quarter in cycle one, the second in cycle two, and so on. Back runs the other way.',
+    params: [
+      { key: 'n', label: 'parts', kind: 'knob', min: 2, max: 8, step: 1, def: 4, always: true },
+      { key: 'fn', label: 'change', kind: 'select', def: 'up12', options: layerOptions },
+      { key: 'mode', label: 'direction', kind: 'select', def: 'chunk', options: [['chunk', 'forward'], ['chunkBack', 'back']] },
+    ],
+  },
+  inside: {
+    title: 'Inside', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Changes the pattern as if it were stretched over several cycles, then squeezes it back: inside(2, rev) reverses each half-cycle on its own instead of the whole cycle. Outside is the opposite, working over several cycles at once.',
+    params: [
+      { key: 'n', label: 'by', kind: 'knob', min: 2, max: 8, step: 1, def: 2, always: true },
+      { key: 'fn', label: 'change', kind: 'select', def: 'rev', options: layerOptions },
+      { key: 'mode', label: 'works', kind: 'select', def: 'inside', options: [['inside', 'inside each cycle'], ['outside', 'across several cycles']] },
+    ],
+  },
+  press: {
+    title: 'Press', cat: 'transform', out: 'through',
+    inputs: [{ id: 'in', type: PATTERN_TYPES, label: 'in', required: true }],
+    blurb: 'Moves each event later within its own slot, so it is played late and short: press at 0.5 starts every event halfway through its step. At 0 nothing moves. A way to put a groove on a straight pattern.',
+    params: [{ key: 'by', label: 'how late', kind: 'knob', min: 0, max: 0.9, step: 0.05, def: 0.5, always: true, tip: 'the fraction of its step that each event waits' }],
   },
   addnotes: {
     title: 'Add notes', cat: 'transform', out: 'through',
@@ -972,7 +1031,7 @@ export const slotWidth = (n) => (n <= 1 ? 20 : n * 14 + (n - 1) * 2);
 // What the speaker / power button on a module does: 'silence' mutes a source, 'bypass' lets the sound through untouched.
 export const MUTE_KIND = Object.fromEntries([
   ...['melody', 'notetext', 'rhythm', 'hitpattern', 'chords', 'drums', 'synth', 'sample', 'randnotes', 'randrhythm', 'codesource', 'take'].map((t) => [t, 'silence']),
-  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes', 'code', 'harmonics', 'notefilter', 'mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes'].map((t) => [t, 'bypass']),
+  ...['fast', 'slow', 'rev', 'transpose', 'ply', 'late', 'swing', 'clip', 'degrade', 'euclid', 'every', 'arp', 'filter', 'delay', 'reverb', 'distortion', 'acid', 'vibrato', 'pulsewidth', 'vowel', 'djf', 'lofi', 'pitchenv', 'fm', 'pan', 'tremolo', 'phaser', 'compressor', 'orbit', 'fx', 'shuffle', 'sometimes', 'code', 'harmonics', 'notefilter', 'mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes', 'segment', 'linger', 'hurry', 'chunk', 'inside', 'press', 'palindrome'].map((t) => [t, 'bypass']),
 ]);
 
 // FM presets: every FM knob is reset to its default and then these are applied, so a preset always sounds the same whatever was set before.
