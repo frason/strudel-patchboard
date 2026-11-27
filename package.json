@@ -21,7 +21,8 @@
     "handoff:index": "node scripts/handoff.mjs index",
     "docs": "node scripts/build-docs.mjs --out public",
     "perf:play": "node --import ./scripts/stub-loader.mjs scripts/perf-play.mjs",
-    "bench:query": "node --import ./scripts/stub-loader.mjs scripts/bench-query.mjs"
+    "bench:query": "node --import ./scripts/stub-loader.mjs scripts/bench-query.mjs",
+    "bench:board": "node --import ./scripts/stub-loader.mjs scripts/bench-board.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

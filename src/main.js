@@ -33,6 +33,7 @@ import { openGrab } from './grabui.js';
 import { evidenceFor } from './evidence.js';
 import { buildFormMap, drawFormMap, describeMap, MAP_LENGTHS } from './formmap.js';
 import { makeShareFragment, readShareFragment, describeBoard, SHARE_PREFIX } from './share.js';
+import { loadLibrary } from './library.js';
 import { sliderValues } from './slider.js';
 import { wavBytes, recordingSeconds, recordingName } from './wav.js';
 import { noteName } from './takecode.js';
@@ -1161,6 +1162,7 @@ addBtn.addEventListener('click', openAddMenu);
 learnBtn.addEventListener('click', () => {
   showPop(learnBtn, h('div', { class: 'menu' }, h('div', { class: 'menu-h' }, 'Learning path'),
     h('button', { class: 'menu-item', onclick: () => { closePop(); showIntro(); } }, 'About this site'),
+    h('button', { class: 'menu-item', id: 'open-library', onclick: () => { closePop(); openLibrary(); } }, 'Library of boards…'),
     LESSONS.flatMap((l, i) => [
       ...(l.section && l.section !== LESSONS[i - 1]?.section ? [h('div', { class: 'menu-h' }, l.section)] : []),
       h('button', { class: 'menu-item', dataset: { lesson: l.id }, onclick: () => loadLesson(l) }, l.title),
@@ -1707,6 +1709,31 @@ document.querySelector('.brand')?.setAttribute('title', 'About this site');
 let introSeen = false;
 try { introSeen = localStorage.getItem('pb.introSeen') === '1'; } catch { /* private mode */ }
 if (!introSeen) showIntro();
+
+// ---------- the library: boards that ship inside the app (nothing is fetched); each is checked like a shared link and opens as a copy ----------
+let library = null;
+function openLibrary() {
+  library = library || loadLibrary(import.meta.glob('../library/*.json', { eager: true }));
+  const rows = library.entries.map((e) => {
+    const out = h('div', { 'aria-live': 'polite' }), kinds = Object.entries(e.facts.types).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, n]) => `${n} ${MODULES[t]?.title || t}`).join(', ');
+    return h('div', { class: 'lib-entry', style: 'border-top:1px solid #2a323b;padding:8px 0' },
+      h('strong', {}, e.title), e.by ? h('span', { class: 'imp-hint' }, ' · ' + e.by) : null,
+      h('p', { class: 'imp-hint' }, `${e.about} ${e.facts.modules} modules (${kinds}).`), out,
+      h('div', { class: 'modal-btns' },
+        h('button', { class: 'btn ghost', dataset: { check: e.id }, title: 'Reads the board back into modules and plays 8 cycles of both offline to compare them', onclick: async (ev) => {
+          const b = ev.currentTarget; b.disabled = true; out.textContent = engine.playing ? 'Checking (the music is playing: this can make a note late)…' : 'Checking…';
+          try { const r = await evidenceFor(e.graph, { sounds: (name, bank) => soundsFor(bank || '').includes(name) }); out.replaceChildren(...r.labels.map((l) => h('div', { class: 'imp-hint' }, (l.ok === true ? '✓ ' : l.ok === false ? '✗ ' : '· ') + l.text))); }
+          catch (err) { out.textContent = 'The check failed: ' + String((err && err.message) || err).slice(0, 120); }
+          b.disabled = false;
+        } }, 'Run the checks'),
+        h('button', { class: 'btn', dataset: { open: e.id }, onclick: () => { closeModal(); loadGraph(e.graph, e.title); } }, 'Open a copy')));
+  });
+  showModal('Library of boards', h('div', {},
+    h('p', { class: 'imp-hint' }, 'Boards that come with the app. Nothing is downloaded. Opening one replaces what is on the board now (you can undo). The checks say the code passes the safety check and reads back the same over 8 cycles; they say nothing about how it sounds, and sample packs a board names are only fetched if you approve them when you play.'),
+    rows.length ? rows : h('p', { class: 'imp-hint' }, 'The library is empty.'),
+    library.errors.length ? h('p', { class: 'imp-hint' }, 'Left out: ' + library.errors.slice(0, 3).join('; ') + '.') : null,
+    h('div', { class: 'modal-btns' }, h('button', { class: 'btn ghost', onclick: closeModal }, 'Close'))));
+}
 
 // ---------- a shared link: show what it is, and open it only if the person says so ----------
 async function openSharedLink() {

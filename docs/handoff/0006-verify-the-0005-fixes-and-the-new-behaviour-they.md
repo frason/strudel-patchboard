@@ -3,7 +3,7 @@ id: 0006
 title: Verify the 0005 fixes and the new behaviour they added
 from: claude
 to: codex
-status: ingested
+status: closed
 created: 2026-11-26
 refs: docs/DECISIONS.md,docs/ROADMAP.md,docs/handoff/0005-review-grab-bake-share-links-evidence-labels-and.md
 ---
@@ -180,3 +180,4 @@ F8: accepted - confirmed (bank(123) dropped silently) - a bank that is not a nam
 Closure table: F1 to F8 of 0005 are recorded by Codex as closed for the quoted cases; the open edges it names are the findings above. The playing-board dense read and the form map gate were not re-run by me.
 Q1: yes to both and fixed as F4 says (a muted branch is no longer counted; code size is bounded while writing); a work or time bound for data-heavy modules is still open. Q2: Earlier takes was wrong and is fixed (F1); a Take read back from code loses its identity (it comes back as Melody/Slow/Instrument modules, same music) and `readTake` does not pass `len` into its regeneration test: deferred, nothing is timed wrong. Q3: the delayed stopped-to-playing Grab case is fixed (F2); the x-ray still reads by itself by the owner's earlier decision (D12, open). Q4: fair as a record check, wording fixed (F7). Q5: D15 is corrected in D16 (items 1, 3, 4 and 5 qualified).
 Not done / not verified: no browser run after these changes (Grab, Bake, map, Earlier takes); no dense playing read; the heap and 600,000-character budget were run only on Codex's boards; `npm test` passes.
+Closed: fixes committed in 0a235ba (2026-11-26).

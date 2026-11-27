@@ -92,3 +92,20 @@ Same method (15 s windows, 3 runs, baseline `r3-idle`, headless Chrome, one mach
 - Final: all three boards pass the gate against idle (0 skipped notes, underruns, stalls and long tasks; heap growth 3 MB or less).
 - What it does not show: whether the memory per evaluation is released later (the window is short), so a very long session of repeated x-ray readings (one evaluation and two queries per reading) is still unmeasured; a form map on a board with many dense voices; a phone.
 
+## Whole boards: compile, guard, one reading and a form map (Node, `npm run bench:board`, 2026-11-26)
+`scripts/bench-board.mjs` runs the real compile, guard, one 4-cycle reading and a 32-cycle form map on the library boards and on deliberately heavy boards (median of 5; the map is one run). Node numbers, not browser numbers.
+
+| board | writings | code chars | compile ms | guard ms | read 4 cycles ms | events | map 32 cycles ms |
+|---|---|---|---|---|---|---|---|
+| library: whole song | 23 | 865 | 0.2 | 0.2 | 5.3 | 99 | 148 |
+| library: chords / song / trance | 9 / 10 / 21 | 249 / 370 / 596 | 0.0 to 0.2 | 0.0 to 0.2 | 2.3 / 3.6 / 5.6 | 83 / 64 / 146 | 31 / 53 / 37 |
+| Take 600 notes | 3 | 4,567 | 0.5 | 0.0 | 57 | 64 | 349 |
+| Take 2,000 notes (the cap) | 3 | 15,038 | 0.8 | 0.1 | 90 | 64 | 478 |
+| Take 2,000 notes, len 64 beats | 3 | 15,038 | 1.3 | 0.1 | 94 | 64 | 485 |
+| fan-out depth 8 | 512 | 14,863 | 2.2 | 0.3 | 12 | 1,024 | 15 |
+| fan-out depth 11 (4,095 writings) | 4,096 | 155,663 | 73 | 2.6 | 100 | 8,192 | 39 |
+| chain of 30 transforms (ten `fast`) | 32 | 384 | 0.1 | 0.0 | **1,189** | 32,769 | **3,704** |
+| chain of 120 transforms | 122 | 1,404 | 0.3 | 0.2 | refused by the guard (65,536 events per cycle, limit 50,000) | | |
+
+What this shows: compiling and the guard are cheap everywhere, including the deepest admitted fan-out (73 ms). The cost is in reading. A Take at the 2,000-note cap reads in about 90 ms; library boards read in under 6 ms. A short chain of ten `fast` modules (32 modules, 384 characters) is admitted by the guard and takes 1.2 s to read once and 3.7 s for a 32-cycle map, because it makes about 8,000 events per cycle: the guard's 50,000 events per cycle limit is far above what the player or the readings can take comfortably. That is the existing mitigation's job (x-ray reads one cycle first; Grab, Bake and the map wait for a button while music plays), not a fix: a lower event limit would change what boards are allowed and is the owner's call. Not measured: the browser, live edits while playing, a phone, a long session.
+

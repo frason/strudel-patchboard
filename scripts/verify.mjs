@@ -2422,6 +2422,19 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
     const rec = await queryEvents('$: s("bd").bank(123)', { to: 1 }), r = grabFrom(rec, { bpm: 120, beatsPerBar: 4, grid: 12 });
     check('0006 F8: a non-string bank is named as a control the hit pattern does not keep', r.hits.report.controlsLost.includes('bank') && lossesOf(r, rec).some((m) => /bank/.test(m)));
   }
+  // ---- library ----
+  {
+    const { loadLibrary, parseEntry } = await import('../src/library.js'), { readFileSync, readdirSync } = await import('node:fs'), { evidenceFor } = await import('../src/evidence.js');
+    const files = Object.fromEntries(readdirSync(new URL('../library/', import.meta.url)).filter((f) => f.endsWith('.json')).map((f) => [f, JSON.parse(readFileSync(new URL('../library/' + f, import.meta.url), 'utf8'))]));
+    const lib = loadLibrary(files);
+    check('Library: every file in library/ is a valid entry (shape, expansion, compile, guard), none is left out, and ids are unique', lib.entries.length === Object.keys(files).length && lib.errors.length === 0 && lib.entries.length >= 4 && new Set(lib.entries.map((e) => e.id)).size === lib.entries.length);
+    const results = []; for (const e of lib.entries) { const r = await evidenceFor(e.graph, { cycles: 4 }); const rb = r.labels.find((l) => l.id === 'readback'); results.push([e.id, r.ok || (rb && rb.equal === true && r.labels.every((l) => l.ok !== false || l.id === 'readback')), r.labels.filter((l) => l.ok === false).map((l) => l.text.slice(0, 80))]); }
+    check('Library: each shipped board reads back to the same events over 4 cycles on this engine (a board whose read folded events is allowed only when the records still match)' + (results.some((r) => !r[1]) ? ' ' + JSON.stringify(results.filter((r) => !r[1])) : ''), results.every((r) => r[1]));
+    const bad = [parseEntry({ v: 1, kind: 'other', id: 'x', graph: {} }), parseEntry({ v: 1, kind: 'patchboard-library-entry', id: 'Bad Id', graph: {} }), parseEntry({ v: 1, kind: 'patchboard-library-entry', id: 'ok', graph: { v: 1, nodes: [{ id: 'a', type: 'nonsense', params: {} }], wires: [] } }), parseEntry(null)];
+    check('Library: a wrong kind, a bad id, an unknown module and null are each refused with a reason, never thrown', bad.every((b) => b.error && !b.entry));
+    const twice = loadLibrary({ a: files['song.json'], b: files['song.json'] });
+    check('Library: a duplicate id is listed once and the second is reported', twice.entries.length === 1 && twice.errors.length === 1);
+  }
 }
 
 process.exit(failures ? 1 : 0);

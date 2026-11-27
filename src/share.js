@@ -38,8 +38,13 @@ export async function readShareFragment(fragment) {
   let env;
   try { env = JSON.parse(text); } catch { return { error: 'This link does not contain a board.' }; }
   if (!env || env.v !== 1 || env.kind !== 'patchboard-board' || typeof env.graph !== 'object') return { error: 'This link is from a different kind of share, or a newer Patchboard.' };
+  return checkBoard(env.graph);
+}
+
+// a board that came from outside (a link, a library file): the shape, the expansion count, the compile and the guard. Returns { graph, code, issues } or { error }.
+export function checkBoard(raw) {
   let graph, removed = 0;
-  try { graph = validateShape(env.graph); const wires0 = graph.wires.length; normalize(graph); removed = Math.max(0, wires0 - graph.wires.length); } catch (e) { return { error: 'The board in this link is not valid: ' + String((e && e.message) || e).slice(0, 140) }; }
+  try { graph = validateShape(raw); const wires0 = graph.wires.length; normalize(graph); removed = Math.max(0, wires0 - graph.wires.length); } catch (e) { return { error: 'The board in this link is not valid: ' + String((e && e.message) || e).slice(0, 140) }; }
   // the compiler writes a module once for every path that reaches it, so a few modules wired in a fan-out can ask for an enormous amount of text: counted BEFORE anything is built, and refused past a limit
   const cost = expansionCost(graph); if (cost > MAX_EXPANSION) return { error: `The board in this link is too tangled to open safely: its cables fan out so that it would be written ${cost > 1e9 ? 'billions of' : cost.toLocaleString('en')} times over (the limit is ${MAX_EXPANSION.toLocaleString('en')}).` };
   let r; try { r = compile(graph); } catch (e) { return { error: 'The board in this link could not be turned into code: ' + String((e && e.message) || e).slice(0, 100) }; }

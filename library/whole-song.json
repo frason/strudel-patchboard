@@ -1,0 +1,830 @@
+{
+ "v": 1,
+ "kind": "patchboard-library-entry",
+ "id": "whole-song",
+ "title": "A whole song, with four new tricks",
+ "about": "A full arrangement that uses four of the newer modules.",
+ "by": "Patchboard lessons",
+ "graph": {
+  "v": 1,
+  "nodes": [
+   {
+    "id": "n1",
+    "type": "key",
+    "x": 0,
+    "y": 120,
+    "params": {
+     "root": "G",
+     "scale": "minor"
+    }
+   },
+   {
+    "id": "n2",
+    "type": "melody",
+    "x": 480,
+    "y": 0,
+    "params": {
+     "steps": 16,
+     "octave": 3,
+     "mode": "steps",
+     "root": "C",
+     "scale": "off",
+     "cells": [
+      {
+       "n": null,
+       "d": [
+        0,
+        2
+       ],
+       "len": 2,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": [
+        2,
+        4
+       ],
+       "len": 2,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": [
+        4,
+        6
+       ],
+       "len": 2,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": [
+        0,
+        2
+       ],
+       "len": 3,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": [
+        1
+       ],
+       "len": 2,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": [
+        16,
+        19
+       ],
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": [
+        4,
+        7
+       ],
+       "len": 2,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n3",
+    "type": "synth",
+    "x": 1944,
+    "y": 0,
+    "params": {
+     "wave": "gm_vibraphone",
+     "attack": 0.001,
+     "decay": 1.29,
+     "sustain": 0.79,
+     "release": 3,
+     "lpf": 20000,
+     "lpq": 1,
+     "detune": 0.18,
+     "gain": 1,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n4",
+    "type": "euclid",
+    "x": 1056,
+    "y": 72,
+    "params": {
+     "pulses": 5,
+     "steps": 8
+    }
+   },
+   {
+    "id": "n5",
+    "type": "every",
+    "x": 1536,
+    "y": 48,
+    "params": {
+     "n": 5,
+     "fn": "up12"
+    }
+   },
+   {
+    "id": "n7",
+    "type": "reverb",
+    "x": 2616,
+    "y": 120,
+    "params": {
+     "room": 0.79,
+     "size": 3.2
+    }
+   },
+   {
+    "id": "n8",
+    "type": "randnotes",
+    "x": 0,
+    "y": 480,
+    "params": {
+     "steps": 8,
+     "mode": "steps",
+     "range": 4,
+     "octave": 3,
+     "loop": 4,
+     "root": "G",
+     "scale": "minor"
+    }
+   },
+   {
+    "id": "n9",
+    "type": "synth",
+    "x": 1536,
+    "y": 408,
+    "params": {
+     "wave": "gm_sitar",
+     "attack": 0,
+     "decay": 0.41,
+     "sustain": 0.62,
+     "release": 2.71,
+     "lpf": 20000,
+     "lpq": 1,
+     "detune": 0.18,
+     "gain": 1.29,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n10",
+    "type": "slow",
+    "x": 480,
+    "y": 504,
+    "params": {
+     "n": 4
+    }
+   },
+   {
+    "id": "n11",
+    "type": "sometimes",
+    "x": 1056,
+    "y": 504,
+    "params": {
+     "p": 0.5,
+     "fn": "rev",
+     "loop": 0
+    }
+   },
+   {
+    "id": "n12",
+    "type": "chords",
+    "x": 0,
+    "y": 888,
+    "params": {
+     "steps": 8,
+     "mode": "turns",
+     "register": "above:c3",
+     "cells": [
+      {
+       "sym": "Gm",
+       "d": null,
+       "len": 1
+      },
+      {
+       "sym": "Dm",
+       "d": null,
+       "len": 1
+      },
+      {
+       "sym": "D#",
+       "d": null,
+       "len": 1
+      },
+      {
+       "sym": "A#",
+       "d": null,
+       "len": 1
+      },
+      {
+       "sym": "Cm",
+       "d": null,
+       "len": 1
+      },
+      {
+       "sym": "Gm",
+       "d": null,
+       "len": 1
+      },
+      {
+       "sym": "Cm",
+       "d": null,
+       "len": 1
+      },
+      {
+       "sym": "Dm",
+       "d": null,
+       "len": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n13",
+    "type": "synth",
+    "x": 1056,
+    "y": 792,
+    "params": {
+     "wave": "supersaw",
+     "attack": 0.032,
+     "decay": 0.74,
+     "sustain": 0.65,
+     "release": 0,
+     "lpf": 800,
+     "lpq": 0.9,
+     "detune": 0.18,
+     "gain": 1,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n14",
+    "type": "transpose",
+    "x": 480,
+    "y": 936,
+    "params": {
+     "n": -24
+    }
+   },
+   {
+    "id": "n15",
+    "type": "vibrato",
+    "x": 1536,
+    "y": 936,
+    "params": {
+     "rate": 11.1,
+     "depth": 0.55
+    }
+   },
+   {
+    "id": "n16",
+    "type": "filter",
+    "x": 1944,
+    "y": 792,
+    "params": {
+     "type": "lpf",
+     "cutoff": 800,
+     "q": 1,
+     "ftype": "12db",
+     "env": 2,
+     "fa": 0.007,
+     "fd": 0.91,
+     "fs": 0.62
+    }
+   },
+   {
+    "id": "n17",
+    "type": "sample",
+    "x": 480,
+    "y": 1200,
+    "params": {
+     "name": "bd",
+     "bank": "",
+     "fit": "off",
+     "speed": 1,
+     "attack": 0.001,
+     "decay": 0.05,
+     "release": 0.01,
+     "lpf": 20000,
+     "gain": 1,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n18",
+    "type": "rhythm",
+    "x": 0,
+    "y": 1320,
+    "params": {
+     "steps": 8,
+     "mode": "steps",
+     "cells": [
+      {
+       "on": true,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": true,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n19",
+    "type": "sample",
+    "x": 480,
+    "y": 1680,
+    "params": {
+     "name": "sd",
+     "bank": "",
+     "fit": "off",
+     "speed": 1,
+     "attack": 0.001,
+     "decay": 0.05,
+     "release": 0.01,
+     "lpf": 20000,
+     "gain": 1,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n20",
+    "type": "rhythm",
+    "x": 0,
+    "y": 1560,
+    "params": {
+     "steps": 8,
+     "mode": "steps",
+     "cells": [
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": true,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": true,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n21",
+    "type": "sample",
+    "x": 480,
+    "y": 2160,
+    "params": {
+     "name": "hh",
+     "bank": "",
+     "fit": "off",
+     "speed": 1,
+     "attack": 0.001,
+     "decay": 0.05,
+     "release": 0.01,
+     "lpf": 20000,
+     "gain": 1,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n22",
+    "type": "rhythm",
+    "x": 0,
+    "y": 1800,
+    "params": {
+     "steps": 8,
+     "mode": "steps",
+     "cells": [
+      {
+       "on": true,
+       "len": 1,
+       "x": "rep2"
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": true,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": true,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      },
+      {
+       "on": true,
+       "len": 1
+      },
+      {
+       "on": false,
+       "len": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n23",
+    "type": "stack",
+    "x": 1056,
+    "y": 1800,
+    "params": {
+     "n": 3
+    }
+   },
+   {
+    "id": "n24",
+    "type": "output",
+    "x": 2904,
+    "y": 816,
+    "params": {
+     "bpm": 124,
+     "mvol": 1,
+     "beats": 4,
+     "mphaser": 0,
+     "mtrem": 0,
+     "mchorus": 0
+    }
+   }
+  ],
+  "wires": [
+   {
+    "id": "w1",
+    "from": {
+     "node": "n1",
+     "port": "out"
+    },
+    "to": {
+     "node": "n2",
+     "port": "key"
+    }
+   },
+   {
+    "id": "w2",
+    "from": {
+     "node": "n2",
+     "port": "out"
+    },
+    "to": {
+     "node": "n4",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w3",
+    "from": {
+     "node": "n4",
+     "port": "out"
+    },
+    "to": {
+     "node": "n5",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w4",
+    "from": {
+     "node": "n5",
+     "port": "out"
+    },
+    "to": {
+     "node": "n3",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w7",
+    "from": {
+     "node": "n8",
+     "port": "out"
+    },
+    "to": {
+     "node": "n10",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w8",
+    "from": {
+     "node": "n10",
+     "port": "out"
+    },
+    "to": {
+     "node": "n11",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w9",
+    "from": {
+     "node": "n11",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w10",
+    "from": {
+     "node": "n12",
+     "port": "out"
+    },
+    "to": {
+     "node": "n14",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w11",
+    "from": {
+     "node": "n14",
+     "port": "out"
+    },
+    "to": {
+     "node": "n13",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w12",
+    "from": {
+     "node": "n13",
+     "port": "out"
+    },
+    "to": {
+     "node": "n15",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w13",
+    "from": {
+     "node": "n15",
+     "port": "out"
+    },
+    "to": {
+     "node": "n16",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w14",
+    "from": {
+     "node": "n18",
+     "port": "out"
+    },
+    "to": {
+     "node": "n17",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w15",
+    "from": {
+     "node": "n20",
+     "port": "out"
+    },
+    "to": {
+     "node": "n19",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w16",
+    "from": {
+     "node": "n22",
+     "port": "out"
+    },
+    "to": {
+     "node": "n21",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w17",
+    "from": {
+     "node": "n17",
+     "port": "out"
+    },
+    "to": {
+     "node": "n23",
+     "port": "in1"
+    }
+   },
+   {
+    "id": "w18",
+    "from": {
+     "node": "n19",
+     "port": "out"
+    },
+    "to": {
+     "node": "n23",
+     "port": "in2"
+    }
+   },
+   {
+    "id": "w19",
+    "from": {
+     "node": "n21",
+     "port": "out"
+    },
+    "to": {
+     "node": "n23",
+     "port": "in3"
+    }
+   },
+   {
+    "id": "w20",
+    "from": {
+     "node": "n7",
+     "port": "out"
+    },
+    "to": {
+     "node": "n24",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w21",
+    "from": {
+     "node": "n16",
+     "port": "out"
+    },
+    "to": {
+     "node": "n24",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w22",
+    "from": {
+     "node": "n23",
+     "port": "out"
+    },
+    "to": {
+     "node": "n24",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w23",
+    "from": {
+     "node": "n9",
+     "port": "out"
+    },
+    "to": {
+     "node": "n24",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w5",
+    "from": {
+     "node": "n3",
+     "port": "out"
+    },
+    "to": {
+     "node": "n7",
+     "port": "in"
+    }
+   }
+  ],
+  "groups": [
+   {
+    "id": "g1",
+    "name": "Melody",
+    "nodes": [
+     "n1",
+     "n2",
+     "n4",
+     "n5",
+     "n3",
+     "n7"
+    ],
+    "collapsed": false
+   }
+  ]
+ }
+}

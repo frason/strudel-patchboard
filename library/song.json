@@ -1,0 +1,332 @@
+{
+ "v": 1,
+ "kind": "patchboard-library-entry",
+ "id": "song",
+ "title": "Putting it together",
+ "about": "Drums, bass and a lead layered into one small song.",
+ "by": "Patchboard lessons",
+ "graph": {
+  "v": 1,
+  "nodes": [
+   {
+    "id": "n9r531iz7",
+    "type": "sample",
+    "x": 40,
+    "y": 40,
+    "params": {
+     "name": "bd hh sd hh",
+     "bank": "RolandTR909",
+     "fit": "off",
+     "speed": 1,
+     "attack": 0.001,
+     "decay": 0.05,
+     "release": 0.01,
+     "lpf": 20000,
+     "gain": 0.45,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r532du7",
+    "type": "sample",
+    "x": 40,
+    "y": 330,
+    "params": {
+     "name": "hh",
+     "bank": "RolandTR909",
+     "fit": "off",
+     "speed": 1,
+     "attack": 0.001,
+     "decay": 0.05,
+     "release": 0.01,
+     "lpf": 20000,
+     "gain": 0.35,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r533v1u",
+    "type": "euclid",
+    "x": 340,
+    "y": 330,
+    "params": {
+     "pulses": 5,
+     "steps": 8
+    }
+   },
+   {
+    "id": "n9r534tq5",
+    "type": "melody",
+    "x": 40,
+    "y": 600,
+    "params": {
+     "steps": 8,
+     "octave": 2,
+     "mode": "steps",
+     "root": "C",
+     "scale": "off",
+     "cells": [
+      {
+       "n": "c2",
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": "c2",
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": "g2",
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": "c2",
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": "eb2",
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": "f2",
+       "d": null,
+       "len": 1,
+       "vel": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n9r535oif",
+    "type": "every",
+    "x": 340,
+    "y": 600,
+    "params": {
+     "n": 4,
+     "fn": "rev"
+    }
+   },
+   {
+    "id": "n9r536uue",
+    "type": "synth",
+    "x": 640,
+    "y": 600,
+    "params": {
+     "wave": "sawtooth",
+     "attack": 0.001,
+     "decay": 0.05,
+     "sustain": 0.6,
+     "release": 0.01,
+     "lpf": 600,
+     "lpq": 4,
+     "detune": 0.18,
+     "gain": 0.5,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r5373x5",
+    "type": "melody",
+    "x": 40,
+    "y": 900,
+    "params": {
+     "steps": 4,
+     "octave": 4,
+     "mode": "turns",
+     "root": "C",
+     "scale": "off",
+     "cells": [
+      {
+       "n": "e4",
+       "d": null,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": "g4",
+       "d": null,
+       "len": 1,
+       "vel": 0.6
+      },
+      {
+       "n": "b4",
+       "d": null,
+       "len": 1,
+       "vel": 0.8
+      },
+      {
+       "n": "g4",
+       "d": null,
+       "len": 1,
+       "vel": 0.6
+      }
+     ]
+    }
+   },
+   {
+    "id": "n9r5383m4",
+    "type": "synth",
+    "x": 340,
+    "y": 900,
+    "params": {
+     "wave": "triangle",
+     "attack": 0.001,
+     "decay": 0.05,
+     "sustain": 0.6,
+     "release": 0.4,
+     "lpf": 20000,
+     "lpq": 1,
+     "detune": 0.18,
+     "gain": 0.7,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r539o6s",
+    "type": "reverb",
+    "x": 640,
+    "y": 900,
+    "params": {
+     "room": 0.7,
+     "size": 4
+    }
+   },
+   {
+    "id": "n9r53ai3d",
+    "type": "output",
+    "x": 1000,
+    "y": 400,
+    "params": {
+     "bpm": 110,
+     "mvol": 1,
+     "beats": 4,
+     "mphaser": 0,
+     "mtrem": 0
+    }
+   }
+  ],
+  "wires": [
+   {
+    "id": "w0",
+    "from": {
+     "node": "n9r531iz7",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r53ai3d",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w1",
+    "from": {
+     "node": "n9r532du7",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r533v1u",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w2",
+    "from": {
+     "node": "n9r533v1u",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r53ai3d",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w3",
+    "from": {
+     "node": "n9r534tq5",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r535oif",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w4",
+    "from": {
+     "node": "n9r535oif",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r536uue",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w5",
+    "from": {
+     "node": "n9r536uue",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r53ai3d",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w6",
+    "from": {
+     "node": "n9r5373x5",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r5383m4",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w7",
+    "from": {
+     "node": "n9r5383m4",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r539o6s",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w8",
+    "from": {
+     "node": "n9r539o6s",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r53ai3d",
+     "port": "in"
+    }
+   }
+  ],
+  "groups": []
+ }
+}

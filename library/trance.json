@@ -1,0 +1,602 @@
+{
+ "v": 1,
+ "kind": "patchboard-library-entry",
+ "id": "trance",
+ "title": "Trance: acid, ducking and views",
+ "about": "Acid line, ducking and views: a trance-style loop.",
+ "by": "Patchboard lessons",
+ "graph": {
+  "v": 1,
+  "nodes": [
+   {
+    "id": "n9r54buws",
+    "type": "key",
+    "x": 40,
+    "y": 40,
+    "params": {
+     "root": "G",
+     "scale": "minor"
+    }
+   },
+   {
+    "id": "n9r54csun",
+    "type": "melody",
+    "x": 40,
+    "y": 250,
+    "params": {
+     "steps": 5,
+     "octave": 3,
+     "mode": "turns",
+     "root": "C",
+     "scale": "major",
+     "cells": [
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 4,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 9,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 7,
+       "len": 1,
+       "vel": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n9r54dh0i",
+    "type": "fast",
+    "x": 420,
+    "y": 250,
+    "params": {
+     "n": 16
+    }
+   },
+   {
+    "id": "n9r54eqv9",
+    "type": "transpose",
+    "x": 420,
+    "y": 420,
+    "params": {
+     "n": -12
+    }
+   },
+   {
+    "id": "n9r54fb0w",
+    "type": "synth",
+    "x": 700,
+    "y": 250,
+    "params": {
+     "wave": "sawtooth",
+     "attack": 0.001,
+     "decay": 0.05,
+     "sustain": 0.6,
+     "release": 0.01,
+     "lpf": 20000,
+     "lpq": 1,
+     "detune": 0.18,
+     "gain": 1,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r54g0gr",
+    "type": "slider",
+    "x": 700,
+    "y": 620,
+    "params": {
+     "value": 0.546,
+     "min": 0,
+     "max": 1,
+     "step": 0
+    }
+   },
+   {
+    "id": "n9r54hzyd",
+    "type": "acid",
+    "x": 980,
+    "y": 250,
+    "params": {
+     "amount": 0.546
+    }
+   },
+   {
+    "id": "n9r54i87h",
+    "type": "pianoroll",
+    "x": 1250,
+    "y": 250,
+    "params": {}
+   },
+   {
+    "id": "n9r54jnhp",
+    "type": "sample",
+    "x": 700,
+    "y": 880,
+    "params": {
+     "name": "bd*4",
+     "bank": "RolandTR909",
+     "fit": "off",
+     "speed": 1,
+     "attack": 0.001,
+     "decay": 0.05,
+     "release": 0.01,
+     "lpf": 20000,
+     "gain": 1,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r54k6w5",
+    "type": "scope",
+    "x": 1000,
+    "y": 880,
+    "params": {
+     "style": "wave"
+    }
+   },
+   {
+    "id": "n9r54ljvi",
+    "type": "sample",
+    "x": 1000,
+    "y": 1150,
+    "params": {
+     "name": "breaks:1/2",
+     "bank": "",
+     "fit": "on",
+     "speed": 1,
+     "attack": 0.001,
+     "decay": 0.05,
+     "release": 0.01,
+     "lpf": 20000,
+     "gain": 0.6,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r54mcpz",
+    "type": "melody",
+    "x": 40,
+    "y": 560,
+    "params": {
+     "steps": 16,
+     "octave": 3,
+     "mode": "steps",
+     "root": "C",
+     "scale": "major",
+     "cells": [
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      },
+      {
+       "n": null,
+       "d": 0,
+       "len": 1,
+       "vel": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n9r54n91s",
+    "type": "transpose",
+    "x": 420,
+    "y": 560,
+    "params": {
+     "n": -24
+    }
+   },
+   {
+    "id": "n9r54otm7",
+    "type": "wave",
+    "x": 700,
+    "y": 760,
+    "params": {
+     "shape": "rand",
+     "min": 0,
+     "max": 1,
+     "slow": 1
+    }
+   },
+   {
+    "id": "n9r54pzxp",
+    "type": "synth",
+    "x": 700,
+    "y": 560,
+    "params": {
+     "wave": "supersaw",
+     "attack": 0.001,
+     "decay": 0.05,
+     "sustain": 0.6,
+     "release": 0.01,
+     "lpf": 20000,
+     "lpq": 1,
+     "detune": 0.18,
+     "gain": 1,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r54qlh2",
+    "type": "slider",
+    "x": 980,
+    "y": 760,
+    "params": {
+     "value": 0.717,
+     "min": 0,
+     "max": 1,
+     "step": 0
+    }
+   },
+   {
+    "id": "n9r54r7kt",
+    "type": "acid",
+    "x": 980,
+    "y": 560,
+    "params": {
+     "amount": 0.717
+    }
+   },
+   {
+    "id": "n9r54swey",
+    "type": "pianoroll",
+    "x": 1250,
+    "y": 560,
+    "params": {}
+   },
+   {
+    "id": "n9r54thmh",
+    "type": "duck",
+    "x": 1500,
+    "y": 480,
+    "params": {
+     "orbit": 3,
+     "depth": 0.8,
+     "attack": 0.16
+    }
+   },
+   {
+    "id": "n9r54udsv",
+    "type": "output",
+    "x": 1800,
+    "y": 480,
+    "params": {
+     "bpm": 136,
+     "mvol": 1,
+     "beats": 4,
+     "mphaser": 0,
+     "mtrem": 0
+    }
+   }
+  ],
+  "wires": [
+   {
+    "id": "w0",
+    "from": {
+     "node": "n9r54buws",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54csun",
+     "port": "key"
+    }
+   },
+   {
+    "id": "w1",
+    "from": {
+     "node": "n9r54csun",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54dh0i",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w2",
+    "from": {
+     "node": "n9r54dh0i",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54eqv9",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w3",
+    "from": {
+     "node": "n9r54eqv9",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54fb0w",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w4",
+    "from": {
+     "node": "n9r54fb0w",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54hzyd",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w5",
+    "from": {
+     "node": "n9r54g0gr",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54hzyd",
+     "port": "p:amount"
+    }
+   },
+   {
+    "id": "w6",
+    "from": {
+     "node": "n9r54hzyd",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54i87h",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w7",
+    "from": {
+     "node": "n9r54i87h",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54thmh",
+     "port": "lead"
+    }
+   },
+   {
+    "id": "w8",
+    "from": {
+     "node": "n9r54ljvi",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54thmh",
+     "port": "lead"
+    }
+   },
+   {
+    "id": "w9",
+    "from": {
+     "node": "n9r54buws",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54mcpz",
+     "port": "key"
+    }
+   },
+   {
+    "id": "w10",
+    "from": {
+     "node": "n9r54mcpz",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54n91s",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w11",
+    "from": {
+     "node": "n9r54n91s",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54pzxp",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w12",
+    "from": {
+     "node": "n9r54otm7",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54pzxp",
+     "port": "p:detune"
+    }
+   },
+   {
+    "id": "w13",
+    "from": {
+     "node": "n9r54pzxp",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54r7kt",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w14",
+    "from": {
+     "node": "n9r54qlh2",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54r7kt",
+     "port": "p:amount"
+    }
+   },
+   {
+    "id": "w15",
+    "from": {
+     "node": "n9r54r7kt",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54swey",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w16",
+    "from": {
+     "node": "n9r54swey",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54thmh",
+     "port": "lead"
+    }
+   },
+   {
+    "id": "w17",
+    "from": {
+     "node": "n9r54jnhp",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54k6w5",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w18",
+    "from": {
+     "node": "n9r54k6w5",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54thmh",
+     "port": "kick"
+    }
+   },
+   {
+    "id": "w19",
+    "from": {
+     "node": "n9r54thmh",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54udsv",
+     "port": "in"
+    }
+   }
+  ],
+  "groups": []
+ }
+}

@@ -1,0 +1,216 @@
+{
+ "v": 1,
+ "kind": "patchboard-library-entry",
+ "id": "chords",
+ "title": "Chords and arpeggios",
+ "about": "Chords and arpeggios from one key.",
+ "by": "Patchboard lessons",
+ "graph": {
+  "v": 1,
+  "nodes": [
+   {
+    "id": "n9r54vl4s",
+    "type": "key",
+    "x": 40,
+    "y": 40,
+    "params": {
+     "root": "A",
+     "scale": "minor"
+    }
+   },
+   {
+    "id": "n9r54wrj0",
+    "type": "chords",
+    "x": 40,
+    "y": 240,
+    "params": {
+     "steps": 4,
+     "mode": "turns",
+     "register": "above:c4",
+     "cells": [
+      {
+       "sym": null,
+       "d": {
+        "i": 0,
+        "ext": ""
+       },
+       "len": 1
+      },
+      {
+       "sym": null,
+       "d": {
+        "i": 5,
+        "ext": ""
+       },
+       "len": 1
+      },
+      {
+       "sym": null,
+       "d": {
+        "i": 2,
+        "ext": ""
+       },
+       "len": 1
+      },
+      {
+       "sym": null,
+       "d": {
+        "i": 6,
+        "ext": ""
+       },
+       "len": 1
+      }
+     ]
+    }
+   },
+   {
+    "id": "n9r54xbth",
+    "type": "synth",
+    "x": 420,
+    "y": 240,
+    "params": {
+     "wave": "gm_epiano1",
+     "attack": 0.001,
+     "decay": 0.05,
+     "sustain": 0.6,
+     "release": 0.8,
+     "lpf": 20000,
+     "lpq": 1,
+     "detune": 0.18,
+     "gain": 0.8,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r54yatf",
+    "type": "arp",
+    "x": 420,
+    "y": 520,
+    "params": {
+     "style": "0 1 2 1",
+     "custom": "0 1 2 3"
+    }
+   },
+   {
+    "id": "n9r54zghd",
+    "type": "fast",
+    "x": 640,
+    "y": 520,
+    "params": {
+     "n": 4
+    }
+   },
+   {
+    "id": "n9r54105q9",
+    "type": "synth",
+    "x": 860,
+    "y": 520,
+    "params": {
+     "wave": "gm_acoustic_guitar_nylon",
+     "attack": 0.001,
+     "decay": 0.05,
+     "sustain": 0.6,
+     "release": 0.01,
+     "lpf": 20000,
+     "lpq": 1,
+     "detune": 0.18,
+     "gain": 0.7,
+     "pan": 0.5
+    }
+   },
+   {
+    "id": "n9r5411muk",
+    "type": "output",
+    "x": 1180,
+    "y": 380,
+    "params": {
+     "bpm": 90,
+     "mvol": 1,
+     "beats": 4,
+     "mphaser": 0,
+     "mtrem": 0
+    }
+   }
+  ],
+  "wires": [
+   {
+    "id": "w0",
+    "from": {
+     "node": "n9r54vl4s",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54wrj0",
+     "port": "key"
+    }
+   },
+   {
+    "id": "w1",
+    "from": {
+     "node": "n9r54wrj0",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54xbth",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w2",
+    "from": {
+     "node": "n9r54wrj0",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54yatf",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w3",
+    "from": {
+     "node": "n9r54yatf",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54zghd",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w4",
+    "from": {
+     "node": "n9r54zghd",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r54105q9",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w5",
+    "from": {
+     "node": "n9r54xbth",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r5411muk",
+     "port": "in"
+    }
+   },
+   {
+    "id": "w6",
+    "from": {
+     "node": "n9r54105q9",
+     "port": "out"
+    },
+    "to": {
+     "node": "n9r5411muk",
+     "port": "in"
+    }
+   }
+  ],
+  "groups": []
+ }
+}
