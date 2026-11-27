@@ -1,6 +1,6 @@
 // The one serialisable graph. Everything else (compiler, code panel, undo, saves, export) reads this.
 //   { v:1, nodes:[{id,type,x,y,params,collapsed?}], wires:[{id,from:{node,port},to:{node,port}}] }
-import { MODULES, PATTERN_TYPES, defaultParams, portsOf, resizeCells, resizeTracks } from './modules.js';
+import { MODULES, MUTE_KIND, PATTERN_TYPES, defaultParams, portsOf, resizeCells, resizeTracks } from './modules.js';
 import { cleanGraph } from './validate.js';
 
 let counter = 0;
@@ -213,7 +213,11 @@ export function insertPlan(g, wire, node) {
 export const MAX_EXPANSION = 5000;   // how many module writings a board may ask for (every board in the library asks for far fewer)
 // how many times modules are written when a board is compiled from the Output back: a module reached by two cables is written twice, and so on down the chain. Computed on the graph, with no compiling.
 export function expansionCost(graph) {
-  const into = new Map(); for (const w of graph.wires) { if (!into.has(w.to.node)) into.set(w.to.node, []); into.get(w.to.node).push(w.from.node); }
+  const byId = new Map(graph.nodes.map((n) => [n.id, n])), into = new Map();
+  for (const w of graph.wires) {   // what the compiler would never read is not counted: a muted module that goes silent ignores its cables, and one that is bypassed reads only its main input
+    const to = byId.get(w.to.node), mk = to && to.muted && MUTE_KIND[to.type]; if ((mk && mk !== 'bypass') || (mk === 'bypass' && w.to.port !== 'in')) continue;
+    if (!into.has(w.to.node)) into.set(w.to.node, []); into.get(w.to.node).push(w.from.node);
+  }
   const memo = new Map(), visiting = new Set();
   const cost = (id) => { if (memo.has(id)) return memo.get(id); if (visiting.has(id)) return 1; visiting.add(id); let c = 1; for (const f of into.get(id) || []) { c += cost(f); if (c > 1e12) { c = 1e12; break; } } visiting.delete(id); memo.set(id, c); return c; };
   const outs = graph.nodes.filter((n) => n.type === 'output'); return outs.reduce((m, o) => m + cost(o.id), 0);

@@ -77,8 +77,8 @@ export function drawFormMap(canvas, map, cssW) {
     for (let i = 0; i < map.cycles; i++) {
       const n = v.counts[i], x = L + i * cw;
       if (i >= v.readCycles && !v.muted) { c.fillStyle = '#161c22'; c.fillRect(x, y + 2, Math.max(1, cw - 1), LANE - 4); continue; }
-      if (n > 0 && v.incomplete) { c.strokeStyle = '#ffb347'; c.lineWidth = 1; c.strokeRect(x + 0.5, y + 2.5, Math.max(1, cw - 2), LANE - 5); }
       if (n > 0) { c.fillStyle = `rgba(180,140,255,${0.25 + 0.75 * Math.log2(1 + n) / Math.log2(1 + max)})`; c.fillRect(x, y + 2, Math.max(1, cw - 1), LANE - 4); }
+      if (v.incomplete) { c.strokeStyle = '#ffb347'; c.lineWidth = 1; c.strokeRect(x + 0.5, y + 2.5, Math.max(1, cw - 2), LANE - 5); }   // drawn after the fill so a full-brightness cell keeps it, and on empty cells too: a cut read may have left out every note there
     }
   });
   return { H };

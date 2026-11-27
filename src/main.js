@@ -715,7 +715,7 @@ const hooks = {
   setTake(id, take, grid) {
     store.update((g) => {
       const n = nodeById(g, id); if (!n || n.type !== 'take') return;
-      const old = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, events: n.params.events || [] };
+      const old = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, len: n.params.len || 0, events: n.params.events || [] };
       const versions = old.events.length ? [old, ...(n.params.versions || [])] : (n.params.versions || []);
       Object.assign(n.params, cleanParams('take', { ...n.params, events: take.events, len: 0, bpm: take.bpm, beats: take.beatsPerBar, grid: grid || n.params.grid, versions: versions.slice(0, 5) }));
     }, { label: 're-record a take' });
@@ -724,8 +724,8 @@ const hooks = {
   restoreTake(id, i) {
     store.update((g) => {
       const n = nodeById(g, id), v = n?.params.versions?.[i]; if (!n || !v) return;
-      const cur = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, events: n.params.events || [] }, rest = n.params.versions.filter((_, k) => k !== i);
-      Object.assign(n.params, cleanParams('take', { ...n.params, events: v.events, len: 0, bpm: v.bpm, beats: v.beats, versions: (cur.events.length ? [cur, ...rest] : rest).slice(0, 5) }));
+      const cur = { at: Date.now(), bpm: n.params.bpm, beats: n.params.beats, len: n.params.len || 0, events: n.params.events || [] }, rest = n.params.versions.filter((_, k) => k !== i);
+      Object.assign(n.params, cleanParams('take', { ...n.params, events: v.events, len: v.len || 0, bpm: v.bpm, beats: v.beats, versions: (cur.events.length ? [cur, ...rest] : rest).slice(0, 5) }));
     }, { label: 'go back to an earlier take' });
     toast('Earlier take restored. The one you had is kept too.', [undoAction], 4000);
   },
@@ -1411,14 +1411,18 @@ function openFormMap() {
     } catch (e) { if (alive && mine === run) status.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 140); }
     go.disabled = false;
   };
-  go.addEventListener('click', read); len.addEventListener('change', () => { if (!engine.playing) read(); });
+  go.addEventListener('click', read);
+  len.addEventListener('change', () => {   // one handler for both states, decided when the length changes: a read in flight is dropped, and a picture that no longer matches the selector says what it shows
+    run++; go.disabled = false;
+    if (engine.playing) { go.textContent = 'Read the map'; status.textContent = map ? `Showing the last read (${map.cycles} cycles). Press Read the map to read ${len.value}.` : 'Press Read the map to read this length.'; } else read();
+  });
   showModal('Song form map', h('div', {},
     h('p', { class: 'imp-hint' }, 'Each lane is a voice (a module plugged into the Output); each cell is a cycle. Intros, breaks and drops show as where the lanes light up. It reads what each voice\'s module outputs, so master volume and effects further along are not applied.'),
     h('label', { style: 'display:flex;gap:8px;align-items:center;margin:4px 0' }, h('span', {}, 'Length'), len), status, canvas, words,
     engine.playing ? h('p', { class: 'imp-hint' }, 'The music is playing: reading a long map takes a moment on the player\'s thread, so a note may come late. It reads in small pieces to keep that short.') : null,
     h('div', { class: 'modal-btns' }, go, close)));
   modalCloseHooks.push(() => { alive = false; });   // after showModal, which runs the hooks of the window it replaces
-  if (engine.playing) { status.textContent = 'The music is playing. Press Read again when you are ready: reading works on the player\'s thread and a note may come late.'; go.textContent = 'Read the map'; len.addEventListener('change', () => { run++; go.disabled = false; status.textContent = 'Press Read the map to read this length.'; }); } else read();   // while music plays nothing is read until it is asked for
+  if (engine.playing) { status.textContent = 'The music is playing. Press Read again when you are ready: reading works on the player\'s thread and a note may come late.'; go.textContent = 'Read the map'; } else read();   // while music plays nothing is read until it is asked for
 }
 function openImport() {
   const area = h('textarea', { class: 'imp-area', id: 'import-text', spellcheck: 'false', placeholder: 'Paste Strudel code here, e.g.\n\nsetcpm(120/4)\n\$: s("bd*2 ~ sd").bank("RolandTR909")' });

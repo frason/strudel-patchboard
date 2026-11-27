@@ -2346,6 +2346,82 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
     const many = { v: 1, nodes: [o, ...Array.from({ length: 30 }, (_, i) => makeNode('codesource', 0, 0, { code: 's("bd")' }))], wires: [] }; many.nodes.slice(1).forEach((n, i) => many.wires.push({ id: 'm' + i, from: { node: n.id, port: 'out' }, to: { node: o.id, port: 'in' } }));
     check('0005 F8: voices past the limit of 24 are counted as not shown', voicesOf(many).omitted === 6 && voicesOf(many).length === 24);
   }
+  // ---- 0006 ----
+  // F1: Earlier takes keep the captured loop length (the schema keeps len on every version)
+  {
+    const { cleanParams } = await import('../src/validate.js');
+    const p = cleanParams('take', { events: [{ t: 0, d: 4, n: 60, v: 1 }], len: 8, versions: [{ at: 1, bpm: 120, beats: 4, len: 8, events: [{ t: 0, d: 4, n: 60, v: 1 }] }, { at: 2, bpm: 120, beats: 4, events: [] }] });
+    check('0006 F1: a Take version keeps its captured length (len 8), and an old version without one is 0', p.versions[0].len === 8 && p.versions[1].len === 0 && p.len === 8);
+  }
+  // F2: an automatic Grab read that was waiting when the music started is not run, and not run inside its turn either
+  {
+    const { openGrab } = await import('../src/grabui.js');
+    const n = makeNode('codesource', 0, 0, { code: 'note("<c3 d3 e3 f3 g3 a3 b3 c4>")' }), o = makeNode('output', 0, 0), g = { v: 1, nodes: [n, o], wires: [] }, els = []; let hook, playing = false, calls = 0, added = null;
+    const h = (tag, attrs = {}, ...kids) => { const es = kids.flat(), el = { tag, attrs, children: es, style: {}, textContent: es.filter((c) => typeof c === 'string').join(''), value: attrs.value ?? (tag === 'select' ? es.find((c) => c.attrs?.selected)?.attrs.value : undefined), disabled: !!attrs.disabled, events: {}, addEventListener(t, f) { this.events[t] = f; }, click() { if (!this.disabled) this.events.click?.(); }, getContext() { return new Proxy({}, { get: () => () => {} }); } }; Object.assign(el, attrs); el.style = {}; els.push(el); return el; };
+    openGrab({ h, showModal() {}, closeModal() { hook?.(); }, onClose(f) { hook = f; }, getGraph: () => { calls++; return g; }, nodeId: n.id, isPlaying: () => playing, onAddTake(t) { added = t; }, onAddHits() {} });
+    await new Promise((r) => setTimeout(r, 1500));
+    const start = els.find((e) => e.attrs['aria-label'] === 'Start at cycle'), add = els.find((e) => e.textContent === 'Add as a Take'), status = els.find((e) => e.attrs['aria-live'] === 'polite');
+    const c0 = calls; start.value = 4; start.events.input(); playing = true; await new Promise((r) => setTimeout(r, 900));
+    check('0006 F2: a read scheduled while stopped does not run once the music has started: nothing is read, Add is off and the window says to press Read now', calls === c0 && add.disabled && /playing/.test(status.textContent) && added === null);
+    hook?.();
+  }
+  // F2b: the turn itself asks again: an admit check that says no stops the read inside the lock
+  {
+    const { queryEvents } = await import('../src/snapshot.js');
+    let err = null; try { await queryEvents('$: note(60)', { to: 1, admit: () => false }); } catch (e) { err = e; }
+    check('0006 F2: a query whose admit check says no inside its turn is declined (declined: true) and reads nothing', err && err.declined === true);
+  }
+  // F3: a reused pattern gets its own Slider values back after another query changed the shared ones
+  {
+    const { queryEvents } = await import('../src/snapshot.js'), reuse = {}, a = '$: note(60).gain(slider(.2,0,1))', gain = (r) => r.events[0].controls.gain;
+    const g1 = gain(await queryEvents(a, { to: 1, reuse })); await queryEvents('$: note(60).gain(slider(.8,0,1))', { to: 1 }); const g2 = gain(await queryEvents(a, { to: 1, reuse }));
+    check('0006 F3: A, then B with the same Slider id, then A again from its cache reads .2, .2 (the cached pattern gets its own Slider values back)', g1 === 0.2 && g2 === 0.2);
+  }
+  // F4: inactive branches are not counted, and the compiler stops at the guard's size while it writes
+  {
+    const { expansionCost } = await import('../src/graph.js'), { readShareFragment } = await import('../src/share.js'), { deflateRawSync } = await import('node:zlib');
+    const trig = makeNode('codesource', 0, 0, { code: 's("bd")' }), o = makeNode('output', 0, 0), sm = makeNode('sample', 0, 0, {}), nodes = [trig, o, sm], wires = []; let prev = trig, k = 0;
+    for (let i = 0; i < 12; i++) { const s = makeNode('stack', 0, 0); nodes.push(s); wires.push({ id: 'a' + k++, from: { node: prev.id, port: 'out' }, to: { node: s.id, port: 'in1' } }, { id: 'a' + k++, from: { node: prev.id, port: 'out' }, to: { node: s.id, port: 'in2' } }); prev = s; }
+    wires.push({ id: 'z', from: { node: prev.id, port: 'out' }, to: { node: sm.id, port: 'trigger' } }, { id: 'zo', from: { node: sm.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+    const q = makeNode('codesource', 0, 0, { code: 's("hh")' }); nodes.push(q); wires.push({ id: 'q', from: { node: q.id, port: 'out' }, to: { node: o.id, port: 'in' } });
+    const live = { v: 1, nodes: JSON.parse(JSON.stringify(nodes)), wires }, muted = { v: 1, nodes: JSON.parse(JSON.stringify(nodes)).map((x) => (x.id === sm.id ? { ...x, muted: true } : x)), wires };
+    const seen = (gr) => expansionCost(gr);
+    check('0006 F4: a branch the compiler ignores (a muted module that goes silent) is not counted: the same board is refused live (over 5,000) and plays its other voice when muted', seen(live) > 5000 && seen(muted) < 100 && compile(live).refused === true && !compile(muted).refused && /hh/.test(compile(muted).code));
+    const take = makeNode('take', 0, 0, { events: Array.from({ length: 2000 }, (_, i) => ({ t: i * 0.25, d: 0.25, n: 60 + (i % 12), v: 1 })), bpm: 120, beats: 4, len: 0, grid: 12 }), tn = [take, makeNode('output', 0, 0)], tw = []; let tp = take;
+    for (let i = 0; i < 8; i++) { const s = makeNode('stack', 0, 0); tn.push(s); tw.push({ id: 'p' + i, from: { node: tp.id, port: 'out' }, to: { node: s.id, port: 'in1' } }, { id: 'r' + i, from: { node: tp.id, port: 'out' }, to: { node: s.id, port: 'in2' } }); tp = s; }
+    const sy = makeNode('synth', 0, 0, { wave: 'sine' }); tn.push(sy); tw.push({ id: 'fin', from: { node: tp.id, port: 'out' }, to: { node: sy.id, port: 'in' } }, { id: 'fin2', from: { node: sy.id, port: 'out' }, to: { node: tn[1].id, port: 'in' } });
+    const big = { v: 1, nodes: tn, wires: tw }, c = compile(big);
+    check('0006 F4: a board whose repeated writing passes the guard\'s size is refused while it is written (refused, short code, issue text), whatever its path count', c.refused === true && c.code.length < 500 && /600,000/.test(c.issues[0].msg));
+    const frag = '#share=' + deflateRawSync(JSON.stringify({ v: 1, kind: 'patchboard-board', graph: big })).toString('base64url'), r = await readShareFragment(frag);
+    check('0006 F4: the share link of that board is refused before it can be opened', !!r.error);
+  }
+  // F5: two notes the storage rounding merges are counted
+  {
+    const { recordToTake } = await import('../src/events.js');
+    const mk = (at, dur) => ({ at, dur, controls: { note: 60 } });
+    const rec = { kind: 'queried', engine: 'x', code: '', span: { from: 0, to: 1 }, warnings: [], context: {}, events: [mk([1, 48], [1, 48]), mk([2083, 200000], [1, 48])] };
+    let r = null; try { r = recordToTake(rec, { bpm: 120, beatsPerBar: 4, grid: 12 }); } catch (e) { r = { err: String(e) }; }
+    check('0006 F5: two notes that the rounding to a thousandth of a beat merges are counted in storage.changed, not missed', r && r.report && r.report.storage.changed >= 1);
+  }
+  // F6: the orange outline is drawn after the cell fill, and on empty cells of a cut read
+  {
+    const { drawFormMap } = await import('../src/formmap.js'), calls = [], ctx = new Proxy({}, { get: (_, k) => (...a) => { calls.push([k, ...a]); }, set: () => true });
+    globalThis.window = globalThis.window || { devicePixelRatio: 1 }; const canvas = { style: {}, getContext: () => ctx };
+    drawFormMap(canvas, { from: 0, cycles: 2, voices: [{ title: 'x', muted: false, counts: [1, 0], readCycles: 2, incomplete: true }] }, 400);
+    const names = calls.map((c) => c[0]), fill = names.lastIndexOf('fillRect'), strokes = names.map((x, i) => (x === 'strokeRect' ? i : -1)).filter((i) => i >= 0);
+    check('0006 F6: every read cell of a cut voice is outlined (two strokes), and each outline comes after the fill of its cell', strokes.length === 2 && strokes[0] > fill - 0 );
+  }
+  // F7: a record difference is described as a record difference, with the first difference
+  {
+    const { evidenceFor } = await import('../src/evidence.js'), c = makeNode('codesource', 0, 0, { code: 's("bd").gain(1)' }), o = makeNode('output', 0, 0), gr = { v: 1, nodes: [c, o], wires: [{ id: 'w', from: { node: c.id, port: 'out' }, to: { node: o.id, port: 'in' } }] };
+    const e = await evidenceFor(gr, { cycles: 2 }), t = (e.labels.find((l) => l.id === 'readback') || {}).text || '';
+    check('0006 F7: a failed read-back says "event record", names the first difference and does not say "does not play the same"', e.ok === true || (/event record/.test(t) && /first difference/.test(t) && !/does not play the same/.test(t)));
+  }
+  // F8: a bank that is not a name is reported as lost
+  {
+    const rec = await queryEvents('$: s("bd").bank(123)', { to: 1 }), r = grabFrom(rec, { bpm: 120, beatsPerBar: 4, grid: 12 });
+    check('0006 F8: a non-string bank is named as a control the hit pattern does not keep', r.hits.report.controlsLost.includes('bank') && lossesOf(r, rec).some((m) => /bank/.test(m)));
+  }
 }
 
 process.exit(failures ? 1 : 0);

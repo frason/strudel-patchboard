@@ -20,12 +20,13 @@ export function openGrab({ h, showModal, closeModal, onClose, getGraph, nodeId, 
   let last = null, gen = 0, timer = 0;
   const readBtn = h('button', { class: 'btn', type: 'button', style: 'display:none' }, 'Read now');
   const idle = (why) => { gen++; clearTimeout(timer); last = null; addTake.disabled = addHits.disabled = true; report.textContent = ''; status.textContent = why; };   // any change drops the result at once: nothing can be added from a read that no longer matches the fields
-  const read = async () => {
+  const read = async (auto = false) => {   // auto: started by a timer after a field changed, not by the Read now button
+    if (auto === true && isPlaying()) return changed();   // the music started while the timer waited: nothing is read until it is asked for
     const mine = ++gen; last = null; addTake.disabled = addHits.disabled = true; status.textContent = 'Reading…'; report.textContent = ''; readBtn.style.display = 'none';
     const from = Math.max(0, Math.floor(Number(start.value) || 0)), cycles = Number(len.value), grid = Number(snap.value), tap = compileTap(getGraph(), nodeId);
     if (tap.error) { status.textContent = tap.error; return; }
     try {
-      const rec = await queryEvents(tap.code, { from, to: from + cycles, kind: 'queried', context: { sliders: sliders() } });
+      const rec = await queryEvents(tap.code, { from, to: from + cycles, kind: 'queried', context: { sliders: sliders() }, admit: auto === true ? () => !isPlaying() : null });   // an automatic read is asked again inside its turn: the music may have started while it queued
       if (mine !== gen) return;
       const r = grabFrom(rec, { bpm, beatsPerBar: beats, grid }); last = { r, rec, grid };
       status.textContent = r.line + '.';
@@ -34,11 +35,11 @@ export function openGrab({ h, showModal, closeModal, onClose, getGraph, nodeId, 
       addTake.disabled = !r.take.events.length || r.takeReport.storage.dropped > 0; addHits.disabled = r.hits.empty;
       if (r.take.events.length) drawTakeRoll(canvas, r.take.events, beats); else { const c = canvas.getContext('2d'); c.fillStyle = '#0b0f13'; c.fillRect(0, 0, canvas.width, canvas.height); }
       canvas.style.display = r.take.events.length ? '' : 'none';
-    } catch (e) { if (mine === gen) status.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 140); }
+    } catch (e) { if (e && e.declined) { if (mine === gen) changed(); return; } if (mine === gen) status.textContent = 'Could not read this: ' + String((e && e.message) || e).slice(0, 140); }
   };
   // while music plays nothing is read until it is asked for: a read is work on the player's own thread and cannot be interrupted (a dense one skipped notes in review 0005)
-  const changed = () => { if (isPlaying()) { idle('The music is playing. Press Read now when you are ready: it may make a note late.'); readBtn.style.display = ''; } else { idle('Reading…'); timer = setTimeout(read, 250); } };
-  readBtn.addEventListener('click', read);
+  const changed = () => { if (isPlaying()) { idle('The music is playing. Press Read now when you are ready: it may make a note late.'); readBtn.style.display = ''; } else { idle('Reading…'); timer = setTimeout(() => read(true), 250); } };
+  readBtn.addEventListener('click', () => read());
   start.addEventListener('input', changed); len.addEventListener('change', changed); snap.addEventListener('change', changed);
   addTake.addEventListener('click', () => { if (last && last.r.take.events.length && !addTake.disabled) { onAddTake(last.r.take, last.grid, `from ${MODULES[node.type].title}`, { bake }); close.click(); } });
   addHits.addEventListener('click', () => { if (last && !last.r.hits.empty && !addHits.disabled) { onAddHits(last.r.hits.code, `from ${MODULES[node.type].title}`); close.click(); } });

@@ -100,7 +100,7 @@ export function cleanParams(type, raw) {
   if (def.data?.take) {   // a recording: notes with start and length in beats, kept to sensible sizes
     const evs = cleanTakeEvents;
     out.events = evs(src.events); out.len = num(src.len, 0, 4096, 0); out.bpm = num(src.bpm, 20, 300, 120); out.beats = int(src.beats, 1, 12, 4);
-    out.versions = (Array.isArray(src.versions) ? src.versions.slice(0, 5) : []).filter((v) => v && typeof v === 'object').map((v) => ({ at: num(v.at, 0, 9e15, 0), bpm: num(v.bpm, 20, 300, 120), beats: int(v.beats, 1, 12, 4), events: evs(v.events) }));
+    out.versions = (Array.isArray(src.versions) ? src.versions.slice(0, 5) : []).filter((v) => v && typeof v === 'object').map((v) => ({ at: num(v.at, 0, 9e15, 0), bpm: num(v.bpm, 20, 300, 120), beats: int(v.beats, 1, 12, 4), len: num(v.len, 0, 4096, 0), events: evs(v.events) }));
   }
   if (def.data?.harmonics) {
     const arr = Array.isArray(src.partials) ? src.partials : [];

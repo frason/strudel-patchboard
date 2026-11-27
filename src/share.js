@@ -43,6 +43,7 @@ export async function readShareFragment(fragment) {
   // the compiler writes a module once for every path that reaches it, so a few modules wired in a fan-out can ask for an enormous amount of text: counted BEFORE anything is built, and refused past a limit
   const cost = expansionCost(graph); if (cost > MAX_EXPANSION) return { error: `The board in this link is too tangled to open safely: its cables fan out so that it would be written ${cost > 1e9 ? 'billions of' : cost.toLocaleString('en')} times over (the limit is ${MAX_EXPANSION.toLocaleString('en')}).` };
   let r; try { r = compile(graph); } catch (e) { return { error: 'The board in this link could not be turned into code: ' + String((e && e.message) || e).slice(0, 100) }; }
+  if (r.refused) return { error: 'The board in this link cannot be written safely: ' + (r.issues[0]?.msg || 'too large') };
   const code = r.code, bad = guardCode(code);   // (the compiler already leaves out code the guard refuses and says so in `issues`; this is the second check, on what would really run)
   if (bad) return { error: 'The code this board makes is refused by the safety check: ' + bad };
   return { graph, code, issues: [...(removed ? [`${removed} cable${removed === 1 ? ' was' : 's were'} removed because ${removed === 1 ? 'it does' : 'they do'} not connect modules properly`] : []), ...r.issues.map((i) => i.msg)] };

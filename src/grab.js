@@ -23,6 +23,7 @@ export function recordToHits(rec) {
     const name = base + (okIndex ? ':' + nv : '');
     if (!base) continue;
     if (base !== e.controls.s || (typeof e.controls.bank === 'string' && bank !== e.controls.bank)) report.renamed++;   // a name with characters the writer cannot keep is not the sample it was
+    if (e.controls.bank !== undefined && typeof e.controls.bank !== 'string') lost.add('bank');   // a bank that is not a name cannot be written, and is said so
     if (e.carry) report.carried++;
     const at = num(e.at) - from; if (at < -1e-9 || at >= cycles - 1e-9) continue;
     const g = typeof e.controls.gain === 'number' ? e.controls.gain : 1, v = typeof e.controls.velocity === 'number' ? e.controls.velocity : 1;

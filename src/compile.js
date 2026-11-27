@@ -3,12 +3,14 @@
 // which is how highlighting, hover and "who made this event" work without any second representation of the sound.
 import { parseArrangeOrder, portsOf, LAYER_FNS, MODULES, MUTE_KIND, EVERY_FNS, SOMETIMES_FNS, fmt, cellNotes, scaleCode, parseX, leafAt, stepHas, SCALES, NOTE_NAMES, noteRank } from './modules.js';
 import { chordSymbol } from './chords.js';
-import { guardCalls, guardCode } from './guard.js';
+import { guardCalls, guardCode, MAX_CHARS } from './guard.js';
 import { takeToPattern } from './takecode.js';
 import { nodeById, wiresInto, outType, effectiveKey, scopeId, expansionCost, MAX_EXPANSION } from './graph.js';
 const FM_WAVES = new Set(['sine', 'sawtooth', 'square', 'triangle', 'supersaw', 'pulse', 'sin', 'saw', 'sqr', 'tri', 'z_sine', 'z_sawtooth', 'z_square', 'z_triangle']);   // oscillators FM can modulate
 
-const S = (t, meta = {}) => ({ t, ...meta });
+let spent = 0, cap = Infinity;   // characters written so far in this compile, and the most the guard would accept: writing stops there instead of building megabytes the guard then refuses
+const OVER = new Error('the board would write more code than the guard accepts');
+const S = (t, meta = {}) => { spent += String(t).length; if (spent > cap) throw OVER; return { t, ...meta }; };
 const NL = (d) => ({ nl: d });
 
 function chain(base, calls, depth, inline) {
@@ -70,10 +72,17 @@ export function audibleLimit(g, n, picked = null) {
 
 export const EMPTY_NOTE = '// Add an Output module and wire a sound into it';
 export function compile(g) {
+  spent = 0; cap = MAX_CHARS;
+  try { return compileBoard(g); } catch (e) {
+    if (e !== OVER) throw e;
+    return { code: 'setcpm(120/4)\n\n// this board is too large to write: it would produce more code than the safety check accepts', segments: [], lines: [{ from: 0, to: 0, text: '', notes: [] }], issues: [{ msg: `This board would write more than ${MAX_CHARS.toLocaleString('en')} characters of code (cables that fan out repeat modules, and a Take repeats all its notes each time): nothing is written. Plug fewer cables into the same module, or bake the part into one.` }], played: 0, refused: true };
+  } finally { cap = Infinity; }
+}
+function compileBoard(g) {
   const issues = [];
   // the compiler writes a module once for every path that reaches it: a board whose cables fan out so that this is past the limit is not written at all (a few modules can ask for gigabytes), on every route a board takes in
   const cost = expansionCost(g);
-  if (cost > MAX_EXPANSION) return { code: 'setcpm(120/4)\n\n// this board is too tangled to write: its cables fan out so that modules would be written over and over', segments: [], lines: [{ from: 0, to: 0, text: '', notes: [] }], issues: [{ msg: `The cables fan out so that this board would be written ${cost >= 1e12 ? 'more than a trillion' : cost.toLocaleString('en')} times over (the limit is ${MAX_EXPANSION.toLocaleString('en')}): nothing is written.` }], played: 0 };
+  if (cost > MAX_EXPANSION) return { code: 'setcpm(120/4)\n\n// this board is too tangled to write: its cables fan out so that modules would be written over and over', segments: [], lines: [{ from: 0, to: 0, text: '', notes: [] }], issues: [{ msg: `The cables fan out so that this board would be written ${cost >= 1e12 ? 'more than a trillion' : cost.toLocaleString('en')} times over (the limit is ${MAX_EXPANSION.toLocaleString('en')}): nothing is written.` }], played: 0, refused: true };
   let acidNode = null;
   const mutedOut = new Set(); // modules that are silent on purpose (muted, or fed only by muted ones): not worth a warning
   const stack = [];

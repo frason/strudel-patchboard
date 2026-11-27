@@ -18,7 +18,8 @@ delayfb delayt dt dfb att dec sus rel amp vel sound freq stut echo euclidRot euc
 degradeBy undegradeBy brak ply plyWith fastchunk slowchunk run gap legato note n s ftype color colour anchor echoWith rib offset partials phases`.split(/\s+/).filter(Boolean));
 // helper definitions the compiler writes word for word (nothing in them depends on the patch): allowed only when they match exactly
 const FIXED = new Set(["register('acidenv', (x, pat) => pat.lpf(100).lpenv(x * 9).lps(.2).lpd(.12))"]);
-const MAX_CHARS = 600_000, MAX_NODES = 60_000;
+export const MAX_CHARS = 600_000;
+const MAX_NODES = 60_000;
 // Admission limits (not proofs of cheap work): a pattern string that expands to an absurd number of events, or a count that is absurd, is refused before anything is evaluated.
 const MAX_EXPANDED = 50_000;
 const NUM_LIMITS = { fast: 4096, fastGap: 4096, ply: 1024, chop: 1024, striate: 1024, segment: 1024, seg: 1024, echo: 64, stut: 64, euclid: 1024, euclidRot: 1024, euclidLegato: 1024, euclidLegatoRot: 1024, euclidInv: 1024, linger: 1024, hurry: 1024, iter: 1024, iterBack: 1024, repeat: 1024 };

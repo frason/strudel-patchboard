@@ -12,6 +12,19 @@ import { onsets, ENGINE_ID } from './events.js';
 const spell = (k, v) => (k === 'note' && typeof v === 'string' && midiOf(v) !== null ? midiOf(v) : v);   // eb2 and d#2 are the same pitch; a pitch is otherwise compared exactly, never rounded
 const val = (v) => (typeof v === 'number' ? String(Math.round(v * 1e9) / 1e9) : JSON.stringify(v));
 const sig = (rec) => onsets(rec).map((e) => `${e.at[0]}/${e.at[1]}|${e.dur[0]}/${e.dur[1]}|${Object.keys(e.controls).sort().map((k) => k + '=' + val(spell(k, e.controls[k]))).join(',')}`).sort().join('\n');
+// the first place two records differ, in words: a record difference is not always an audible one (an explicit gain(1) that the importer drops resolves to a different control set, not a different sound)
+function firstDiff(a, b) {
+  const A = sig(a).split('\n'), B = sig(b).split('\n');
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    if (A[i] === B[i]) continue;
+    const [pa, pb] = [A[i], B[i]].map((l) => (l === undefined ? null : l.split('|'))); if (!pa || !pb) return `one has ${pa ? 'an attack at ' + pa[0] : 'an extra attack at ' + pb[0]} that the other does not`;
+    if (pa[0] !== pb[0]) return `an attack starts at ${pa[0]} in one and ${pb[0]} in the other`;
+    if (pa[1] !== pb[1]) return `the slot of the attack at ${pa[0]} is ${pa[1]} in one and ${pb[1]} in the other`;
+    const ca = new Map(pa.slice(2).join('|').split(',').map((x) => x.split(/=(.*)/s))), cb = new Map(pb.slice(2).join('|').split(',').map((x) => x.split(/=(.*)/s)));
+    for (const k of new Set([...ca.keys(), ...cb.keys()])) if (ca.get(k) !== cb.get(k)) return `at ${pa[0]}, ${k} is ${ca.has(k) ? ca.get(k) : 'not set'} in one and ${cb.has(k) ? cb.get(k) : 'not set'} in the other`;
+  }
+  return 'they differ';
+}
 const quiet = (rec) => rec.warnings.length === 0;   // a record that was cut, folded or left things out is not a full-fidelity comparison
 export async function evidenceFor(graph, { cycles = 8, sounds = () => true } = {}) {
   const labels = [], code = compile(graph).code, bad = guardCode(code);
@@ -23,7 +36,7 @@ export async function evidenceFor(graph, { cycles = 8, sounds = () => true } = {
     const again = compile(imp.graph).code;
     const a = await queryEvents(code, { from: 0, to: cycles }), b = await queryEvents(again, { from: 0, to: cycles }), n = onsets(a).length;
     const same = sig(a) === sig(b) && quiet(a) && quiet(b);
-    labels.push({ id: 'readback', ok: same, text: same ? `Read back into modules and written again, it plays the same ${n} attacks over ${cycles} cycles (${ENGINE_ID}): same start, same slot and the same value for every control it sets. That is a replay of those cycles, not a proof for every cycle.` : `Read back into modules and written again, it does not play the same over ${cycles} cycles (${n} attacks before, ${onsets(b).length} after${quiet(a) && quiet(b) ? '' : '; the read was also cut or left things out, so it cannot show they are equal'}).` });
+    labels.push({ id: 'readback', ok: same, text: same ? `Read back into modules and written again, it plays the same ${n} attacks over ${cycles} cycles (${ENGINE_ID}): same start, same slot and the same value for every control it sets. That is a replay of those cycles, not a proof for every cycle.` : `Read back into modules and written again, it gives a different event record over ${cycles} cycles (${n} attacks before, ${onsets(b).length} after; first difference: ${firstDiff(a, b)}${quiet(a) && quiet(b) ? '' : '; the read was also cut or left things out, so it cannot show they are equal'}). A different record is not always a different sound: a control the importer drops because it is the default shows up here.` });
     if (imp.report && imp.report.skipped && imp.report.skipped.length) labels.push({ id: 'skipped', ok: false, text: `${imp.report.skipped.length} part${imp.report.skipped.length === 1 ? '' : 's'} of the code could not be turned into modules.` });
   } catch (e) { labels.push({ id: 'readback', ok: false, text: 'The read-back check failed: ' + String((e && e.message) || e).slice(0, 120) }); }
   labels.push({ id: 'not-checked', ok: null, text: 'Not checked: that the sample files exist and download, and how it sounds.' });

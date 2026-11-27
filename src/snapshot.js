@@ -35,7 +35,7 @@ export const bindPlayerClock = (cps, now = null) => { playerCps = cps; playerNow
 // both are put back too (handoff 0004, F1), and so is the shared trigger hook.
 const PROTO = ['cpm'];
 const SHARED = ['all', 'each', 'hush', 'cpm', 'setCps', 'setcps', 'setCpm', 'setcpm', 'compileKabel'];   // cycles one query may ask for
-async function queryHaps(code, from, to, sliders = null, timing = null, reuse = null) {   // reuse: an object that keeps the evaluated pattern, so reading one voice in several pieces evaluates it once
+async function queryHaps(code, from, to, sliders = null, timing = null, reuse = null, admit = null) {   // reuse: an object that keeps the evaluated pattern, so reading one voice in several pieces evaluates it once
   const refused = guardCode(code);
   if (refused) throw new Error('Not drawn: ' + refused);
   if (!(to > from) || to - from > MAX_RANGE) throw new Error(`Not drawn: a query may ask for 1 to ${MAX_RANGE} cycles at a time`);
@@ -45,6 +45,7 @@ async function queryHaps(code, from, to, sliders = null, timing = null, reuse = 
   // The Slider values of a query live in a store of their own, and the global sliderWithID that the evaluated code calls is swapped in for the length of the query and put
   // back after: a picture or a download list must never reset a Slider (or replace the player's sliderWithID, which would cut the live Slider from the sound).
   const run = () => exclusive(async () => {
+    if (admit && !admit()) { const e = new Error('Not read: the situation changed while this waited for its turn'); e.declined = true; throw e; }   // checked at the turn itself, not when it was asked for: the music may have started while it queued
     if (!offline) offline = initOffline();   // built here, inside the turn: building it sets shared global names, which must never overlap a player evaluation
     const saved = globalThis.sliderWithID, keep = {}; for (const k of SHARED) keep[k] = globalThis[k];
     let o = null, proto = null, trigger, hadTrigger = false; const protoKeep = {};
@@ -53,14 +54,16 @@ async function queryHaps(code, from, to, sliders = null, timing = null, reuse = 
     try {
       o = await offline;
       const t0 = performance.now();   // the cost of the query itself: waiting for the turn and building the evaluator for the first time are not counted
-      globalThis.sliderWithID = makeSliderWithID(o.ref, offlineSliders);
+      const defs = {}, mk = makeSliderWithID(o.ref, offlineSliders);
+      globalThis.sliderWithID = (id, value) => { defs[id] = value; return mk(id, value); };   // the values the code itself gives its Sliders
       try { o.repl.scheduler.setCps(0.5); } catch { /* the default tempo, so a patch that sets none is read the way the player reads it */ }
       if (reuse && reuse.pat && (reuse.code !== code || reuse.owner !== o)) reuse.pat = null;   // a cached pattern is only good for the code and the evaluator it came from
       let pat = reuse && reuse.pat, cps0 = reuse && reuse.cps;
       if (!pat) {
         pat = await o.repl.evaluate(code, false); cps0 = Number(o.repl.scheduler.cps) || 0.5;
-        if (reuse) { reuse.pat = pat; reuse.cps = cps0; reuse.code = code; reuse.owner = o; reuse.proto = {}; if (proto) for (const k of PROTO) reuse.proto[k] = proto[k]; }   // the scheduler-bound methods this evaluation installed belong to the pattern
+        if (reuse) { reuse.pat = pat; reuse.cps = cps0; reuse.code = code; reuse.owner = o; reuse.defs = defs; reuse.proto = {}; if (proto) for (const k of PROTO) reuse.proto[k] = proto[k]; }   // the scheduler-bound methods this evaluation installed belong to the pattern
       } else {
+        Object.assign(offlineSliders, reuse.defs || {});   // another read may have changed the shared Slider values since: this pattern's own come back before it is read
         if (proto && reuse.proto) for (const k of PROTO) if (reuse.proto[k] !== undefined) proto[k] = reuse.proto[k];
         try { o.repl.scheduler.setCps(cps0 || 0.5); } catch { /* the tempo this code set when it was evaluated, for the lazy callbacks that read the scheduler */ }
       }   // a later read of the same pattern puts them back for its lazy callbacks (the finally below restores the player's)
@@ -98,9 +101,9 @@ export async function queryPatch(code, cycles) {
 
 // The full event record (src/events.js) of cycles from..to: exact positions, every control, the span, the revision. For the cable x-ray, Grab and Bake.
 // context.sliders ({ slider_id: value }) are live Slider values to use for this query; they are applied, and the record says which were.
-export async function queryEvents(code, { from = 0, to = 4, kind = 'queried', context = {}, timing = null, reuse = null } = {}) {   // timing: an object that gets .ms, the milliseconds the query itself took inside its turn
+export async function queryEvents(code, { from = 0, to = 4, kind = 'queried', context = {}, timing = null, reuse = null, admit = null } = {}) {   // admit: asked again inside the turn; false means do not read (the error has .declined). timing: an object that gets .ms, the milliseconds the query itself took inside its turn
   const g0 = performance.now(); guardCode(code); const guardMs = performance.now() - g0;   // (queryHaps guards again; the second pass is the price of keeping it simple) timing counts every phase that runs on this thread: guard, evaluate, query, record
-  const r = await queryHaps(code, from, to, context.sliders, timing, reuse);
+  const r = await queryHaps(code, from, to, context.sliders, timing, reuse, admit);
   const t0 = performance.now(), rec = recordFromHaps(r.haps, { from, to, code, kind, context: { cps: r.cps, ...(context.sliders ? { sliders: r.applied } : {}) } });
   if (timing) timing.ms = (timing.ms || 0) + guardMs + (performance.now() - t0);
   return rec;

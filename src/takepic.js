@@ -35,7 +35,7 @@ export function buildTakePic(node, ctl, { store, hooks, h }) {
   const draw = (p) => {
     const P = p || paramsOf(), ev = Array.isArray(P.events) ? P.events : [];
     lay = drawTakeRoll(canvas, ev, P.beats || 4, { edit: true, lay: locked });
-    const bars = ev.length ? Math.ceil(Math.max(...ev.map((e) => e.t + e.d)) / (P.beats || 4)) : 0;
+    const bars = ev.length ? Math.ceil(Math.max(P.len || 0, ...ev.map((e) => e.t + e.d)) / (P.beats || 4)) : 0;
     info.textContent = ev.length ? `${ev.length} note${ev.length === 1 ? '' : 's'} · ${bars} bar${bars === 1 ? '' : 's'} · ${Math.round(P.bpm)} BPM` : 'no notes yet';
     const vs = Array.isArray(P.versions) ? P.versions : [];
     older.replaceChildren(h('option', { value: '' }, vs.length ? `Earlier takes (${vs.length})` : 'No earlier takes'), ...vs.map((v, i) => h('option', { value: String(i) }, `${i + 1}. ${v.events.length} notes · ${ago(v.at)}`)));
