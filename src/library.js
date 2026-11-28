@@ -28,7 +28,7 @@ export function loadLibrary(files) {
   for (const [file, content] of Object.entries(files || {})) {
     const r = parseEntry(content && content.default !== undefined ? content.default : content, file.split('/').pop());
     if (r.error) { errors.push(r.error); continue; }
-    bytes += JSON.stringify(r.entry.graph).length; if (bytes > LIBRARY_MAX_BYTES) { errors.push(`${r.entry.id}: the library is over its size limit (${Math.round(LIBRARY_MAX_BYTES / 1e6)} MB), so this and later files are left out`); break; }
+    bytes += new TextEncoder().encode(JSON.stringify(r.entry.graph)).length; if (bytes > LIBRARY_MAX_BYTES) { errors.push(`${r.entry.id}: the library is over its size limit (${Math.round(LIBRARY_MAX_BYTES / 1e6)} MB), so this and later files are left out`); break; }
     if (seen.has(r.entry.id)) { errors.push(`${r.entry.id}: listed twice, the second is ignored`); continue; }
     seen.add(r.entry.id); entries.push(r.entry);
   }

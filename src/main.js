@@ -989,7 +989,7 @@ engine.onStatus((s) => {
   if (s.state !== 'playing') xray.playingChanged();   // paused updates can run again once the music stops
   statusEl.textContent = { idle: 'ready', loading: s.message, ok: 'ok', ready: 'stopped', playing: 'playing', error: 'error: ' + s.message, warn: s.message }[s.state] || s.state;
   if (s.state === 'ok' || s.state === 'playing') lastDenseOffer = '';
-  if (s.state === 'error' && isTooDense(s.message) && s.message !== lastDenseOffer) { lastDenseOffer = s.message; toast('This board is too dense to play (more than ' + MAX_EXPANDED.toLocaleString('en') + ' events per cycle in one chain).', getAI().key ? [{ label: 'Ask the AI to lighten it', fn: () => lightenWithAI([{ msg: s.message }]) }] : [], 12000); }   // said once per message; without an AI key the status line already says what to lower
+  if (s.state === 'error' && isTooDense(s.message) && s.message !== lastDenseOffer) { lastDenseOffer = s.message; toast('This board is above Patchboard\'s density estimate (limit ' + MAX_EXPANDED.toLocaleString('en') + ' events per cycle in one chain).', getAI().key ? [{ label: 'Ask the AI to lighten it', fn: () => lightenWithAI([{ msg: s.message }]) }] : [], 12000); }   // said once per message; without an AI key the status line already says what to lower
   statusEl.className = 'status ' + s.state;
   const long = (s.state === 'error' || s.state === 'warn') && s.message;   // the toolbar cuts long messages short: hover shows all of it, a click opens it in a box
   statusEl.title = long ? statusEl.textContent + '\n(click to read it in full)' : '';

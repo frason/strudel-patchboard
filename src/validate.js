@@ -54,7 +54,8 @@ function optionValues(spec) { return (spec.options || []).map((o) => (Array.isAr
 function cleanParam(spec, v, node, notes) {
   const d = spec.def;
   switch (spec.kind) {
-    case 'knob': case 'num': {   // a number can never become code, so this only keeps values sane: code written outside a dial's range (speed 8, gain 3, 300 BPM) is kept as written, up to 10 spans beyond it
+    case 'knob': case 'num': {
+      if (spec.hard && isNum(v) && Number.isFinite(spec.min) && Number.isFinite(spec.max)) return spec.step === 1 ? clamp(Math.round(v), spec.min, spec.max) : clamp(v, spec.min, spec.max);   // a count or fraction the engine cannot take outside its range (linger -0.5, chunk -2 throw): held to the dial, not 10 spans beyond it   // a number can never become code, so this only keeps values sane: code written outside a dial's range (speed 8, gain 3, 300 BPM) is kept as written, up to 10 spans beyond it
       if (!isNum(v)) return d;
       return Number.isFinite(spec.min) && Number.isFinite(spec.max) && !spec.dyn ? clamp(v, spec.min - 10 * (spec.max - spec.min), spec.max + 10 * (spec.max - spec.min)) : clamp(v, -1e9, 1e9);
     }

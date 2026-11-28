@@ -44,8 +44,9 @@ async function queryHaps(code, from, to, sliders = null, timing = null, reuse = 
   // half-built engine ("... .p is not a function"): build the offline evaluator again and ask once more before giving up.
   // The Slider values of a query live in a store of their own, and the global sliderWithID that the evaluated code calls is swapped in for the length of the query and put
   // back after: a picture or a download list must never reset a Slider (or replace the player's sliderWithID, which would cut the live Slider from the sound).
+  const stillWanted = () => { if (admit && !admit()) { const e = new Error('Not read: the situation changed while this waited for its turn'); e.declined = true; throw e; } };
   const run = () => exclusive(async () => {
-    if (admit && !admit()) { const e = new Error('Not read: the situation changed while this waited for its turn'); e.declined = true; throw e; }   // checked at the turn itself, not when it was asked for: the music may have started while it queued
+    stillWanted();   // checked at the turn itself, not when it was asked for: the music may have started while it queued
     if (!offline) offline = initOffline();   // built here, inside the turn: building it sets shared global names, which must never overlap a player evaluation
     const saved = globalThis.sliderWithID, keep = {}; for (const k of SHARED) keep[k] = globalThis[k];
     let o = null, proto = null, trigger, hadTrigger = false; const protoKeep = {};
@@ -53,6 +54,7 @@ async function queryHaps(code, from, to, sliders = null, timing = null, reuse = 
 
     try {
       o = await offline;
+      stillWanted();   // asked again after each wait: the music may have started, or the window closed, while the evaluator was being built
       const t0 = performance.now();   // the cost of the query itself: waiting for the turn and building the evaluator for the first time are not counted
       const defs = {}, mk = makeSliderWithID(o.ref, offlineSliders);
       globalThis.sliderWithID = (id, value) => { defs[id] = value; return mk(id, value); };   // the values the code itself gives its Sliders
@@ -67,6 +69,7 @@ async function queryHaps(code, from, to, sliders = null, timing = null, reuse = 
         if (proto && reuse.proto) for (const k of PROTO) if (reuse.proto[k] !== undefined) proto[k] = reuse.proto[k];
         try { o.repl.scheduler.setCps(cps0 || 0.5); } catch { /* the tempo this code set when it was evaluated, for the lazy callbacks that read the scheduler */ }
       }   // a later read of the same pattern puts them back for its lazy callbacks (the finally below restores the player's)
+      stillWanted();   // and again after the pattern was evaluated, right before the query itself
       const applied = {};
       for (const [id, v] of Object.entries(sliders || {})) if (typeof v === 'number' && Number.isFinite(v)) { offlineSliders[id] = v; applied[id] = v; }   // a captured live value replaces the one in the code, for this query only; anything else is ignored and not reported as applied
       const cps = cps0 || 0.5;

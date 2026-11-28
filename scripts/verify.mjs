@@ -1869,6 +1869,42 @@ $: arrange([1, note("~").s("sawtooth")], [4, cat(note("g3").s("sawtooth"), note(
   check('Chords: offset and a root mode become the Chord Sequencer\'s own settings', t.graph.nodes.some((n) => n.type === 'chords' && n.params.offset === -1 && n.params.voice === 'root:g2'));
   t = imp('$: chord("<C Am>").anchor("<c5 e5>").voicing().s("piano")');
   check('Chords: an anchor that is a pattern, not a plain note name, keeps the whole line as written, and plays the same', !t.report.skipped.length && t.graph.nodes.some((n) => n.type === 'codesource') && !t.graph.nodes.some((n) => n.type === 'chords') && (await evs('$: chord("<C Am>").anchor("<c5 e5>").voicing().s("piano")')) === (await evs(compile(t.graph).code)) && !String(await evs(compile(t.graph).code)).startsWith('ERROR'));
+  // 0008: Codex's counterexamples. Each line imports, and the code it compiles to must play exactly what the original line plays (a line kept as written passes too).
+  {
+    const V = '"0.2 0.8 0.4 0.6"', B = 'note("c3 e3 g3 b3").s("sawtooth")';
+    const lines = ['$: chord("<C Am>").voicing().mode("root:c2").s("piano")', '$: chord("<C Am>").voicing().offset(2).s("piano")', '$: chord("<C Am>").voicing().mode("above:c4").s("piano")', '$: chord("<C Am>").voicing().anchor("c5").s("piano")', '$: chord("<C Am>").voicing().dict("lefthand").s("piano")', '$: chord("<C Am>").offset(1).voicing().mode("below:c4").s("piano")',
+      `$: ${B}.palindrome().velocity(${V})`, `$: ${B}.linger(.5).velocity(${V})`, `$: ${B}.hurry(2).velocity(${V})`, `$: ${B}.chunk(4,rev).velocity(${V})`, `$: ${B}.chunkBack(4,rev).velocity(${V})`, `$: ${B}.inside(2,rev).velocity(${V})`, `$: ${B}.outside(2,rev).velocity(${V})`, `$: ${B}.euclidLegatoRot(3,8,2).velocity(${V})`, `$: ${B}.velocity(${V}).palindrome()`,
+      `$: ${B}.linger(1/3)`, `$: ${B}.hurry(4/3)`, `$: ${B}.pressBy(1/3)`, '$: s("bd sd").begin(1/3).end(2/3)', `$: ${B}.linger(1/16)`, '$: s("bd sd").begin(.25).end(.75)', `$: ${B}.linger(.25)`, `$: ${B}.pressBy(.25)`];
+    const bad = [];
+    for (const line of lines) { const t = imp(line), a = await evs(line), b = await evs(compile(t.graph).code); if (String(a).startsWith('ERROR') || a !== b) bad.push(line.slice(3, 90)); }
+    check('0008 F1-F3: voicing settings after voicing(), step velocities after an order-changing call, and fractions the module would round all play the same after import' + (bad.length ? ' ' + JSON.stringify(bad) : ''), bad.length === 0);
+    check('0008 F1: a chord line with a voicing setting after voicing() stays one Code source, and one with it before still becomes the Chord Sequencer', imp('$: chord("<C Am>").voicing().mode("root:c2").s("piano")').graph.nodes.some((n) => n.type === 'codesource') && imp('$: chord("<C Am>").mode("root:c2").voicing().s("piano")').graph.nodes.some((n) => n.type === 'chords'));
+    check('0008 F3: a plain quarter still becomes a Linger module, a third does not', imp(`$: ${B}.linger(.25)`).graph.nodes.some((n) => n.type === 'linger') && !imp(`$: ${B}.linger(1/3)`).graph.nodes.some((n) => n.type === 'linger'));
+    // F6: values outside what the engine can take are held to the dial, at the graph boundary
+    const { checkBoard: cb } = await import('../src/share.js'), { queryEvents: qe } = await import('../src/snapshot.js');
+    const wrong = [];
+    for (const [type, params] of [['linger', { t: -0.5 }], ['chunk', { n: -2, fn: 'up12', mode: 'chunk' }], ['segment', { n: -2 }], ['inside', { n: 0, fn: 'rev', mode: 'inside' }], ['press', { by: 1.5 }], ['hurry', { n: -1 }]]) {
+      const { g } = build(type, params), r = cb(JSON.parse(JSON.stringify(g)));
+      let ok = !r.error; if (ok) { try { await qe(r.code, { to: 2 }); } catch { ok = false; } }
+      if (!ok) wrong.push(type);
+    }
+    check('0008 F6: a Linger, Chunk, Segment, Inside, Press or Hurry value outside the dial is held to it by the graph check, and the board plays' + (wrong.length ? ' ' + JSON.stringify(wrong) : ''), wrong.length === 0);
+    // F7: Segment samples, it does not multiply
+    check('0008 F7: segment(64) on a pattern that already has 64 hits is allowed (it plays 64, not 4,096), and so are a chord and a gap pattern', gc('$: s("bd*64").segment(64)') === null && gc('$: s("bd*64").seg(64)') === null && gc('$: note("[c3,e3,g3]").segment(8)') === null && gc('$: s("bd ~").segment(8)') === null);
+    check('0008 F7: segment still counts: a busy pattern at a high count past the limit is refused, with a message that calls it an estimate', typeof gc('$: s("hh*2000").segment(8)') === 'string' && /estimate/.test(gc('$: s("hh*2000").segment(8)')) && typeof gc('$: s("bd*4").fast(2000).segment(64)') === 'string');
+    // F5: asked again after the evaluator is ready and after the pattern is evaluated
+    { let n = 0, err = null; try { await qe('$: note(60)', { to: 1, admit: () => ++n < 2 }); } catch (e) { err = e; }
+      check('0008 F5: admission is asked again after the evaluator is built and before the query: a read that is turned down then is declined', err && err.declined === true && n === 2);
+      let n2 = 0, err2 = null; try { await qe('$: note(60)', { to: 1, admit: () => ++n2 < 3 }); } catch (e) { err2 = e; }
+      check('0008 F5: and once more after the pattern is evaluated', err2 && err2.declined === true && n2 === 3); }
+    // F4: a link and a library entry count the same bytes (UTF-8), and the shipped files have a stated size
+    { const { LIMITS: LM } = await import('../src/validate.js'), { LIBRARY_MAX_BYTES: LMB } = await import('../src/library.js'), { statSync, readdirSync: rd } = await import('node:fs');
+      const g = eg(); const o = mn('output', 0, 0, {}); g.nodes.push(o); for (let i = 0; i < 330; i++) g.nodes.push(mn('codesource', 0, 0, { code: '// ' + '漢'.repeat(3600) + '\nnote(60)' }));
+      const r = cb(JSON.parse(JSON.stringify(g)));
+      check('0008 F4: a board of many-byte characters is counted in bytes, so a library file cannot be larger than a link may be', !!r.error && /larger|too/.test(r.error));
+      const dir = new URL('../library/', import.meta.url), sizes = rd(dir).filter((f) => f.endsWith('.json')).map((f) => statSync(new URL(f, dir)).size);
+      check('0008 F4: every file in library/ is under the size of one board, and all together under the library limit (checked on the raw files, before they are bundled)', sizes.every((z) => z <= LM.bytes) && sizes.reduce((a, b) => a + b, 0) <= LMB); }
+  }
   // the module list itself
   const { MODULES: MM } = await import('../src/modules.js');
   check('The ten new modules are in the module list, each with a plain-language description, and can be muted (they pass the sound through)', ['mask', 'chop', 'loopat', 'when', 'superimpose', 'off', 'jux', 'echo', 'iter', 'addnotes', 'segment', 'linger', 'hurry', 'chunk', 'inside', 'press', 'palindrome'].every((k) => MM[k] && MM[k].blurb.length > 40 && MM[k].cat === 'transform'));

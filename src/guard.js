@@ -85,7 +85,7 @@ export function expandedSize(str) {
 class Refuse extends Error {}
 const at = (node, code) => { const line = code.slice(0, node.start).split('\n').length; return `line ${line}`; };
 
-const tooBig = (text, node, code) => { if (typeof text === 'string' && text.length > 3 && /[*!(]/.test(text)) { const n = expandedSize(text); if (n > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this pattern is too dense: it expands to about ${n > 1e9 ? 'billions of' : n.toLocaleString('en')} events per cycle, and Patchboard plays at most ${MAX_EXPANDED.toLocaleString('en')} (a typical song uses a few hundred). Lower the repeat counts (the number after * or !), or thin the rhythm`); return Math.max(1, n); } return 1; };
+const tooBig = (text, node, code) => { if (typeof text === 'string' && text.length > 3 && /[*!(]/.test(text)) { const n = expandedSize(text); if (n > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this pattern is too dense for Patchboard's estimate: it expands to about ${n > 1e9 ? 'billions of' : n.toLocaleString('en')} events per cycle, and the limit is ${MAX_EXPANDED.toLocaleString('en')} (a typical song uses a few hundred). Lower the repeat counts (the number after * or !), or thin the rhythm`); return Math.max(1, n); } return 1; };
 function expr(node, code, ctx) {
   if (++ctx.nodes > MAX_NODES) throw new Refuse('the code is too large');
   switch (node.type) {
@@ -121,8 +121,9 @@ function expr(node, code, ctx) {
         if (a.type === 'SpreadElement') throw new Refuse(`${at(node, code)}: spread is not allowed`);
         if (a.type === 'ArrowFunctionExpression') arrow(a, code, ctx); else { const v = expr(a, code, ctx) || 1; if (base === 0) extra += v; }
       });
-      const total = c.type === 'Identifier' ? extra : base * factor;
-      if (total > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this is too dense: it would make about ${total > 1e9 ? 'billions of' : Math.round(total).toLocaleString('en')} events per cycle, and Patchboard plays at most ${MAX_EXPANDED.toLocaleString('en')} (a typical song uses a few hundred). Lower a number in it${name && MULTIPLIES.has(name) ? ` (the .${name}(...) count is the likely one)` : ' (fast, ply, chop, segment or echo)'}, or thin the rhythm`);
+      // segment(n) samples the pattern n times a cycle: about n events per simultaneous voice, it does not multiply what is already there (s("bd*64").segment(64) is 64, not 4,096). Voices are not known in advance, so up to 4 are assumed.
+      const total = c.type === 'Identifier' ? extra : (name === 'segment' || name === 'seg') ? Math.max(base, factor * Math.min(base, 4)) : base * factor;
+      if (total > MAX_EXPANDED) throw new Refuse(`${at(node, code)}: this is too dense for Patchboard's estimate: it counts about ${total > 1e9 ? 'billions of' : Math.round(total).toLocaleString('en')} events per cycle, and the limit is ${MAX_EXPANDED.toLocaleString('en')} (a typical song uses a few hundred; the count is an estimate, not a measurement). Lower a number in it${name && MULTIPLIES.has(name) ? ` (the .${name}(...) count is the likely one)` : ' (fast, ply, chop, segment or echo)'}, or thin the rhythm`);
       return total || 1;
     }
     case 'MemberExpression': return member(node, code, ctx);
